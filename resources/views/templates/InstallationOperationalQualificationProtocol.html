@@ -1,0 +1,3450 @@
+<div id="content" class="editable fromedit" contenteditable="false">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- HEADER                                                  -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<table border="1" style="width:100%; border-collapse:collapse;">
+<tr>
+  <td rowspan="4" style="width:15%; text-align:center; vertical-align:middle;">
+    <img src="/storage/lupin.png" alt="Lupin" style="height:80px; width:auto;">
+  </td>
+  <td colspan="3" style="text-align:center; font-weight:bold;">LUPIN LIMITED</td>
+</tr>
+<tr>
+  <td colspan="3" style="text-align:center; font-weight:bold;">INSTALLATION &amp; OPERATIONAL QUALIFICATION PROTOCOL</td>
+</tr>
+<tr>
+  <td style="padding:6px;"><strong>FACILITY / SECTION</strong><br><input name="facility_section" style="width:100%;"></td>
+  <td style="padding:6px;"><strong>EQUIPMENT / SYSTEM NAME</strong><br><input name="equipment_name" style="width:100%;"></td>
+  <td style="padding:6px;"><strong>EQUIPMENT / SYSTEM ID NO.</strong><br><input name="equipment_id" style="width:100%;"></td>
+</tr>
+<tr>
+  <td style="padding:6px;">
+    <strong>DOCUMENT NO.</strong><br>
+    <select name="document_id" data-options="documents" style="width:100%;"><option value="">-- Select Document --</option></select>
+    <!-- <input name="document_no" style="width:100%; margin-top:6px;" placeholder="Document number"> -->
+  </td>
+  <td style="padding:6px;"><strong>VERSION</strong><br><input name="version" value="00" style="width:100%;"></td>
+  <td style="padding:6px;"><strong>PAGE NO.</strong><br><input name="page_no" value="Auto" style="width:100%;"></td>
+</tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- PRE APPROVAL SIGNATURE                                  -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h3 style="margin-top:16px;">PRE APPROVAL SIGNATURE</h3>
+
+<!-- Prepared By -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:30%;">Prepared By (Department)</th>
+    <th style="padding:6px; width:40%;">Name &amp; Designation</th>
+    <th style="padding:6px; width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;">User / Validation</td>
+    <td style="padding:6px;">
+      <select name="prepared_by_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="prepared_by_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="prepared_by_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+</table>
+
+<!-- Checked By -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:30%;">Checked By (Department)</th>
+    <th style="padding:6px; width:40%;">Name &amp; Designation</th>
+    <th style="padding:6px; width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Engineering</td>
+    <td style="padding:6px;">
+      <select name="checked_by_engineering_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="checked_by_engineering_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="checked_by_engineering_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Production</td>
+    <td style="padding:6px;">
+      <select name="checked_by_production_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="checked_by_production_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="checked_by_production_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">User / Validation</td>
+    <td style="padding:6px;">
+      <select name="checked_by_validation_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="checked_by_validation_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="checked_by_validation_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Quality Assurance</td>
+    <td style="padding:6px;">
+      <!-- ✅ FIX: was plain <input>, now <select data-options="users"> -->
+      <select name="checked_by_quality_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="checked_by_quality_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="checked_by_quality_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+</table>
+
+<!-- Approved By -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:30%;">Approved By (Department)</th>
+    <th style="padding:6px; width:40%;">Name &amp; Designation</th>
+    <th style="padding:6px; width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;">User / Validation</td>
+    <td style="padding:6px;">
+      <select name="approved_by_user_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="approved_by_user_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="approved_by_user_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Quality Assurance</td>
+    <td style="padding:6px;">
+      <select name="approved_by_quality_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="approved_by_quality_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="approved_by_quality_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+</table>
+
+<p style="margin-top:12px;">
+  <b>EFFECTIVE DATE:</b>
+  <input name="effective_date" type="date" style="margin-left:8px;">
+</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- TABLE OF CONTENTS                                       -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>TABLE OF CONTENTS</h4>
+<p>1.0 OBJECTIVE ..... 4</p>
+<p>2.0 SCOPE ..... 4</p>
+<p>3.0 RESPONSIBILITY ..... 5</p>
+<p>4.0 PRE-REQUISITES ..... 6</p>
+<p>5.0 EQUIPMENT/ SYSTEM IDENTIFICATION ..... 6</p>
+<p>6.0 EQUIPMENT/SYSTEM DESCRIPTION ..... 6</p>
+<p>7.0 INSTALLATION CHECKS ..... 7</p>
+<p>8.0 OPERATIONAL CHECKS ..... 10</p>
+<p>9.0 INSTALLATION &amp; OPERATIONAL CHECKS/ REVIEW ..... 11</p>
+<p>10.0 IDENTIFICATION AND VERIFICATION OF STANDARD OPERATING PROCEDURE ..... 11</p>
+<p>11.0 TRAINING ..... 12</p>
+<p>12.0 COMPARISON BETWEEN URS, DQ &amp; IOQ ..... 12</p>
+<p>13.0 COMPLIANCE OF MITIGATION PLAN ..... 12</p>
+<p>14.0 SUMMARY AND CONCLUSION ..... 12</p>
+<p>15.0 REFERENCES ..... 12</p>
+<p>16.0 ABBREVIATIONS ..... 13</p>
+<p>17.0 ATTACHMENTS ..... 13</p>
+<p>18.0 REVISION HISTORY ..... 14</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 1.0 OBJECTIVE                                           -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>1.0 OBJECTIVE</h4>
+<p style="line-height:2.2;">
+  To establish documentary evidence to demonstrate that
+  <input name="objective_machine_name" style="width:140px; border:none; border-bottom:1px solid #000; outline:none;">
+  machine I.D No.
+  <input name="objective_machine_id" style="width:140px; border:none; border-bottom:1px solid #000; outline:none;">
+  located
+  <input name="objective_machine_location" style="width:140px; border:none; border-bottom:1px solid #000; outline:none;">
+  in the facility of Lupin is installed as per the URS
+  <input name="objective_urs_no" style="width:140px; border:none; border-bottom:1px solid #000; outline:none;">
+  and qualified for correct installation and operation as per the guidelines outlined in this protocol &amp;/or operations manual provided by the manufacturer/vendor.
+</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 2.0 SCOPE                                               -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>2.0 SCOPE</h4>
+<p>The scope of this document/ is applicable for:</p>
+<p style="line-height:2.2;">
+  The installation and operational qualification of
+  <input name="scope_machine_name" style="display:inline-block; width:180px; border:none; border-bottom:1px solid #000; outline:none; vertical-align:middle;">
+  machine I.D
+  <input name="scope_machine_id" style="display:inline-block; width:160px; border:none; border-bottom:1px solid #000; outline:none; vertical-align:middle;">
+  under the following condition/s:
+</p>
+<p><label style="display:inline-flex; align-items:center; gap:8px;"><input type="checkbox" name="scope_condition_new_installation" value="1" style="width:auto;"> <span>New/ first installation</span></label></p>
+<p><label style="display:inline-flex; align-items:center; gap:8px;"><input type="checkbox" name="scope_condition_major_modification" value="1" style="width:auto;"> <span>Major modification/ change done after installation</span></label></p>
+<p><label style="display:inline-flex; align-items:center; gap:8px;"><input type="checkbox" name="scope_condition_shifted_location" value="1" style="width:auto;"> <span>Shifted from one location to another location</span></label></p>
+<p><label style="display:inline-flex; align-items:center; gap:8px;"><input type="checkbox" name="scope_condition_in_use" value="1" style="width:auto;"> <span>In Use equipment/system/utility</span></label></p>
+<p>This protocol provides directions/ procedure for identification and verification of the following, leading to qualification for correct installation and operation:</p>
+<ul>
+  <li>The subjected equipment and its major components</li>
+  <li>Process control instruments, such as Pressure indicator and Pressure gauge etc.</li>
+  <li>All product contact surfaces</li>
+  <li>All Utilities</li>
+  <li>All product/process and personnel safety systems</li>
+  <li>All supporting documentation, such as installation operation and maintenance manuals, parts list and necessary SOP’s.</li>
+  <li>Operation of all major component / systems</li>
+  <li>Operation of the entire equipment as a system</li>
+  <li>Operation of process control instrumentation and safety systems</li>
+  <li>The protocol also provides directions/ procedure for:</li>
+  <li>Reporting and handling the deviations observed (if any).</li>
+  <li>Comparing the as-built and as-installed system with approved design (DQ).</li>
+  <li>Identifying the tentative SOP list with respect to the subjected equipment and providing instructions/ directions for writing the same.</li>
+  <li>Identifying specific personnel training need with respect to its correct operation, cleaning, maintenance or calibration of the equipment and/ or its major components.</li>
+
+</ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 3.0 RESPONSIBILITY                                      -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>3.0 RESPONSIBILITY</h4>
+<p style="line-height:2.2;">
+  Responsibilities of different department/ personnel involved in different activities related to the installation &amp; Operational qualification of
+  <input name="responsibility_machine_name" style="width:160px; border:none; border-bottom:1px solid #000; outline:none;">
+  machine I.D No.
+  <input name="responsibility_machine_id" style="width:140px; border:none; border-bottom:1px solid #000; outline:none;">
+  is defined below:
+</p>
+<p><b>Validation Department</b></p>
+<ul>
+  <li>Preparation of IOQ Protocol in consultation with Engineering / Projects if required.</li>
+  <li>Checking the protocol for accuracy and adequacy prior to the approval.</li>
+  <li>Preparation of IOQ Summary Report.</li>
+</ul>
+<p><b>Engineering / Production Department</b></p>
+<ul>
+  <li>Providing required information to Validation department for preparation of the protocol.</li>
+  <li>Execution of protocol in-coordination with user department.</li>
+  <li>Checking the protocol and report for adequacy and accuracy.</li>
+</ul>
+<p><b>Quality Assurance Department</b></p>
+<ul>
+  <li>Providing guidance, wherever required to the related departments.</li>
+  <li>Review and approval of the protocol.</li>
+  <li>Review and approval of the Installation and Operational qualification Report.</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 4.0 PRE-REQUISITES                                      -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>4.0 PRE-REQUISITES</h4>
+<p>Prior to conducting the installation qualification protocol following conditions must be completed and approved.</p>
+<ul><li>Design Qualification Report</li></ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 5.0 EQUIPMENT IDENTIFICATION                            -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>5.0 EQUIPMENT/ SYSTEM IDENTIFICATION</h4>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <td style="padding:6px; width:40%;"><b>Equipment/System Name</b></td>
+    <td style="padding:6px;"><input name="equip_ident_name" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"><b>Machine I.D No.</b></td>
+    <td style="padding:6px;"><input name="equip_ident_id" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"><b>Location</b></td>
+    <td style="padding:6px;"><input name="equip_ident_location" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"><b>Model No.</b></td>
+    <td style="padding:6px;"><input name="equip_model_no" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"><b>Serial No.</b></td>
+    <td style="padding:6px;"><input name="equip_serial_no" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"><b>In-house Equipment No.</b></td>
+    <td style="padding:6px;"><input name="equip_inhouse_no" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"><b>Name of the Supplier/Manufacturer</b></td>
+    <td style="padding:6px;"><input name="equip_supplier" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"><b>Purchase Order No.</b></td>
+    <td style="padding:6px;"><input name="equip_po_no" style="width:100%;"></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 6.0 EQUIPMENT DESCRIPTION                               -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>6.0 EQUIPMENT/SYSTEM DESCRIPTION</h4>
+<textarea name="equipment_system_description" rows="5" style="width:100%; border:1px solid #ddd; padding:8px;" placeholder="Description of the major subsystems if applicable and Description of Major Components"></textarea>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 7.0 INSTALLATION CHECKS                                 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>7.0 Installation Checks:</h4>
+
+<h5>7.1 Identification of Execution Team Members and Training on Protocol:</h5>
+<p>Objective: To identify the execution team members and impart training to the personal on the qualification protocol prior to qualification activity.</p>
+<ul>
+    <li>
+        Identify the execution team members from Validation/Engineering / User department / QA and any other related departments as per the requirement.
+    </li>
+    <li>Training shall be imparted to the personnel involved in execution of qualification protocol. Details of the personnel undergone training and involved on qualification activity shall be recorded in Attachment - 1.</li>
+</ul>
+<!-- <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Name</th>
+    <th style="padding:6px;">Department</th>
+    <th style="padding:6px;">Signature</th>
+    <th style="padding:6px;">Training Imparted by</th>
+    <th style="padding:6px;">Date</th>
+  </tr>
+
+    <td style="padding:4px;"><input name="team_name_5" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="team_dept_5" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="team_sign_5" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="team_trainer_5" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="team_date_5" type="date" style="width:100%;"></td>
+  </tr>
+</table>
+<p>Training imparted: <label><input type="checkbox" name="training_imparted_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="training_imparted_no" value="1" style="width:auto;"> No</label></p> -->
+
+<h5>7.2 Pre-Installation Checks:</h5>
+<p>Once the equipment is installed and ready for qualification, following general installation checks shall be conducted and the records enclosed with Attachment-2.</p>
+<ul>
+    <li>
+        General appearance & equipment identification.
+    </li>
+    <li>Levelling / Centring / Alignment</li>
+    <li>Anchoring / Grouting</li>
+    <li>Access & Clearance</li>
+    <li>Integration with other equipment</li>
+</ul>
+
+
+<h5>7.3 Identification of Major Components</h5>
+<p>The major components in the Bundle Machine, those are essential for correct functioning are identified and attached as attachment -5 The major components in the Bundle Machine are identified on the basis of physical inspection, Purchase Order & operation/maintenance manuals.</p>
+<ul>
+    <li>Main Machine Body</li>
+    <li>Mechanical Major and Sub Components</li>
+    <li>Electrical Major and Sub Components</li>
+    <li>Important details and installation of each major component, identified in this section shall be checked / verified, recorded in a separate Data Sheet and attached as Attachment-3.</li>
+</ul>
+<h5>7.4 Identification and classification of Process Control Instruments and instruments impacting on equipment functionality</h5>
+<p>All Instruments/Indicators/Sensors provided in the equipment for correct functioning & process control are identified and listed below. The instruments are classified in two categories as (i) Critical (C) for the instruments used to indicate, control or measure the process parameter and (ii) Non Critical (NC) for the instruments which are not used as a part of process control or Instruments shall be classified as per site specific procedure.</p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">S. No.</th>
+    <th style="padding:6px;">Instrument</th>
+    <th style="padding:6px;">Location in the System</th>
+    <th style="padding:6px;">Function</th>
+    <th style="padding:6px;">Class C/NC/Other</th>
+  </tr>
+  <tr>
+    <td style="padding:6px; text-align:center;">1</td>
+    <td style="padding:4px;"><input name="instrument_name_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="instrument_location_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="instrument_function_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="instrument_class_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px; text-align:center;">2</td>
+    <td style="padding:4px;"><input name="instrument_name_2" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="instrument_location_2" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="instrument_function_2" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="instrument_class_2" style="width:100%;"></td>
+  </tr>
+
+</table>
+<p>This section will form a basis for development of a calibration program in the future and identification of all instruments, which are required to be calibrated periodically. During the Operational qualification, current calibration status of the Critical (C) class instruments should only be checked, Non-critical (NC) class instruments may be accepted on the basis of the vendor‘s calibration certificate, and shall be calibrated only if found damaged/tampered.
+Important details and installation of each instrument identified and classified under this section shall be checked / verified, recorded in a separate Data Sheet and attached as Attachment-4.</p>
+<p><b>Note:</b> If critical class instrument needs to be sent to outside agency for calibration, the calibration certificates of vendor may be considered.</p>
+
+<h5>7.5 Identification of Contact Surfaces</h5>
+<p>All components of the Equipment, which may come in direct/indirect contact with the product are identified and listed below.</p>
+<p>The list shall be prepared on the basis of physical inspection of the system, instruction manuals, product information brochures, purchase order & DQ documents.</p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Contact Surface</th>
+    <th style="padding:6px;">Material of Construction</th>
+    <th style="padding:6px;">Ref No. of Certificate</th>
+  </tr>
+  <tr>
+    <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="contact_moc_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="contact_cert_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:4px;"><input name="contact_surface_2" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="contact_moc_2" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="contact_cert_2" style="width:100%;"></td>
+  </tr>
+</table>
+<p>The contact surfaces identified under this section shall be accepted on the basis of the manufacturer’s material of construction certificate. MOC certificates shall be reviewed and enclosed as Attachment-5.</p>
+
+<h5>7.6 Identification of Utilities</h5>
+<p>The essential Utilities identified under this section shall be verified / checked for installation and the observations shall be recorded and enclosed as Attachment-6.</p>
+<ul>
+    <li>Power /Electrical connections.</li>
+    <li>Compressed air connections.</li>
+</ul>
+
+<h5>7.7 Identification of Documents</h5>
+<p>Each document provided with the equipment shall be identified and attached as enclosures. All documents provided with the equipment shall be critically reviewed and crosschecked with the actual equipment for accuracy.</p>
+<p>The list of general documents provided / available with the equipment shall be verified against the requirements specified in the URS / DQ document, the checks recorded and enclosed as Attachment-7.</p>
+<p>If the document is provided () should be indicated on yes option and if the document is not available / not provided a () sign should be indicated on NO option. The location for storage of these documents shall also be written to have a better traceability.</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 8.0 OPERATIONAL CHECKS                                  -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>8.0 OPERATIONAL CHECKS</h4>
+
+<h5>8.1 Calibration</h5>
+<ul>
+    <b>Reference Calibration Instruments</b>
+    <li>Calibration Reference Standard Instruments, that are required for calibration of the process control instruments or for verification of certain operating parameters, such as standard tachometer etc. should be in a state of calibration.</li>
+    <li>The current calibration certificates for the same instruments should clearly provide the reference of NPL traceable standard. These calibration certificates shall be enclosed as Attachment-8.</li>
+   <b>Critical Process Control Instruments</b>
+    <li>The critical instruments identified should be subjected to in-house calibration prior to commencing the OQ tests.</li>
+    <li>The instruments identified for calibration shall be calibrated in-house or by a contracted agency or as per the corresponding standard operating procedures. Enclose a copy of the calibration certificate provided by the contracted agency or generated in house as Attachment-8.</li>
+</ul>
+
+<h5>8.2 Test Functions</h5>
+<p>The test functions are defined as the step-wise unit checks to confirm that each unit/ component in the equipment/ system is functional. When all units/ components in the equipment perform as per the requirement, high level of assurance is established that each unit will perform in unison when the equipment/ system will be operated routinely as per the established SOP.</p>
+<p style="line-height:2.2;">
+  In order to evaluate correct functioning/operation of
+  <!-- ✅ FIX: contenteditable span → input -->
+  <input name="test_func_machine_name" style="width:180px; border:none; border-bottom:1px solid #000; outline:none;">
+  machine, I.D No.
+  <input name="test_func_machine_id" style="width:150px; border:none; border-bottom:1px solid #000; outline:none;">
+  the following test functions should be checked/verified as per the defined procedures.
+</p>
+
+<h5>8.2.1 Motor Verification:</h5>
+<p>Verify the motors in the equipment and record the same in Attachment -9.</p>
+
+<h5>8.2.2 Operational, Functional, Safety and Performance Checks</h5>
+<ul>In order to evaluate correct functioning/ operation of the equipment, checks such as start-up check, shut down check, operational checks, motor and safety checks shall be performed.</ul>
+<ul>Follow the procedure for checking the functional system as per the Draft SOP prepared before OQ stage and note down the observation in a separate data sheet enclosed as Attachment -10.</ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 9.0 INSTALLATION & OPERATIONAL CHECKS REVIEW           -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>9.0 INSTALLATION &amp; OPERATIONAL CHECKS / REVIEW</h4>
+<ul>All check points identified earlier under the section 7.0 and 9.0 shall be crosschecked individually and the observations/ results shall be recorded in a separate data sheet for evaluation. Each Test data sheet shall contain main installation and operation checkpoint, test method/procedure or its reference, observations, results and comments. Each test data sheet shall be reviewed by responsible person and compiled for final evaluation of the system.</ul>
+<ul>Any deviation, exception and / or difference observed with respect to the corresponding acceptance criteria and / or the design as outlined in the URS / DQ document should be adequately discussed and appropriate decision / conclusion to be documented in the corresponding test sheet.</ul>
+<textarea name="ioq_review_notes" rows="4" style="width:100%; border:1px solid #ddd; padding:8px;" placeholder="All check points shall be crosschecked individually and the observations/results recorded for evaluation..."></textarea>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 10.0 SOP IDENTIFICATION                                 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>10.0 IDENTIFICATION AND VERIFICATION OF STANDARD OPERATING PROCEDURE</h4>
+
+<h5>List of SOPs Identified:</h5>
+<ul>List of SOPs required for correct operation, cleaning, maintenance and calibration shall be identified and recorded in Attachment-11. Draft SOPs may be prepared before OQ stage (after the completion of IQ). Enclose the prepared draft SOPs along with Attachment-11.</ul>
+<ul>After successful completion of simulation trials, the draft standard operating procedures prepared shall be verified for its accuracy and completeness. Any changes / corrections required in the draft SOP shall be communicated to the concerned personnel / department and SOP(s) shall be finalized after implementation of the suggested changes.</ul>
+
+<!-- <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:8%;">S. No.</th>
+    <th style="padding:6px; width:40%;">Title of SOP</th>
+    <th style="padding:6px; width:25%;">SOP Number</th>
+    <th style="padding:6px; width:27%;">Effective Date</th>
+  </tr>
+  <tr>
+    <td style="padding:6px; text-align:center;">1</td>
+    <td style="padding:4px;"><input name="sop_title_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="sop_no_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="sop_date_1" type="date" style="width:100%;"></td>
+  </tr>
+</table> -->
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 11.0 TRAINING                                           -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>11.0 TRAINING</h4>
+<ul>Training shall be imparted on the SOPs / System and document the same in Attachment 12 and enclose the same for reference. The training may include the Operation, Maintenance, Calibration, Cleaning, Safety precautions, Trouble shooting etc.</ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 12.0 COMPARISON URS DQ IOQ                             -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>12.0 COMPARISON BETWEEN URS, DQ &amp; IOQ</h4>
+<ul>Comparison between URS, DQ and IOQ shall be done and recorded in Attachment - 13.</ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 13.0 COMPLIANCE OF MITIGATION PLAN                     -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>13.0 COMPLIANCE OF MITIGATION PLAN IDENTIFIED AT DESIGN REVIEW STAGE</h4>
+<ul>Compliance of mitigation plan identified (if any) shall be verified and recorded in attachment 14</ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 14.0 SUMMARY AND CONCLUSION                            -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>14.0 SUMMARY AND CONCLUSION</h4>
+<p>On completion of IOQ activity, the data generated shall be collected, compiled, critically reviewed, evaluated; any deviations observed shall be discussed and resolved. Based on the final results and discussions a brief summary (IOQ Report) shall be prepared and shall contain the following:</p>
+<ul>On completion of IOQ activity, the data generated shall be collected, compiled, critically reviewed, evaluated; any deviations observed shall be discussed and resolved. Based on the final results and discussions a brief summary (IOQ Report) shall be prepared and shall contain the following:</ul>
+<ul>
+    <li>Objective</li>
+    <li>Equipment/System Description model and serial number</li>
+    <li>Observations/ results & evaluation</li>
+    <li>Deviation & corrective actions taken.</li>
+    <li>Review and Discussion</li>
+    <li>Conclusion</li>
+    <p>The discussion of IOQ results (IOQ Report) shall be enclosed as Attachment-14.</p>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 15.0 REFERENCES                                         -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>15.0 REFERENCES</h4>
+<p>Following documents have been referred in preparation and execution of this protocol:</p>
+<ul>SOP of Equipment Qualification SOP_SKM_QA_070136.</ul>
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 16.0 ABBREVIATIONS                                      -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>16.0 ABBREVIATIONS</h4>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Abbreviation</th>
+    <th style="padding:6px;">Full Form</th>
+  </tr>
+  <tr><td style="padding:6px;">DQ</td><td style="padding:6px;">Design Qualification</td></tr>
+  <tr><td style="padding:6px;">CGMP</td><td style="padding:6px;">Current good Manufacturing practices</td></tr>
+  <tr><td style="padding:6px;">MOC</td><td style="padding:6px;">Material of Construction</td></tr>
+  <tr><td style="padding:6px;">URS</td><td style="padding:6px;">User Requirement Specification</td></tr>
+  <tr><td style="padding:6px;">IQ</td><td style="padding:6px;">Installation Qualification</td></tr>
+  <tr><td style="padding:6px;">OQ</td><td style="padding:6px;">Operational Qualification</td></tr>
+  <tr><td style="padding:6px;">IOQ</td><td style="padding:6px;">Installation & Operational Qualification</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 17.0 ATTACHMENTS                                        -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>17.0 ATTACHMENTS</h4>
+<ul>The documents and / or data sheets generated in verification of installation / operational checks as explained in the above sections shall be enclosed as attachments with this document in following sequence.</ul>
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:15%;">Attachment No.</th>
+    <th style="padding:6px; width:35%;">Attachment Type</th>
+    <th style="padding:6px; width:20%;">Applicable</th>
+    <th style="padding:6px; width:30%;">Upload File</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Attachment-1</td>
+    <td style="padding:6px;">Identification of Personnel and Training</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Attachment-2</td>
+    <td style="padding:6px;">Pre-installation Checks</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_2_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_2_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_2" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Attachment-3</td>
+    <td style="padding:6px;">Major Components / Sub-system</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_3_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_3_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_3" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Attachment-4</td>
+    <td style="padding:6px;">Instruments</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_4_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_4_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_4" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Attachment-5</td>
+    <td style="padding:6px;">Material of Construction Verification</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_5_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_5_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_5" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Attachment-6</td>
+    <td style="padding:6px;">Identification of Utilities</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_6_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_6_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_6" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Attachment-7</td>
+    <td style="padding:6px;">Identification of Documents</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_7_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_7_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_7" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Attachment-8</td>
+    <td style="padding:6px;">Instrument Calibration</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_8_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_8_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_8" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Attachment-9</td>
+    <td style="padding:6px;">Motors Verification</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_9_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_9_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_9" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td style="padding:6px;">Attachment-10</td>
+    <td style="padding:6px;">Operational / Functional /Safety and performance Checks</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_9_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_9_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_9" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td style="padding:6px;">Attachment-11</td>
+    <td style="padding:6px;">Identification and Verification of SOPs</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_9_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_9_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_9" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td style="padding:6px;">Attachment-12</td>
+    <td style="padding:6px;">Training</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_9_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_9_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_9" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td style="padding:6px;">Attachment-13</td>
+    <td style="padding:6px;">Comparison of URS, DQ & IOQ</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_9_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_9_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_9" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td style="padding:6px;">Attachment-14</td>
+    <td style="padding:6px;">Discussion of IOQ results (IOQ Report)</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_9_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_9_na" value="1" style="width:auto;"> NA</label></td>
+    <td style="padding:4px;"><input type="file" name="attachment_file_9" style="width:100%;"></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 18.0 REVISION HISTORY                                   -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>18.0 REVISION HISTORY</h4>
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Revision No.</th>
+    <th style="padding:6px; width:30%;">Effective Date</th>
+    <th style="padding:6px; width:50%;">Reason for Revision</th>
+  </tr>
+  <tr>
+    <td style="padding:4px;"><input name="revision_no_1" value="00" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="revision_reason_1" value="New Document" style="width:100%;"></td>
+  </tr>
+
+</table>
+<p>Following personnel identified for execution of qualification activity and imparted training.</p>
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Department</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:20%;">Training Imparted by</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+ <tr>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+
+  </tr>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+</table>
+<td style="padding:6px;"><label><input type="checkbox" name="attachment_9_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_9_na" value="1" style="width:auto;"> NA</label></td>
+ <p style="line-height:2;">
+    Training imparted Validation /Quality Assurance:(Sign)
+    <input name="objective_equipment_name" style="width:40%; border:none; border-bottom:1px solid #000; outline:none;" />
+(/Date)
+        <td style="padding:4px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">S.No.</th>
+    <th style="padding:6px; width:20%;">Check</th>
+    <th style="padding:6px; width:20%;">Method</th>
+    <th style="padding:6px; width:20%;">Specification</th>
+    <th style="padding:6px; width:20%;">Observation/Result</th>
+    <th style="padding:6px; width:30%;">Checked by sign and date</th>
+  </tr>
+  <tr>
+    <td>
+  </td>
+  <td>General checks </td>
+  </tr>
+ <tr><td style="padding:6px;">1.</td>
+    <td style="padding:6px;">Leveling / Centering / Alignment</td>
+    <td style="padding:6px;">Visual Inspection</td>
+    <td style="padding:6px;">Should be properly leveled / centered / aligned</td>
+    <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+</tr>
+<tr><td style="padding:6px;">2.</td>
+    <td style="padding:6px;">Access and Clearance</td>
+    <td style="padding:6px;">Visual Inspection</td>
+    <td style="padding:6px;">Adequate space is available for accessing the equipment for operation, cleaning and maintenance</td>
+    <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+</tr>
+ <tr><td style="padding:6px;">3.</td>
+    <td style="padding:6px;">Utilities connections</td>
+    <td style="padding:6px;">Visual and tracking</td>
+    <td style="padding:6px;">Should be connected properly</td>
+   <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+ <tr><td style="padding:6px;">4.</td>
+    <td style="padding:6px;">Installation and commissioning of the mechanical and electrical components as per equipment manual</td>
+    <td style="padding:6px;">Visual Inspection</td>
+    <td style="padding:6px;">Should be installed properly as per installation manual provided by the vendor.</td>
+    <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+</tr>
+ <tr><td style="padding:6px;">5.</td>
+    <td style="padding:6px;">Machine Cleaning</td>
+    <td style="padding:6px;">Visual Inspection</td>
+    <td style="padding:6px;">Should be easy to clean with dry lint free cloth.</td>
+    <!-- <td style="padding:6px;">
+    <input name="post_prepared_by_signature" style="width:100%;" placeholder="Observation/ Result">
+    </td> -->
+    <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+</tr>
+</table>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Deviation (If any)</th>
+    <th style="padding:6px; width:20%;">Acceptable/Not Acceptable</th>
+    <th style="padding:6px; width:20%;">Corrective Actions</th>
+  </tr>
+
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments / Remarks</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+  <p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+
+  <table border="1" style="width:100%; border-collapse:collapse;">
+
+  <!-- MAIN BODY -->
+  <tr>
+    <th colspan="5" style="text-align:left; padding:6px;">Main Body:</th>
+  </tr>
+
+  <tr>
+    <td style="width:5%; padding:6px;">1.</td>
+    <td style="padding:4px;"><input name="main_body_part_1" style="width:100%;"></td>
+    <td style="padding:4px;"><textarea name="main_body_desc_1" rows="2" style="width:100%;"></textarea></td>
+    <td style="padding:4px;"><input name="main_body_check_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="main_body_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td colspan="5" style="padding:6px;">
+      Verified by sign and date :
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+
+  <!-- MECHANICAL COMPONENTS -->
+  <tr>
+    <th colspan="5" style="text-align:left; padding:6px;">Mechanical Components</th>
+  </tr>
+
+  <!-- ROWS 1-5 -->
+  <tr>
+    <td>1.</td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td>2.</td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td>3.</td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td>4.</td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td>5.</td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+   <tr>
+    <td colspan="5" style="padding:6px;">
+      Verified by sign and date :
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+
+  <!-- ELECTRICAL COMPONENTS -->
+  <tr>
+    <th colspan="5" style="text-align:left; padding:6px;">Electrical Components</th>
+  </tr>
+
+  <!-- ROWS 1-5 -->
+  <tr>
+    <td>1.</td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td>2.</td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td>3.</td>
+   <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td>4.</td>
+   <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td>5.</td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_check_1" style="width:100%;"></td>
+    <td><input name="mech_remark_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td colspan="5" style="padding:6px;">
+      Verified by sign and date :
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+
+</table>
+
+
+
+<!-- duplicate  -->
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Deviation (If any)</th>
+    <th style="padding:6px; width:20%;">Acceptable/Not Acceptable</th>
+    <th style="padding:6px; width:20%;">Corrective Actions</th>
+  </tr>
+
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+  <table border="1" style="width:100%; border-collapse:collapse;">
+
+  <!-- HEADER -->
+  <thead>
+    <tr>
+      <th style="padding:6px;">Checks</th>
+      <th style="padding:6px;">Method</th>
+      <th style="padding:6px;">Specification</th>
+      <th style="padding:6px;">Observation / Result</th>
+      <th style="padding:6px;">Sign and Date</th>
+    </tr>
+  </thead>
+
+  <tbody>
+
+    <!-- PRESSURE GAUGE -->
+    <tr>
+      <th colspan="5" style="text-align:left; padding:6px;">Pressure Gauge</th>
+    </tr>
+
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+
+     <tbody>
+
+    <!-- PRESSURE GAUGE -->
+    <tr>
+      <th colspan="5" style="text-align:left; padding:6px;">Temperature Sensor</th>
+    </tr>
+
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+
+</table>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Deviation (If any)</th>
+    <th style="padding:6px; width:20%;">Acceptable/Not Acceptable</th>
+    <th style="padding:6px; width:20%;">Corrective Actions</th>
+  </tr>
+
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments </th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+  <p>The material of construction (MOC) certificate provided by the manufacturer shall be reviewed and enclosed with Attachment-5 for reference.</p>
+
+  <table border="1" style="width:100%; border-collapse:collapse;">
+
+  <!-- HEADER -->
+  <thead>
+    <tr>
+      <th style="padding:6px;">Part Name</th>
+      <th style="padding:6px;">Acceptance Criteria</th>
+      <th style="padding:6px;">Actual</th>
+      <th style="padding:6px;">Certification No.</th>
+      <th style="padding:6px;">Sign and Date</th>
+    </tr>
+  </thead>
+
+  <tbody>
+
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+    <tr>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+       <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+      <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+</table>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Deviation (If any)</th>
+    <th style="padding:6px; width:20%;">Acceptable/Not Acceptable</th>
+    <th style="padding:6px; width:20%;">Corrective Actions</th>
+  </tr>
+
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments </th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Reviewed By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+<!-- duplicate1 -->
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Check</th>
+    <th style="padding:6px; width:20%;">Method</th>
+    <th style="padding:6px; width:20%;">Acceptance Criteria</th>
+    <th style="padding:6px; width:20%;">Observation/Result</th>
+    <th style="padding:6px; width:30%;">Checked by sign and date</th>
+  </tr>
+  <tr>
+    <td colspan="5" style="padding:6px; font-weight:bold;">
+      Power / Electrical connections
+    </td>
+  </tr>
+ <tr>
+    <td style="padding:6px;">Availability of Operating Power</td>
+    <td style="padding:6px;">Visual Inspection/ Measuring device</td>
+    <td style="padding:6px;">Single phase, 50 Hz Power availability:: ______ VAC</td>
+    <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+</tr>
+<tr>
+    <td style="padding:6px;">Earthing</td>
+    <td style="padding:6px;">Visual Inspection</td>
+    <td style="padding:6px;">Should be connected firmly</td>
+    <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+</tr>
+ <tr>
+    <td style="padding:6px;">Verify electric connections are tight, weather proof and grounded.</td>
+    <td style="padding:6px;">Visual and tracking</td>
+    <td style="padding:6px;">Should be tight, weather proof and grounded.</td>
+   <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+    </tr>
+ <tr>
+    <td style="padding:6px;">General method of the electrical wiring</td>
+    <td style="padding:6px;">Visual Inspection</td>
+    <td style="padding:6px;">- No loose hanging cables
+- Well-insulated electrical wirings.
+- Located in a safe place well protected from water seepage during machine or floor cleaning and also safe for operator during operation.</td>
+    <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+</tr>
+ <tr>
+    <td style="padding:6px;">Compressed Air Connections</td>
+    <td style="padding:6px;">Measuring device</td>
+    <td style="padding:6px;">Pressure of compressed Air --------</td>
+    <td style="padding:4px;"><input name="contact_surface_1" style="width:100%;" ></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+</tr>
+</table>
+<p><b>Note:</b>Details of other utilities if any shall be recorded as applicable.</p>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Deviation (If any)</th>
+    <th style="padding:6px; width:20%;">Acceptable/Not Acceptable</th>
+    <th style="padding:6px; width:20%;">Corrective Actions</th>
+  </tr>
+
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:4px;">
+      <input name="deviation_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments </th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+<!-- duplicate2 -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+
+  <!-- HEADER -->
+  <tr style="background:#d9d9d9;">
+    <th style="padding:6px;">Description of Document</th>
+    <th style="padding:6px;">Available</th>
+    <th style="padding:6px;">Document Identification (If any)</th>
+    <th style="padding:6px;">Location</th>
+  </tr>
+
+  <!-- GENERAL -->
+  <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">General</td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Purchase Orders</td>
+     <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_1" style="width:100%;"></td>
+    <td><input name="doc_loc_1" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">System specification</td>
+     <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_2" style="width:100%;"></td>
+    <td><input name="doc_loc_2" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Warranty terms</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_3" style="width:100%;"></td>
+    <td><input name="doc_loc_3" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">PLC software Back-ups</td>
+     <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_4" style="width:100%;"></td>
+    <td><input name="doc_loc_4" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">PLC/Software program lock keys</td>
+     <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_5" style="width:100%;"></td>
+    <td><input name="doc_loc_5" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Control Panel lock keys</td>
+     <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_6" style="width:100%;"></td>
+    <td><input name="doc_loc_6" style="width:100%;"></td>
+  </tr>
+
+  <!-- SOFTWARE AND CONTROLS -->
+  <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">Software and Controls</td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">PLC program ladder logic</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_7" style="width:100%;"></td>
+    <td><input name="doc_loc_7" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Control loop check documents</td>
+     <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_8" style="width:100%;"></td>
+    <td><input name="doc_loc_8" style="width:100%;"></td>
+  </tr>
+
+  <!-- LISTS -->
+  <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">Lists</td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Equipment and instrument list with component descriptions</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_9" style="width:100%;"></td>
+    <td><input name="doc_loc_9" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Electrical component parts list with descriptions</td>
+     <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_10" style="width:100%;"></td>
+    <td><input name="doc_loc_10" style="width:100%;"></td>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Spare parts list</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+
+  <!-- MANUALS -->
+  <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">Manuals</td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Operation and maintenance manuals</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Operation and maintenance manuals for important components and bought out items.</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <!-- drawings -->
+    <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">Drawings</td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Engineering drawings(As built & As installed)</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Electrical diagrams</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Piping and instrumentation diagram (P&ID)</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Engineering drawing for mechanical equipment’s</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Pneumatic drawing</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Control panel (internal & external) layout, wiring & installation</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">General arrangement/ Schematic line diagram</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td style="padding:6px;">Isometric</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+
+  <!-- certification  -->
+   <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">Certificates</td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Detailed list of modifications after contract</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Material specifications and certificates</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Welding inspection documentation</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Passivation repor</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Instrument calibration certificate</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">SVDB Pressure test certificate</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Functional/Factory acceptance test</td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <!-- others  -->
+   <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">Others</td>
+  </tr>
+   <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+    <td><input name="doc_id_11" style="width:100%;"></td>
+    <td><input name="doc_loc_11" style="width:100%;"></td>
+  </tr>
+
+</table>
+<p>Document available (yes/ No)</p>
+    <td style="padding:6px;"><label><input type="checkbox" name="attachment_1_yes" value="1" style="width:auto;"> Yes</label> <label style="margin-left:12px;"><input type="checkbox" name="attachment_1_na" value="1" style="width:auto;"> NA</label></td>
+
+
+    <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+
+
+  <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+
+  <!-- HEADER ROW 1 -->
+  <tr style="background:#d9d9d9;">
+    <th rowspan="2" style="padding:6px;">Instrument description</th>
+    <th rowspan="2" style="padding:6px;">ID Code/ No.</th>
+    <th colspan="2" style="padding:6px;">Calibration details</th>
+    <th rowspan="2" style="padding:6px;">Sign and Date</th>
+  </tr>
+
+  <!-- HEADER ROW 2 -->
+  <tr style="background:#d9d9d9;">
+    <th style="padding:6px;">Done On</th>
+    <th style="padding:6px;">Due On</th>
+  </tr>
+
+  <!-- ROW 1 -->
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+
+  <!-- ROW 2 -->
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+
+</table>
+
+ <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+
+<p style="line-height:2;">
+   Motor No:
+    <input name="objective_equipment_name" style="width:40%; border:none; border-bottom:1px solid #000; outline:none;" /></p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+
+  <!-- HEADER -->
+  <tr style="background:#d9d9d9;">
+    <th style="padding:6px;">Description</th>
+    <th style="padding:6px;">Specified</th>
+    <th style="padding:6px;">Method of Testing</th>
+    <th style="padding:6px;">Acceptance Criteria</th>
+    <th style="padding:6px;">Observation</th>
+    <th style="padding:6px;">Sign and Date</th>
+  </tr>
+
+  <!-- ROW 1 -->
+  <tr>
+    <td style="padding:6px;">Speed (RPM)</td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="method_1" value="Tachometer" style="width:100%;"></td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Current drawn</td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="method_1" value="Clamp meter" style="width:100%;"></td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Voltage</td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="method_1" value="Clamp meter" style="width:100%;"></td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Direction of rotation</td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="method_1" value="Visual" style="width:100%;"></td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td>  <input name="contact_surface_1" style="width:100%;"></td>
+    <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+
+</table>
+<p><b>Note:</b>If motor verification is not feasible for any motors same shall be recorded as not feasible</p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Deviation (If any)</th>
+    <th style="padding:6px; width:20%;">Acceptable/Not Acceptable</th>
+    <th style="padding:6px; width:20%;">Corrective Actions</th>
+  </tr>
+  <tr>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+</tr>
+<tr>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+</tr>
+<tr>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+</tr>
+<tr>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+</tr>
+<tr>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+</tr>
+<tr>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+</tr>
+<tr>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+   <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+</tr>
+  </table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments </th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+
+  <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+
+  <!-- HEADER -->
+  <tr style="background:#d9d9d9;">
+    <th style="padding:6px;">Check</th>
+    <th style="padding:6px;">Acceptance Criteria</th>
+    <th style="padding:6px;">Observation/Result</th>
+    <th style="padding:6px;">Sign and Date</th>
+  </tr>
+
+  <!-- MECHANICAL ADJUSTMENTS -->
+  <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">Mechanical Adjustments</td>
+  </tr>
+
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+   <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+
+  <!-- MACHINE PERFORMANCE -->
+  <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">Machine Performance</td>
+  </tr>
+
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+   <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+   <td style="padding:6px;">
+      <input name="contact_surface_1" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="revision_date_1" style="width:100%;">
+    </td>
+  </tr>
+
+
+  <!-- SAFETY CHECKS -->
+  <tr style="background:#f0f0f0;">
+    <td colspan="4" style="padding:6px; font-weight:bold;">Safety Checks</td>
+  </tr>
+
+
+</table>
+
+
+
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+
+  <!-- HEADER -->
+  <tr style="background:#d9d9d9;">
+    <th style="padding:6px;">Instruments used during functional/Operational Checks</th>
+    <th style="padding:6px;">Instrument ID number</th>
+    <th style="padding:6px;">Calibration details</th>
+    <th style="padding:6px;">Remark</th>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+  </tr>
+</table>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+
+  <!-- HEADER -->
+  <tr style="background:#d9d9d9;">
+    <th style="padding:6px;">Deviation (If any)</th>
+    <th style="padding:6px;">Acceptable/Not Acceptable</th>
+    <th style="padding:6px;">Corrective Actions</th>
+
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+    <td><input name="contact_surface_1" style="width:100%;"></td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments </th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+  <p>List of SOPs Identified:</p>
+
+  <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">S.No.</th>
+    <th style="padding:6px; width:20%;">Title of SOP</th>
+    <th style="padding:6px; width:20%;">SOP Number</th>
+    <th style="padding:6px; width:30%;">Effective Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">1.</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">2.</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">3.</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+  <p>Verification of draft SOPs:</p>
+
+  <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">S.No.</th>
+    <th style="padding:6px; width:20%;">SOP No.</th>
+    <th style="padding:6px; width:20%;">Title of SOP</th>
+    <th style="padding:6px; width:30%;">Performed by</th>
+    <th style="padding:6px; width:30%;">Verified by</th>
+    <th style="padding:6px; width:30%;">Changes required</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">1.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">2.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td style="padding:6px;">3.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">4.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">5.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+  <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments </th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+  <p>Record the trainings conducted on below table and attach the training record for reference along with the attachment 12.</p>
+
+   <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">S.No.</th>
+    <th style="padding:6px; width:20%;">Topic</th>
+    <th style="padding:6px; width:20%;">As per Document No.</th>
+    <th style="padding:6px; width:30%;">Applicability to Department</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">1.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">2.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">3.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">4.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">5.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">6.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">7.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+  </table>
+   <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments </th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Complied By</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Approved By</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+  <h4>COMPARISON BETWEEN URS, DQ & IOQ</h4>
+
+   <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">S.No.</th>
+    <th style="padding:6px; width:20%;">Requirements defined in URS</th>
+    <th style="padding:6px; width:20%;">DQ</th>
+    <th style="padding:6px; width:30%;">IOQ</th>
+    <th style="padding:6px; width:30%;">Remark Acceptable / Not Acceptable</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;">1.</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td colspan="5" style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="(Each design parameter as per URS shall be mentioned here and shall be compared for compliance during DQ and IOQ)">
+      </textarea>
+    </td>
+  </tr>
+  </table>
+
+  <p><ul>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</ul></p>
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Deviation (If any)</th>
+    <th style="padding:6px; width:20%;">Acceptable/Not Acceptable</th>
+    <th style="padding:6px; width:20%;">Corrective Actions</th>
+
+  </tr>
+  <tr>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+  </tr>
+  </table>
+ <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px;">Comments </th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Enter detailed comments, observations, or remarks here..."></textarea>
+    </td>
+  </tr>
+</table>
+<p><ul><b>COMPLIANCE OF MITIGATION PLAN IDENTIFIED DURING RISK ASSESSMENT:</b></ul></p>
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Sr.No.</th>
+    <th style="padding:6px; width:20%;">Requirement[Each mitigation plan decided during GMP risk assessment during design qualification and/or change control (in case of major modification) shall be reviewed for compliance in this section.]</th>
+    <th style="padding:6px; width:20%;">RPN obtained during design risk analysis</th>
+    <th style="padding:6px; width:20%;">Mitigation plan proposed</th>
+    <th style="padding:6px; width:20%;">Status of the Mitigation plan</th>
+
+  </tr>
+  <tr>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+     <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+      <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+  <table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+
+  <!-- HEADER ROW 1 -->
+  <tr style="background:#d9d9d9;">
+    <th colspan="3" style="padding:6px;">Revised Risk Analysis</th>
+    <th colspan="2" style="padding:6px;">Risk Evaluation*</th>
+    <th rowspan="2" style="padding:6px;">Remarks</th>
+  </tr>
+
+  <!-- HEADER ROW 2 -->
+  <tr style="background:#d9d9d9;">
+    <th style="padding:6px;">S</th>
+    <th style="padding:6px;">D</th>
+    <th style="padding:6px;">L</th>
+    <th style="padding:6px;">RPN</th>
+    <th style="padding:6px;">High / Medium / Low</th>
+  </tr>
+
+  <!-- ROW 1 -->
+  <tr>
+    <td><input name="s_1" style="width:100%;"></td>
+    <td><input name="d_1" style="width:100%;"></td>
+    <td><input name="l_1" style="width:100%;"></td>
+    <td><input name="rpn_1" style="width:100%;"></td>
+    <td><input name="risk_level_1" style="width:100%;"></td>
+    <td><input name="remark_1" style="width:100%;"></td>
+  </tr>
+
+  <!-- ROW 2 -->
+  <tr>
+    <td><input name="s_2" style="width:100%;"></td>
+    <td><input name="d_2" style="width:100%;"></td>
+    <td><input name="l_2" style="width:100%;"></td>
+    <td><input name="rpn_2" style="width:100%;"></td>
+    <td><input name="risk_level_2" style="width:100%;"></td>
+    <td><input name="remark_2" style="width:100%;"></td>
+  </tr>
+
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;"></th>
+    <th style="padding:6px; width:20%;">Name</th>
+    <th style="padding:6px; width:20%;">Signature</th>
+    <th style="padding:6px; width:30%;">Date</th>
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">Performed by</td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Checked by</td>
+
+    <td style="padding:4px;">
+      <input name="deviation_status_1" style="width:100%;">
+    </td>
+
+    <td style="padding:4px;">
+      <input name="deviation_action_1" style="width:100%;">
+    </td>
+    <td style="padding:6px;"><input type="date" name="revision_date_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+<ul>
+    <p>INSTALLATION & OPERATION QUALIFICATION</p>
+    <p style="line-height:2;">
+     (IOQ) REPORT FOR OF
+    <input name="objective_equipment_name" style="width:40%; border:none; border-bottom:1px solid #000; outline:none;" />
+     MACHINE
+    <input name="urs_no_objective" style="width:20%; border:none; border-bottom:1px solid #000; outline:none;" />
+    (Identification No. <input name="urs_no_objective" style="width:20%; border:none; border-bottom:1px solid #000; outline:none;" />
+    )
+  </p>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- TABLE OF CONTENTS                                       -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>TABLE OF CONTENTS</h4>
+<p>1.0 OBJECTIVE ..... 3</p>
+<p>2.0 SCOPE ..... 3</p>
+<p>3.0 RESPONSIBILITY ..... 4</p>
+<p>4.0 PRE-REQUISITES ..... 5</p>
+<p>5.0 EQUIPMENT/ SYSTEM IDENTIFICATION ..... 5</p>
+<p>6.0 EQUIPMENT/SYSTEM DESCRIPTION ..... 5</p>
+<p>7.0 INSTALLATION CHECKS ..... 6</p>
+<p>8.0 OPERATIONAL CHECKS ..... 19</p>
+<p>9.0 INSTALLATION &amp; OPERATIONAL CHECKS/ REVIEW ..... 10</p>
+<p>10.0 IDENTIFICATION AND VERIFICATION OF STANDARD OPERATING PROCEDURE ..... 10</p>
+<p>11.0 TRAINING ..... 11</p>
+<p>12.0 COMPARISON BETWEEN URS, DQ &amp; IOQ ..... 11</p>
+<p>13.0 COMPLIANCE OF MITIGATION PLAN IDENTIFIED AT DESIGN REVIEW STAGE. ..... 11</p>
+<p>14.0 SUMMARY AND CONCLUSION ..... 11</p>
+<p>15.0 REFERENCES ..... 11</p>
+<p>16.0 ABBREVIATIONS ..... 12</p>
+<p>17.0 ATTACHMENTS ..... 12</p>
+<p>18.0 REVISION HISTORY ..... 13</p>
+
+<h4> OBJECTIVE</h4>
+<p style="line-height:2.2;">
+  To establish documentary evidence to demonstrate that
+  <input name="objective_machine_name" style="width:140px; border:none; border-bottom:1px solid #000; outline:none;">
+  machine I.D No.
+  <input name="objective_machine_id" style="width:140px; border:none; border-bottom:1px solid #000; outline:none;">
+ located temporarily in packing line in
+  <input name="objective_machine_location" style="width:140px; border:none; border-bottom:1px solid #000; outline:none;">
+ Facility of Lupin is qualified for correct
+installation and Operation as per the guidelines outlined in this protocol &/or operations
+manual provided by the manufacturer/ vendor.
+</p>
+<h4>1.0 Equipment/System Description</h4>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Equipment/System Description"></textarea>
+    </td>
+  </tr>
+</table>
+<h4>2.0 Observations & Results</h4>
+<h4>2.1 Installation qualification checks</h4>
+<p>Following tests were performed during the installation qualification to qualify the
+equipment.</p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+
+  <!-- HEADER -->
+  <tr style="background:#d9d9d9;">
+    <th style="padding:6px; width:10%;">S. No.</th>
+    <th style="padding:6px; width:40%;">Test</th>
+    <th style="padding:6px; width:25%;">Acceptance criteria</th>
+    <th style="padding:6px; width:25%;">Result</th>
+  </tr>
+
+  <!-- ROW 1 -->
+  <tr>
+    <td rowspan="2" style="padding:6px;">1.</td>
+    <td colspan="3" style="padding:6px;">Checks for major components</td>
+  </tr>
+  <tr>
+    <td><input name="test_1" style="width:100%;"></td>
+    <td><input name="criteria_1" style="width:100%;"></td>
+    <td><input name="result_1" style="width:100%;"></td>
+  </tr>
+
+  <!-- ROW 2 -->
+  <tr>
+    <td rowspan="2" style="padding:6px;">2.</td>
+    <td colspan="3" style="padding:6px;">
+      Installation checks for following process control instruments
+    </td>
+  </tr>
+  <tr>
+    <td><input name="test_2" style="width:100%;"></td>
+    <td><input name="criteria_2" style="width:100%;"></td>
+    <td><input name="result_2" style="width:100%;"></td>
+  </tr>
+
+  <!-- ROW 3 -->
+  <tr>
+    <td rowspan="2" style="padding:6px;">3.</td>
+    <td colspan="3" style="padding:6px;">
+      Checks for the material of construction for contact surfaces
+    </td>
+  </tr>
+  <tr>
+    <td><input name="test_3" style="width:100%;"></td>
+    <td><input name="criteria_3" style="width:100%;"></td>
+    <td><input name="result_3" style="width:100%;"></td>
+  </tr>
+
+  <!-- ROW 4 -->
+  <tr>
+    <td rowspan="2" style="padding:6px;">4.</td>
+    <td colspan="3" style="padding:6px;">Checks for utilities</td>
+  </tr>
+  <tr>
+    <td><input name="test_4" style="width:100%;"></td>
+    <td><input name="criteria_4" style="width:100%;"></td>
+    <td><input name="result_4" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td rowspan="2" style="padding:6px;">5.</td>
+    <td colspan="3" style="padding:6px;">Documents available</td>
+  </tr>
+  <tr>
+    <td><input name="test_4" style="width:100%;"></td>
+    <td><input name="criteria_4" style="width:100%;"></td>
+    <td><input name="result_4" style="width:100%;"></td>
+  </tr>
+</table>
+<h4>2.2 Operational qualification checks</h4>
+<p>Following tests were performed during the operational qualification to qualify the
+equipment.</p>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+
+  <!-- HEADER -->
+  <tr style="background:#d9d9d9;">
+    <th style="padding:6px; width:10%;">S. No.</th>
+    <th style="padding:6px; width:40%;">Test Recommended</th>
+    <th style="padding:6px; width:25%;">Acceptance criteria</th>
+    <th style="padding:6px; width:25%;">Result</th>
+  </tr>
+
+  <!-- ROW 1 -->
+  <tr>
+    <td rowspan="2" style="padding:6px;">1.</td>
+    <td colspan="3" style="padding:6px;">Calibration of following process control instruments</td>
+  </tr>
+  <tr>
+    <td><input name="test_1" style="width:100%;"></td>
+    <td><input name="criteria_1" style="width:100%;"></td>
+    <td><input name="result_1" style="width:100%;"></td>
+  </tr>
+
+  <!-- ROW 2 -->
+  <tr>
+    <td rowspan="2" style="padding:6px;">2.</td>
+    <td colspan="3" style="padding:6px;">
+      Operational Checks
+    </td>
+  </tr>
+  <tr>
+    <td><input name="test_2" style="width:100%;"></td>
+    <td><input name="criteria_2" style="width:100%;"></td>
+    <td><input name="result_2" style="width:100%;"></td>
+  </tr>
+
+  <!-- ROW 3 -->
+  <tr>
+    <td rowspan="2" style="padding:6px;">3.</td>
+    <td colspan="3" style="padding:6px;">
+      Safety Checks
+    </td>
+  </tr>
+  <tr>
+    <td><input name="test_3" style="width:100%;"></td>
+    <td><input name="criteria_3" style="width:100%;"></td>
+    <td><input name="result_3" style="width:100%;"></td>
+  </tr>
+
+  <!-- ROW 4 -->
+  <tr>
+    <td rowspan="2" style="padding:6px;">4.</td>
+    <td colspan="3" style="padding:6px;">Machine Performance Check</td>
+  </tr>
+  <tr>
+    <td><input name="test_4" style="width:100%;"></td>
+    <td><input name="criteria_4" style="width:100%;"></td>
+    <td><input name="result_4" style="width:100%;"></td>
+  </tr>
+</table>
+<h4>3.0 Deviation Details:</h4>
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:20%;">Deviation (If any)</th>
+    <th style="padding:6px; width:20%;">Corrective Action/ Preventive Action</th>
+    <th style="padding:6px; width:20%;">Remarks</th>
+  </tr>
+  <tr>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+  </tr>
+   <tr>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_status_1" style="width:100%;"></td>
+    <td style="padding:4px;"><input name="deviation_action_1" style="width:100%;"></td>
+  </tr>
+  </table>
+
+
+  <h4>4.0 Review and Discussions</h4>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Review and Discussions"></textarea>
+    </td>
+  </tr>
+</table>
+<h4>5.0 Conclusion</h4>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+
+  </tr>
+
+  <tr>
+    <td style="padding:6px;">
+      <textarea
+        name="comments"
+        rows="5"
+        style="width:100%; border:1px solid #ccc; padding:8px; resize:vertical;"
+        placeholder="Conclusion"></textarea>
+    </td>
+  </tr>
+</table>
+<!-- pree approval -->
+
+<h3 style="margin-top:16px;">6.0 Report Approval</h3>
+
+<!-- Prepared By -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:30%;">Prepared By (Department)</th>
+    <th style="padding:6px; width:40%;">Name &amp; Designation</th>
+    <th style="padding:6px; width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;">
+      <select name="prepared_by_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="prepared_by_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="prepared_by_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+</table>
+
+<!-- Checked By -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:30%;">Checked By (Department)</th>
+    <th style="padding:6px; width:40%;">Name &amp; Designation</th>
+    <th style="padding:6px; width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;">
+      <select name="checked_by_engineering_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="checked_by_engineering_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="checked_by_engineering_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;">
+      <select name="checked_by_production_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="checked_by_production_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="checked_by_production_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;">
+      <select name="checked_by_validation_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="checked_by_validation_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="checked_by_validation_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;">
+      <!-- ✅ FIX: was plain <input>, now <select data-options="users"> -->
+      <select name="checked_by_quality_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="checked_by_quality_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="checked_by_quality_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+</table>
+
+<!-- Approved By -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:30%;">Approved By (Department)</th>
+    <th style="padding:6px; width:40%;">Name &amp; Designation</th>
+    <th style="padding:6px; width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;"></td>
+    <td style="padding:6px;">
+      <select name="approved_by_user_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="approved_by_user_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="approved_by_user_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+
+</table>
+
+<!-- ═════════════════════════════════════════════════  -->
+<!-- POST APPROVAL SIGNATURE                                 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h3 style="margin-top:30px; border-top:2px solid #333; padding-top:16px;">POST APPROVAL SIGNATURE</h3>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:30%;">Prepared By (Department)</th>
+    <th style="padding:6px; width:40%;">Name &amp; Designation</th>
+    <th style="padding:6px; width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;">User / Validation</td>
+    <td style="padding:6px;">
+      <select name="post_prepared_by_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="post_prepared_by_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="post_prepared_by_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+</table>
+
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr style="background:#f0f0f0;">
+    <th style="padding:6px; width:30%;">Checked / Approved By (Department)</th>
+    <th style="padding:6px; width:40%;">Name &amp; Designation</th>
+    <th style="padding:6px; width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Engineering</td>
+    <td style="padding:6px;">
+      <select name="post_checked_by_engineering_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="post_checked_by_engineering_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="post_checked_by_engineering_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Production</td>
+    <td style="padding:6px;">
+      <select name="post_checked_by_production_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="post_checked_by_production_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="post_checked_by_production_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">User / Validation</td>
+    <td style="padding:6px;">
+      <select name="post_checked_by_validation_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="post_checked_by_validation_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="post_checked_by_validation_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:6px;">Quality Assurance</td>
+    <td style="padding:6px;">
+      <select name="post_approved_by_quality_name" data-options="users" style="width:100%;"><option value="">Select user</option></select>
+    </td>
+    <td style="padding:6px;">
+      <input name="post_approved_by_quality_signature" style="width:100%;" placeholder="Signature"><br>
+      <input type="date" name="post_approved_by_quality_date" style="width:100%; margin-top:6px;">
+    </td>
+  </tr>
+</table>
+
+</div>

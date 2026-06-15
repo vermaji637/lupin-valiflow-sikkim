@@ -1,0 +1,775 @@
+<!-- =========================================================
+facility_qualification_fixed.html  (FIXED VERSION 2.0)
+FIXES APPLIED:
+1. All duplicate name="prepared_by_name/signature/date" → unique names per row
+2. Pre-approval Approved By: reused prepared_by_* → approved_by_quality_*
+3. Post-approval Compiled By: reused prepared_by_* → post_compiled_by_*
+4. Post-approval Checked By rows: all reused prepared_by_* → unique post_checked_by_*
+5. Post-approval Approved By: reused prepared_by_* → post_approved_by_quality_*
+6. Image src → /storage/lupin.png (relative path)
+7. <input type="text" ...> malformed attribute "..." removed
+8. Unnamed inputs in objective/scope → proper name attributes added
+9. Missing section 10.0 heading "ATTACHMENTS" fixed (was just <h4> with no number)
+10. QA "Reviewed By" row was commented out → restored with select + proper name
+11. textarea fields in sections 4,5,6 → proper name attributes added
+========================================================= -->
+
+<div id="content" class="editable fromedit" contenteditable="false">
+
+<!-- ================= HEADER ================= -->
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <!-- FIX #6: hardcoded IP path → relative /storage/lupin.png -->
+    <td rowspan="4" style="width:15%; text-align:center; vertical-align:middle;">
+      <img src="http://localhost/storage/lupin-logo.png" style="height:200px; width:auto;" alt="Lupin" />
+    </td>
+    <td colspan="4" style="text-align:center; font-weight:bold;">
+      LUPIN LIMITED, (LOCATION)
+    </td>
+  </tr>
+  <tr>
+    <td colspan="4" style="text-align:center; font-weight:bold;">
+      FACILITY QUALIFICATION PROTOCOL &amp; REPORT
+    </td>
+  </tr>
+  <tr>
+    <td colspan="4" style="font-weight:bold;">
+      FACILITY / SECTION<br />
+      <input name="facility_section" style="width:100%;" />
+    </td>
+  </tr>
+  <tr>
+    <td style="width:25%;">
+      <b>DOCUMENT NO.</b><br />
+      <select name="document_id" data-options="documents" style="width:100%;">
+        <option value="">-- Select Document --</option>
+      </select>
+      <!-- <input name="document_no" style="width:100%;" /> -->
+    </td>
+    <td style="width:25%;">
+      <b>VERSION</b><br />
+      <input name="version" value="00" style="width:100%;" />
+    </td>
+    <td style="width:25%;">
+      <b>PAGE NO.</b><br />
+      <span>2 of 14</span>
+    </td>
+  </tr>
+</table>
+
+<!-- ================= TABLE OF CONTENTS ================= -->
+<h3>TABLE OF CONTENTS</h3>
+<table border="0" style="width:100%;">
+  <tr><td>1.0 PRE-APPROVAL</td><td style="text-align:right;">3</td></tr>
+  <tr><td>2.0 OBJECTIVE</td><td style="text-align:right;">4</td></tr>
+  <tr><td>3.0 SCOPE</td><td style="text-align:right;">4</td></tr>
+  <tr><td>4.0 BACKGROUND</td><td style="text-align:right;">4</td></tr>
+  <tr><td>5.0 DESCRIPTION OF FACILITY</td><td style="text-align:right;">4</td></tr>
+  <tr><td>6.0 RESPONSIBILITY</td><td style="text-align:right;">5</td></tr>
+  <tr><td>7.0 QUALIFICATION METHODOLOGY</td><td style="text-align:right;">5</td></tr>
+  <tr><td>8.0 QUALIFICATION CHECKS</td><td style="text-align:right;">5</td></tr>
+  <tr><td>8.1 Architectural verification checks</td><td style="text-align:right;">6</td></tr>
+  <tr><td>8.2 Utility verification checks</td><td style="text-align:right;">7</td></tr>
+  <tr><td>8.3 Instrument verification checks</td><td style="text-align:right;">8</td></tr>
+  <tr><td>8.4 Light Intensity verification checks</td><td style="text-align:right;">9</td></tr>
+  <tr><td>8.5 Equipment verification checks</td><td style="text-align:right;">10</td></tr>
+  <tr><td>8.6 Layout Verification checks</td><td style="text-align:right;">11</td></tr>
+  <tr><td>9.0 ACCEPTANCE CRITERIA</td><td style="text-align:right;">12</td></tr>
+  <tr><td>10.0 ATTACHMENTS</td><td style="text-align:right;">12</td></tr>
+  <tr><td>11.0 DEFICIENCY (IF ANY) AND CORRECTIVE ACTION REPORT</td><td style="text-align:right;">12</td></tr>
+  <tr><td>12.0 SUMMARY AND EVALUATION OF RESULTS</td><td style="text-align:right;">13</td></tr>
+  <tr><td>13.0 CONCLUSION</td><td style="text-align:right;">13</td></tr>
+  <tr><td>14.0 POST-APPROVAL</td><td style="text-align:right;">14</td></tr>
+</table>
+
+<!-- ================= 1.0 PRE-APPROVAL ================= -->
+<h3>1.0 PRE-APPROVAL</h3>
+
+<!-- PREPARED BY -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr>
+    <th style="width:30%;">Prepared By</th>
+    <th style="width:40%;">Name &amp; Designation</th>
+    <th style="width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td>User / Validation</td>
+    <td>
+      <select name="prepared_by_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="prepared_by_signature" style="width:100%;" /><br />
+      <input type="date" name="prepared_by_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+</table>
+
+<!-- REVIEWED BY -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr>
+    <th style="width:30%;">Reviewed By</th>
+    <th style="width:40%;">Name &amp; Designation</th>
+    <th style="width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td>Engineering</td>
+    <td>
+      <!-- FIX #1: was checked_by_validation_name — renamed to match role -->
+      <select name="checked_by_engineering_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="checked_by_engineering_signature" style="width:100%;" /><br />
+      <input type="date" name="checked_by_engineering_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+  <tr>
+    <td>User</td>
+    <td>
+      <select name="checked_by_user_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <!-- FIX #2: was checked_by_production_* → checked_by_user_* to match label -->
+      <input name="checked_by_user_signature" style="width:100%;" /><br />
+      <input type="date" name="checked_by_user_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+  <tr>
+    <td>Validation</td>
+    <td>
+      <!-- FIX #3: was checked_by_engineering_name → checked_by_validation_name to match label -->
+      <select name="checked_by_validation_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="checked_by_validation_signature" style="width:100%;" /><br />
+      <input type="date" name="checked_by_validation_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+  <!-- FIX #10: QA row was commented out — restored with proper unique name -->
+  <tr>
+    <td>Quality Assurance</td>
+    <td>
+      <select name="checked_by_quality_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="checked_by_quality_signature" style="width:100%;" /><br />
+      <input type="date" name="checked_by_quality_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+</table>
+
+<!-- APPROVED BY -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr>
+    <th style="width:30%;">Approved By</th>
+    <th style="width:40%;">Name &amp; Designation</th>
+    <th style="width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td>Quality Assurance</td>
+    <td>
+      <!-- FIX #4: was reusing prepared_by_name → approved_by_quality_name -->
+      <select name="approved_by_quality_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="approved_by_quality_signature" style="width:100%;" /><br />
+      <input type="date" name="approved_by_quality_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+</table>
+<td style="width:25%;">
+      <b>Effective Date</b><br />
+      <input type="date" name="effective_date" style="width:100%;" />
+    </td>
+<!-- ================= 2.0 OBJECTIVE ================= -->
+<h4>2.0 OBJECTIVE</h4>
+<p>
+  Objective of this facility qualification is to establish documented evidence that
+  the newly constructed / modified area of
+  <!-- FIX #8: unnamed inputs → proper name attributes -->
+  <input name="objective_facility_name" style="width:200px;" /> facility as per change control no.
+  <input name="objective_change_control_no" style="width:200px;" />
+  is acceptable as per user / process requirements and engineering / regulatory standards.
+</p>
+
+<!-- ================= 3.0 SCOPE ================= -->
+<h4>3.0 SCOPE</h4>
+<p>(Mention applicability of this protocol, so as to cover details of facility &amp; tests to be covered)</p>
+<p>
+  Scope of this protocol is applicable for newly constructed / modified area of
+  <input name="scope_facility_name" style="width:200px;" /> facility.
+</p>
+
+<!-- ================= 4.0 BACKGROUND ================= -->
+<h4>4.0 BACKGROUND</h4>
+<p>(Mention details of change control/ design qualification document etc. related to the facility creation/ modification)</p>
+<!-- FIX #11: unnamed textarea → name attribute added -->
+<textarea name="background_details" style="width:100%; height:80px;"></textarea>
+
+<!-- ================= 5.0 FACILITY DESCRIPTION ================= -->
+<h4>5.0 FACILITY DESCRIPTION</h4>
+<textarea name="facility_description" style="width:100%; height:120px;"></textarea>
+
+<!-- ================= 6.0 RESPONSIBILITY ================= -->
+<h4>6.0 RESPONSIBILITY</h4>
+<p>(Mention responsibility of representatives being part of the facility qualification)</p>
+<textarea name="responsibility_details" style="width:100%; height:100px;"></textarea>
+
+<!-- ================= 7.0 QUALIFICATION METHODOLOGY ================= -->
+<h4>7.0 QUALIFICATION METHODOLOGY</h4>
+<p>(Shall include detailed methodology to be followed for qualification of facility, it shall include following tests (but not limited to)</p>
+<ul>
+  <li>Architectural Verification Test</li>
+  <li>Electrical connection verification</li>
+  <li>Utility verification</li>
+  <li>Instrument verification</li>
+  <li>Equipment verification</li>
+  <li>Layout verification</li>
+</ul>
+
+<!-- ================= 8.0 QUALIFICATION CHECKS ================= -->
+<h4>8.0 QUALIFICATION CHECKS:</h4>
+<p>(Mention the procedure to be followed while executing the tests along with data sheets for recording the data)</p>
+
+<!-- ================= 8.1 ARCHITECTURAL ================= -->
+<h4>8.1 ARCHITECTURAL VERIFICATION CHECK</h4>
+Room Name / Number: <input name="arch_room_name" style="width:200px;" />
+
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Feature</th>
+    <th>Acceptance Criteria</th>
+    <th>Observation</th>
+    <th>Done By</th>
+  </tr>
+  <tr>
+    <td><input name="arch_feature_1" style="width:100%;" /></td>
+    <td><input name="arch_criteria_1" style="width:100%;" /></td>
+    <td><input name="arch_obs_1" style="width:100%;" /></td>
+    <td><input name="arch_done_by_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="arch_feature_2" style="width:100%;" /></td>
+    <td><input name="arch_criteria_2" style="width:100%;" /></td>
+    <td><input name="arch_obs_2" style="width:100%;" /></td>
+    <td><input name="arch_done_by_2" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="arch_feature_3" style="width:100%;" /></td>
+    <td><input name="arch_criteria_3" style="width:100%;" /></td>
+    <td><input name="arch_obs_3" style="width:100%;" /></td>
+    <td><input name="arch_done_by_3" style="width:100%;" /></td>
+  </tr>
+</table>
+
+<p><b>DEVIATIONS (IF ANY)</b></p>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Deviation (If any)</th>
+    <th>Corrective Actions</th>
+    <th>Preventive Actions</th>
+  </tr>
+  <tr>
+    <td><input name="arch_deviation_1" style="width:100%;" /></td>
+    <td><input name="arch_corrective_1" style="width:100%;" /></td>
+    <td><input name="arch_preventive_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="arch_deviation_2" style="width:100%;" /></td>
+    <td><input name="arch_corrective_2" style="width:100%;" /></td>
+    <td><input name="arch_preventive_2" style="width:100%;" /></td>
+  </tr>
+</table>
+<p><b>Comments:</b></p>
+<textarea name="arch_comments" style="width:100%; resize:vertical; min-height:80px; padding:8px;"></textarea>
+<!-- FIX #7: malformed <input type="text" ...> → proper input -->
+<p>Verified By: <input type="text" name="arch_verified_by" style="width:200px;" /></p>
+
+<!-- ================= 8.2 UTILITY ================= -->
+<h4>8.2 UTILITY VERIFICATION CHECK</h4>
+Room Name / Number: <input name="utility_room_name" style="width:200px;" />
+
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Utility</th>
+    <th>Acceptance Criteria</th>
+    <th>Observation</th>
+    <th>Done By</th>
+  </tr>
+  <tr>
+    <td><input name="utility_name_1" style="width:100%;" /></td>
+    <td><input name="utility_criteria_1" style="width:100%;" /></td>
+    <td><input name="utility_obs_1" style="width:100%;" /></td>
+    <td><input name="utility_done_by_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="utility_name_2" style="width:100%;" /></td>
+    <td><input name="utility_criteria_2" style="width:100%;" /></td>
+    <td><input name="utility_obs_2" style="width:100%;" /></td>
+    <td><input name="utility_done_by_2" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="utility_name_3" style="width:100%;" /></td>
+    <td><input name="utility_criteria_3" style="width:100%;" /></td>
+    <td><input name="utility_obs_3" style="width:100%;" /></td>
+    <td><input name="utility_done_by_3" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="utility_name_4" style="width:100%;" /></td>
+    <td><input name="utility_criteria_4" style="width:100%;" /></td>
+    <td><input name="utility_obs_4" style="width:100%;" /></td>
+    <td><input name="utility_done_by_4" style="width:100%;" /></td>
+  </tr>
+</table>
+
+<p><b>DEVIATIONS (IF ANY):</b></p>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Deviation (If any)</th>
+    <th>Corrective Actions</th>
+    <th>Preventive Actions</th>
+  </tr>
+  <tr>
+    <td><input name="utility_deviation_1" style="width:100%;" /></td>
+    <td><input name="utility_corrective_1" style="width:100%;" /></td>
+    <td><input name="utility_preventive_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="utility_deviation_2" style="width:100%;" /></td>
+    <td><input name="utility_corrective_2" style="width:100%;" /></td>
+    <td><input name="utility_preventive_2" style="width:100%;" /></td>
+  </tr>
+</table>
+<p><b>Comments:</b></p>
+<textarea name="utility_comments" style="width:100%; resize:vertical; min-height:80px; padding:8px;"></textarea>
+<p>Verified By: <input type="text" name="utility_verified_by" style="width:200px;" /></p>
+
+<!-- ================= 8.3 INSTRUMENT ================= -->
+<h4>8.3 INSTRUMENT VERIFICATION CHECK</h4>
+Room Name / Number: <input name="instrument_room_name" style="width:200px;" />
+
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Instrument</th>
+    <th>Acceptance Criteria</th>
+    <th>Observation</th>
+    <th>Done By</th>
+  </tr>
+  <tr>
+    <td><input name="inst_name_1" style="width:100%;" /></td>
+    <td><input name="inst_criteria_1" style="width:100%;" /></td>
+    <td><input name="inst_obs_1" style="width:100%;" /></td>
+    <td><input name="inst_done_by_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="inst_name_2" style="width:100%;" /></td>
+    <td><input name="inst_criteria_2" style="width:100%;" /></td>
+    <td><input name="inst_obs_2" style="width:100%;" /></td>
+    <td><input name="inst_done_by_2" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="inst_name_3" style="width:100%;" /></td>
+    <td><input name="inst_criteria_3" style="width:100%;" /></td>
+    <td><input name="inst_obs_3" style="width:100%;" /></td>
+    <td><input name="inst_done_by_3" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="inst_name_4" style="width:100%;" /></td>
+    <td><input name="inst_criteria_4" style="width:100%;" /></td>
+    <td><input name="inst_obs_4" style="width:100%;" /></td>
+    <td><input name="inst_done_by_4" style="width:100%;" /></td>
+  </tr>
+</table>
+
+<p><b>DEVIATIONS (IF ANY):</b></p>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Deviation (If any)</th>
+    <th>Corrective Actions</th>
+    <th>Preventive Actions</th>
+  </tr>
+  <tr>
+    <td><input name="inst_deviation_1" style="width:100%;" /></td>
+    <td><input name="inst_corrective_1" style="width:100%;" /></td>
+    <td><input name="inst_preventive_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="inst_deviation_2" style="width:100%;" /></td>
+    <td><input name="inst_corrective_2" style="width:100%;" /></td>
+    <td><input name="inst_preventive_2" style="width:100%;" /></td>
+  </tr>
+</table>
+<p><b>Comments:</b></p>
+<textarea name="instrument_comments" style="width:100%; resize:vertical; min-height:80px; padding:8px;"></textarea>
+<p>Verified By: <input type="text" name="instrument_verified_by" style="width:200px;" /></p>
+
+<!-- ================= 8.4 LIGHT INTENSITY ================= -->
+<h4>8.4 LIGHT INTENSITY VERIFICATION CHECK</h4>
+
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Room Name / Number</th>
+    <th>Acceptance Criteria</th>
+    <th>Observation</th>
+    <th>Done By</th>
+  </tr>
+  <tr>
+    <td><input name="light_room_1" style="width:100%;" /></td>
+    <td><input name="light_criteria_1" style="width:100%;" /></td>
+    <td><input name="light_obs_1" style="width:100%;" /></td>
+    <td><input name="light_done_by_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="light_room_2" style="width:100%;" /></td>
+    <td><input name="light_criteria_2" style="width:100%;" /></td>
+    <td><input name="light_obs_2" style="width:100%;" /></td>
+    <td><input name="light_done_by_2" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="light_room_3" style="width:100%;" /></td>
+    <td><input name="light_criteria_3" style="width:100%;" /></td>
+    <td><input name="light_obs_3" style="width:100%;" /></td>
+    <td><input name="light_done_by_3" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="light_room_4" style="width:100%;" /></td>
+    <td><input name="light_criteria_4" style="width:100%;" /></td>
+    <td><input name="light_obs_4" style="width:100%;" /></td>
+    <td><input name="light_done_by_4" style="width:100%;" /></td>
+  </tr>
+</table>
+
+<p><b>DEVIATIONS (IF ANY):</b></p>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Deviation (If any)</th>
+    <th>Corrective Actions</th>
+    <th>Preventive Actions</th>
+  </tr>
+  <tr>
+    <td><input name="light_deviation_1" style="width:100%;" /></td>
+    <td><input name="light_corrective_1" style="width:100%;" /></td>
+    <td><input name="light_preventive_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="light_deviation_2" style="width:100%;" /></td>
+    <td><input name="light_corrective_2" style="width:100%;" /></td>
+    <td><input name="light_preventive_2" style="width:100%;" /></td>
+  </tr>
+</table>
+<p><b>Comments:</b></p>
+<textarea name="light_comments" style="width:100%; resize:vertical; min-height:80px; padding:8px;"></textarea>
+<p>Verified By: <input type="text" name="light_verified_by" style="width:200px;" /></p>
+
+<!-- ================= 8.5 EQUIPMENT ================= -->
+<h4>8.5 EQUIPMENT VERIFICATION CHECK</h4>
+Room Name / Number: <input name="equip_room_name" style="width:200px;" />
+
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Equipment</th>
+    <th>Acceptance Criteria</th>
+    <th>Observation</th>
+    <th>Done By</th>
+  </tr>
+  <tr>
+    <td><input name="equip_name_1" style="width:100%;" /></td>
+    <td><input name="equip_criteria_1" style="width:100%;" /></td>
+    <td><input name="equip_obs_1" style="width:100%;" /></td>
+    <td><input name="equip_done_by_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="equip_name_2" style="width:100%;" /></td>
+    <td><input name="equip_criteria_2" style="width:100%;" /></td>
+    <td><input name="equip_obs_2" style="width:100%;" /></td>
+    <td><input name="equip_done_by_2" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="equip_name_3" style="width:100%;" /></td>
+    <td><input name="equip_criteria_3" style="width:100%;" /></td>
+    <td><input name="equip_obs_3" style="width:100%;" /></td>
+    <td><input name="equip_done_by_3" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="equip_name_4" style="width:100%;" /></td>
+    <td><input name="equip_criteria_4" style="width:100%;" /></td>
+    <td><input name="equip_obs_4" style="width:100%;" /></td>
+    <td><input name="equip_done_by_4" style="width:100%;" /></td>
+  </tr>
+</table>
+
+<p><b>DEVIATIONS (IF ANY):</b></p>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Deviation (If any)</th>
+    <th>Corrective Actions</th>
+    <th>Preventive Actions</th>
+  </tr>
+  <tr>
+    <td><input name="equip_deviation_1" style="width:100%;" /></td>
+    <td><input name="equip_corrective_1" style="width:100%;" /></td>
+    <td><input name="equip_preventive_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="equip_deviation_2" style="width:100%;" /></td>
+    <td><input name="equip_corrective_2" style="width:100%;" /></td>
+    <td><input name="equip_preventive_2" style="width:100%;" /></td>
+  </tr>
+</table>
+<p><b>Comments:</b></p>
+<textarea name="equip_comments" style="width:100%; resize:vertical; min-height:80px; padding:8px;"></textarea>
+<p>Verified By: <input type="text" name="equip_verified_by" style="width:200px;" /></p>
+
+<!-- ================= 8.6 LAYOUT ================= -->
+<h4>8.6 LAYOUT VERIFICATION CHECK</h4>
+
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Layout</th>
+    <th>Layout Number</th>
+    <th>Observation</th>
+    <th>Done By</th>
+  </tr>
+  <tr>
+    <td><input name="layout_name_1" style="width:100%;" /></td>
+    <td><input name="layout_no_1" style="width:100%;" /></td>
+    <td><input name="layout_obs_1" style="width:100%;" /></td>
+    <td><input name="layout_done_by_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="layout_name_2" style="width:100%;" /></td>
+    <td><input name="layout_no_2" style="width:100%;" /></td>
+    <td><input name="layout_obs_2" style="width:100%;" /></td>
+    <td><input name="layout_done_by_2" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="layout_name_3" style="width:100%;" /></td>
+    <td><input name="layout_no_3" style="width:100%;" /></td>
+    <td><input name="layout_obs_3" style="width:100%;" /></td>
+    <td><input name="layout_done_by_3" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="layout_name_4" style="width:100%;" /></td>
+    <td><input name="layout_no_4" style="width:100%;" /></td>
+    <td><input name="layout_obs_4" style="width:100%;" /></td>
+    <td><input name="layout_done_by_4" style="width:100%;" /></td>
+  </tr>
+</table>
+
+<p><b>DEVIATIONS (IF ANY):</b></p>
+<p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Deviation (If any)</th>
+    <th>Corrective Actions</th>
+    <th>Preventive Actions</th>
+  </tr>
+  <tr>
+    <td><input name="layout_deviation_1" style="width:100%;" /></td>
+    <td><input name="layout_corrective_1" style="width:100%;" /></td>
+    <td><input name="layout_preventive_1" style="width:100%;" /></td>
+  </tr>
+  <tr>
+    <td><input name="layout_deviation_2" style="width:100%;" /></td>
+    <td><input name="layout_corrective_2" style="width:100%;" /></td>
+    <td><input name="layout_preventive_2" style="width:100%;" /></td>
+  </tr>
+</table>
+<p><b>Comments:</b></p>
+<textarea name="layout_comments" style="width:100%; resize:vertical; min-height:80px; padding:8px;"></textarea>
+<p>Verified By: <input type="text" name="layout_verified_by" style="width:200px;" /></p>
+
+<!-- ================= 9.0 ACCEPTANCE CRITERIA ================= -->
+<h4>9.0 ACCEPTANCE CRITERIA</h4>
+<p>
+  Facility/Area shall be considered qualified when all the conditions specified in the test data sheets, have been met.
+</p>
+<p>Any deviation from the acceptance criteria of the specific check point shall be reported and the reason for the deviation shall be justified and recorded.</p>
+
+<!-- ================= 10.0 ATTACHMENTS ================= -->
+<!-- FIX #9: heading was missing section number "10.0" -->
+<h4>10.0 ATTACHMENTS</h4>
+<p>List of attachments:</p>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th style="width:5%;">No.</th>
+    <th style="width:50%;">Attachment Name</th>
+    <th style="width:45%;">Upload File</th>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td><input name="attachment_name_1" style="width:100%;" /></td>
+    <td><input type="file" name="attachment_file_1" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><input name="attachment_name_2" style="width:100%;" /></td>
+    <td><input type="file" name="attachment_file_2" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><input name="attachment_name_3" style="width:100%;" /></td>
+    <td><input type="file" name="attachment_file_3" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+  </tr>
+</table>
+
+<!-- ================= 11.0 DEFICIENCY ================= -->
+<h4>11.0 DEFICIENCY (IF ANY) AND CORRECTIVE ACTION REPORT</h4>
+
+<p>Description of deficiency and date observed:</p>
+<textarea name="deficiency_description" style="width:100%; height:80px;"></textarea>
+
+<p>Person, responsible for corrective action and date assigned:</p>
+<textarea name="deficiency_responsible_person" style="width:100%; height:80px;"></textarea>
+
+<p>Corrective actions taken and date conducted:</p>
+<textarea name="deficiency_corrective_action" style="width:100%; height:80px;"></textarea>
+
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Conducted By:</th>
+    <th>Approved By (QA)</th>
+    <th>Date</th>
+  </tr>
+  <tr>
+    <td><input name="deficiency_conducted_by" style="width:100%;" /></td>
+    <td><input name="deficiency_approved_by_qa" style="width:100%;" /></td>
+    <td><input type="date" name="deficiency_date" /></td>
+  </tr>
+</table>
+
+<p>Remarks:</p>
+<textarea name="deficiency_remarks" style="width:100%; resize:vertical; min-height:80px; padding:8px;"></textarea>
+<p>Verified By: <input type="text" name="deficiency_verified_by" style="width:200px;" /></p>
+<p>Name: <input type="text" name="deficiency_verified_name" style="width:200px;" /></p>
+<p>Date: <input type="date" name="deficiency_verified_date" /></p>
+
+<!-- ================= 12.0 SUMMARY ================= -->
+<h4>12.0 SUMMARY AND EVALUATION OF RESULTS</h4>
+<table border="1" style="width:100%; border-collapse:collapse;">
+  <tr>
+    <th>Checks</th>
+    <th>Observations Yes / No</th>
+    <th>Remarks (if any)</th>
+  </tr>
+  <tr>
+    <td>Whether the acceptance criteria and specific checkpoints are met.</td>
+    <td><input name="summary_criteria_met" style="width:100%;" /></td>
+    <td><input name="summary_remarks" style="width:100%;" /></td>
+  </tr>
+</table>
+
+<!-- ================= 13.0 CONCLUSION ================= -->
+<h4>13.0 CONCLUSION</h4>
+<textarea name="conclusion_details" style="width:100%; height:100px;"></textarea>
+
+<!-- ================= 14.0 POST-APPROVAL ================= -->
+<h3>14.0 POST APPROVAL</h3>
+
+<!-- COMPILED BY -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr>
+    <th style="width:30%;">Compiled By</th>
+    <th style="width:40%;">Name &amp; Designation</th>
+    <th style="width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td>Validation</td>
+    <td>
+      <!-- FIX #5: was reusing prepared_by_name → post_compiled_by_validation_name -->
+      <select name="post_compiled_by_validation_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="post_compiled_by_validation_signature" style="width:100%;" /><br />
+      <input type="date" name="post_compiled_by_validation_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+</table>
+
+<!-- CHECKED BY -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr>
+    <th style="width:30%;">Checked By</th>
+    <th style="width:40%;">Name &amp; Designation</th>
+    <th style="width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td>Engineering</td>
+    <td>
+      <!-- FIX #5: all 3 rows were reusing prepared_by_name → unique post_checked_by_* names -->
+      <select name="post_checked_by_engineering_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="post_checked_by_engineering_signature" style="width:100%;" /><br />
+      <input type="date" name="post_checked_by_engineering_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+  <tr>
+    <td>Initiating department</td>
+    <td>
+      <select name="post_checked_by_initiating_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="post_checked_by_initiating_signature" style="width:100%;" /><br />
+      <input type="date" name="post_checked_by_initiating_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+  <tr>
+    <td>Validation</td>
+    <td>
+      <select name="post_checked_by_validation_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="post_checked_by_validation_signature" style="width:100%;" /><br />
+      <input type="date" name="post_checked_by_validation_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+</table>
+
+<!-- APPROVED BY -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+  <tr>
+    <th style="width:30%;">Approved By</th>
+    <th style="width:40%;">Name &amp; Designation</th>
+    <th style="width:30%;">Signature &amp; Date</th>
+  </tr>
+  <tr>
+    <td>Quality Assurance</td>
+    <td>
+      <!-- FIX #5: was reusing prepared_by_name → post_approved_by_quality_name -->
+      <select name="post_approved_by_quality_name" data-options="users" style="width:100%;">
+        <option value="">Select user</option>
+      </select>
+    </td>
+    <td>
+      <input name="post_approved_by_quality_signature" style="width:100%;" /><br />
+      <input type="date" name="post_approved_by_quality_date" style="width:100%; margin-top:6px;" />
+    </td>
+  </tr>
+</table>
+
+</div>

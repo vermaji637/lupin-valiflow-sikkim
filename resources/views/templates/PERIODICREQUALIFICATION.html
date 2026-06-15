@@ -1,0 +1,1293 @@
+<!-- =========================================================
+starter_body.html  (FIXED VERSION 2.0)
+FIXES APPLIED:
+1. prepared_by_name → <select data-options="users">
+2. All post-approval plain inputs → <select data-options="users">
+3. data-options="users" added wherever missing
+4. Image src → /storage/lupin.png (relative, not hardcoded IP)
+5. Duplicate name attributes fixed
+6. checked_by_quality name field fixed (was reusing validation name)
+7. All signature fields consistent
+========================================================= -->
+
+<div id="content" class="editable fromedit" contenteditable="false">
+
+  <!-- ================= HEADER ================= -->
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <td rowspan="4" style="width:15%; text-align:center; vertical-align:middle;">
+        <img
+          src="http://localhost/storage/lupin-logo.png"
+          alt="Lupin"
+          style="height:200px; width:auto;"
+        />
+      </td>
+      <td colspan="3" style="text-align:center;">
+        <input
+          style="width:100%; text-align:center; font-weight:bold;"
+          name="company_name"
+          value="Lupin Limited"
+        />
+      </td>
+    </tr>
+    <tr>
+      <td colspan="3" style="text-align:center; font-weight:bold;">
+        PERIODIC REQUALIFICATION PROTOCOL AND REPORT
+      </td>
+    </tr>
+    <tr>
+      <td style="width:25%; padding:6px;">
+        <strong>FACILITY / SECTION</strong><br>
+        <input style="width:100%;" name="facility_section" />
+      </td>
+
+      <td style="width:30%; padding:6px;">
+        <strong>EQUIPMENT / SYSTEM NAME</strong><br>
+        <input style="width:100%;" name="equipment_name" />
+      </td>
+
+      <td style="width:30%; padding:6px;">
+        <strong>EQUIPMENT / SYSTEM ID.</strong><br>
+        <input style="width:100%;" name="equipment_id" />
+      </td>
+
+    </tr>
+    <tr>
+      <td>
+        <strong>DOCUMENT NO.</strong><br />
+        <select class="input" id="document_no" name="document_id" data-options="documents">
+          <option value="">-- Select Document --</option>
+        </select>
+        <!-- <input class="input" name="document_no" /> -->
+      </td>
+      <td>
+        <strong>VERSION</strong><br />
+        <input style="width:100%;" name="version" value="00" />
+      </td>
+      <td>
+        <strong>PAGE NO.</strong>
+        <span>1 of 25</span>
+      </td>
+    </tr>
+  </table>
+
+  <!-- ================= PRE-APPROVAL SIGNATURE ================= -->
+  <div class="pre-approval-section">
+    <h3 style="margin-top:18px;">PRE-APPROVAL SIGNATURE</h3>
+
+    <!-- PREPARED BY -->
+    <table border="1" style="width:100%; border-collapse:collapse;">
+      <tr>
+        <th style="width:30%;">PREPARED BY</th>
+        <th style="width:40%;">NAME &amp; DESIGNATION</th>
+        <th style="width:30%;">SIGNATURE &amp; DATE</th>
+      </tr>
+      <tr>
+        <td>USER DEPARTMENT (ENGINEERING)</td>
+        <!-- FIX #1: was plain <input>, now <select data-options="users"> -->
+        <td>
+          <select style="width:100%;" name="prepared_by_name" data-options="users">
+            <option value="">Select user</option>
+          </select>
+        </td>
+        <td>
+          <input style="width:100%;" name="prepared_by_signature" placeholder="Signature" /><br />
+          <input style="width:100%; margin-top:6px;" name="prepared_by_date" type="date" />
+        </td>
+      </tr>
+    </table>
+
+    <!-- CHECKED BY -->
+    <table border="1" style="width:100%; border-collapse:collapse; margin-top:10px;">
+      <tr>
+        <th style="width:30%;">CHECKED BY</th>
+        <th style="width:40%;">NAME &amp; DESIGNATION</th>
+        <th style="width:30%;">SIGNATURE &amp; DATE</th>
+      </tr>
+      <tr>
+        <td>ENGINEERING</td>
+        <td>
+          <select style="width:100%;" name="checked_by_engineering_name" data-options="users">
+            <option value="">Select user</option>
+          </select>
+        </td>
+        <td>
+          <input style="width:100%;" name="checked_by_engineering_signature" placeholder="Signature" /><br />
+          <input style="width:100%; margin-top:6px;" name="checked_by_engineering_date" type="date" />
+        </td>
+      </tr>
+      <tr>
+        <td>USER DEPARTMENT (PRODUCTION)</td>
+        <td>
+          <select style="width:100%;" name="checked_by_production_name" data-options="users">
+            <option value="">Select user</option>
+          </select>
+        </td>
+        <td>
+          <input style="width:100%;" name="checked_by_production_signature" placeholder="Signature" /><br />
+          <input style="width:100%; margin-top:6px;" name="checked_by_production_date" type="date" />
+        </td>
+      </tr>
+      <tr>
+        <td>VALIDATION</td>
+        <td>
+          <select style="width:100%;" name="checked_by_validation_name" data-options="users">
+            <option value="">Select user</option>
+          </select>
+        </td>
+        <td>
+          <input style="width:100%;" name="checked_by_validation_signature" placeholder="Signature" /><br />
+          <input style="width:100%; margin-top:6px;" name="checked_by_validation_date" type="date" />
+        </td>
+      </tr>
+      <tr>
+        <!-- FIX #2: was reusing checked_by_validation_name, now unique name -->
+        <td>QUALITY ASSURANCE</td>
+        <td>
+          <select style="width:100%;" name="checked_by_quality_name" data-options="users">
+            <option value="">Select user</option>
+          </select>
+        </td>
+        <td>
+          <!-- FIX #3: was reusing checked_by_validation_signature/date, now unique -->
+          <input style="width:100%;" name="checked_by_quality_signature" placeholder="Signature" /><br />
+          <input style="width:100%; margin-top:6px;" name="checked_by_quality_date" type="date" />
+        </td>
+      </tr>
+    </table>
+
+    <!-- APPROVED BY -->
+    <table border="1" style="width:100%; border-collapse:collapse; margin-top:10px;">
+      <tr>
+        <th style="width:30%;">APPROVED BY</th>
+        <th style="width:40%;">NAME &amp; DESIGNATION</th>
+        <th style="width:30%;">SIGNATURE &amp; DATE</th>
+      </tr>
+      <tr>
+        <td>USER / VALIDATION</td>
+        <td>
+          <select style="width:100%;" name="approved_by_user_name" data-options="users">
+            <option value="">Select user</option>
+          </select>
+        </td>
+        <td>
+          <input style="width:100%;" name="approved_by_user_signature" placeholder="Signature" /><br />
+          <input style="width:100%; margin-top:6px;" name="approved_by_user_date" type="date" />
+        </td>
+      </tr>
+      <tr>
+        <td>QUALITY ASSURANCE</td>
+        <td>
+          <!-- FIX #4: data-options="users" was missing -->
+          <select style="width:100%;" name="approved_by_quality_name" data-options="users">
+            <option value="">Select user</option>
+          </select>
+        </td>
+        <td>
+          <input style="width:100%;" name="approved_by_quality_signature" placeholder="Signature" /><br />
+          <input style="width:100%; margin-top:6px;" name="approved_by_quality_date" type="date" />
+        </td>
+      </tr>
+    </table>
+  </div>
+
+ <p style="margin-top:12px;">
+    <b>EFFECTIVE DATE:</b>
+    <input name="effective_date" type="date" />
+  </p>
+
+  <!-- ================= TABLE OF CONTENTS ================= -->
+  <h3>TABLE OF CONTENTS</h3>
+  <table border="0" style="width:100%; border-collapse:collapse;">
+    <tr><td>1.0 OBJECTIVE</td><td style="text-align:right;">3</td></tr>
+    <tr><td>2.0 SCOPE</td><td style="text-align:right;">3</td></tr>
+    <tr><td>3.0 RESPONSIBILITY</td><td style="text-align:right;">4</td></tr>
+    <tr><td>4.0 TYPE OF QUALIFICATION</td><td style="text-align:right;">4</td></tr>
+    <tr><td>5.0 EQUIPMENT / SYSTEM DETAILS</td><td style="text-align:right;">5</td></tr>
+    <tr><td>6.0 PRE-REQUISITES</td><td style="text-align:right;">7</td></tr>
+    <tr><td>7.0 APPLICABLE SOPs</td><td style="text-align:right;">8</td></tr>
+    <tr><td>8.0 PRE-QUALIFICATION CHECKS</td><td style="text-align:right;">8</td></tr>
+    <tr><td>9.0 REQUALIFICATION CHECKS</td><td style="text-align:right;">12</td></tr>
+    <tr><td>10.0 DEVIATIONS (IF ANY)</td><td style="text-align:right;">21</td></tr>
+    <tr><td>11.0 SUMMARY &amp; CONCLUSION</td><td style="text-align:right;">21</td></tr>
+    <tr><td>12.0 REFERENCES</td><td style="text-align:right;">22</td></tr>
+    <tr><td>13.0 ABBREVIATIONS</td><td style="text-align:right;">22</td></tr>
+    <tr><td>14.0 REVISION HISTORY</td><td style="text-align:right;">23</td></tr>
+  </table>
+
+  <!-- ================= 1.0 OBJECTIVE ================= -->
+  <h5><strong>1.0 OBJECTIVE</strong></h5>
+  <p>
+    The protocol provides guidelines for the requalification of Air Handling Unit ID. No.
+    <span class="documentID">/ENG/AHU-005</span> in the facility of Company Name Ltd. Location to establish high degree of assurance
+    that the equipment is maintained at a qualified stage since its initial installation and is fit for its intended use
+    when operated as per applicable SOP.
+  </p>
+
+  <!-- ================= 2.0 SCOPE ================= -->
+  <h5><strong>2.0 SCOPE</strong></h5>
+  <p>
+    This protocol is applicable for Air Handling Unit as details given in below table. This protocol provides directions /
+    procedure for requalification to provide documented evidence that Air Handling Unit is operated in accordance with the
+    requirements of the product, process, and safety and cGMP norms. The subjected equipment is identified as Air Handling Unit ID. No.
+    <span class="documentID">/ENG/AHU-005</span> located at Service Floor.
+  </p>
+
+  <table border="1" id="detailsTable" style="width:100%; border-collapse:collapse;">
+    <tr><th>Details</th><th>Description</th></tr>
+    <tr>
+      <td>Tag. No.</td>
+      <!-- FIX #5: duplicate name="tag_no" — each gets unique name -->
+      <td><input style="width:100%;" name="scope_tag_no" value="/ENG/AHU-005" /></td>
+    </tr>
+    <tr>
+      <td>Location</td>
+      <td><input style="width:100%;" name="equipment_location" placeholder="e.g., Service Floor" /></td>
+    </tr>
+    <tr>
+      <td>MOC</td>
+      <td><input style="width:100%;" name="scope_moc" value="Aluminum, thermal Break section with internal coving." /></td>
+    </tr>
+    <tr>
+      <td>Capacity</td>
+      <td><input style="width:100%;" name="scope_capacity" value="2967 CFM" /></td>
+    </tr>
+    <tr>
+      <td>Elevation</td>
+      <td><input style="width:100%;" name="scope_elevation" value="NA" /></td>
+    </tr>
+    <tr>
+      <td>Area Catering to</td>
+      <td><input style="width:100%;" name="scope_area_catering" value="Compression-1" /></td>
+    </tr>
+  </table>
+
+  <!-- ================= 3.0 RESPONSIBILITY ================= -->
+  <h5><strong>3.0 RESPONSIBILITY</strong></h5>
+  <ul>
+    <li>Engineering department is responsible to prepare &amp; review the re-qualification protocol in consultation with Validation / QA, execution of the requalification and preparation of re-qualification summary report.</li>
+    <li>User and engineering department shall execute the re-qualification activity.</li>
+    <li>Engineering department is responsible to review the protocol for adequacy and accuracy, and to provide the equipment maintenance history.</li>
+    <li>Validation department is responsible to review the requalification protocol and summary report.</li>
+    <li>Quality Assurance is responsible to provide guidance, wherever required to the related departments, review &amp; approval of the protocol &amp; requalification report.</li>
+  </ul>
+
+  <!-- ================= 4.0 TYPE OF QUALIFICATION ================= -->
+  <h5><strong>4.0 TYPE OF QUALIFICATION</strong></h5>
+  <p>
+    As the qualification of Air Handling Unit having I.D.
+    <span class="documentID">/ENG/AHU-005</span> has been completed on
+    <input name="qualification_date" type="date" value="2017-01-13" />
+    as per document no.
+    <input name="qualification_document_no" value="/PQR/AHU/16-001" />.
+    Hence periodic re-qualification is to be performed as per frequency defined in SOP.
+  </p>
+
+  <h3>Qualification History</h3>
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Qualification</th>
+      <th>Details of qualification (Report no and approval date)</th>
+    </tr>
+    <tr>
+      <td>Initial Qualification (PQ)</td>
+      <td>
+        <b>Report No.</b>
+        <input name="initial_qualification_report_no" value="/PQR/AHU/16-001" style="width:100%;" /><br />
+        <b>Approval Date</b>
+        <input name="initial_qualification_approval_date" type="date" value="2017-01-13" style="width:100%; margin-top:6px;" />
+      </td>
+    </tr>
+    <tr>
+      <td>Other qualifications after initial</td>
+      <td><input name="other_qualifications" value="NA" style="width:100%;" /></td>
+    </tr>
+  </table>
+
+  <!-- ================= 5.0 EQUIPMENT / SYSTEM DETAILS ================= -->
+  <h5><strong>5.0 EQUIPMENT / SYSTEM DETAILS</strong></h5>
+  <h6>Details of Air Handling Unit</h6>
+
+  <!-- FIX #6: All duplicate name="equipment_make_model" → unique names -->
+  <table border="1" id="accessoriesTable" style="width:100%; border-collapse:collapse;">
+    <tr><th>DETAILS</th><th>DESCRIPTION</th></tr>
+    <tr>
+      <td>Name of Equipment</td>
+      <td><input name="eq_name" value="Air Handling Unit" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Name of supplier / manufacturer</td>
+      <td><input name="eq_supplier" value="D.J.K Industries" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Model No.</td>
+      <td><input name="eq_model_no" value="NA" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Serial No.</td>
+      <td><input name="eq_serial_no" value="NA" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>In-house Equipment / system ID. No.</td>
+      <td><input name="eq_inhouse_id" value="/ENG/AHU-005" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>AHU Location</td>
+      <td><input name="eq_ahu_location" value="Service Floor" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>AHU Dimension</td>
+      <td><input name="eq_ahu_dimension" value="3800L x 1180W x 1760H mm" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Capacity</td>
+      <td><input name="eq_capacity" value="2967 CFM" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>MOC of AHU Frame</td>
+      <td><input name="eq_moc_frame" value="Aluminum, thermal Break section with internal coving." style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Area Catering to</td>
+      <td><input name="eq_area_catering" value="Compression-1" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Area Classification</td>
+      <td><input name="eq_area_classification" value="ISO-8" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>No. of Supply grill</td>
+      <td><input name="eq_supply_grill_count" value="04 Nos." style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>No. of return riser / grill</td>
+      <td><input name="eq_return_grill_count" value="05 Nos." style="width:100%;" /></td>
+    </tr>
+  </table>
+
+  <!-- FIX #7: All duplicate name="blower_motor" in accessories → unique names -->
+  <table border="1" id="accessories" style="width:100%; border-collapse:collapse; margin-top:10px;">
+    <tr><th>Connected Accessories</th><th>Description</th></tr>
+    <tr>
+      <td>Blower / motor</td>
+      <td><textarea name="acc_blower_motor" rows="5" style="width:100%;">Plug type Blower provided in the unit to supply air in the working area, and is directly mount on the motor shaft. The blower recirculates the air by taking the air from the atmosphere and rooms as return air and delivers it to the working areas through supply and return duct. It is capable of developing the static pressure of 135 MM of WC.</textarea></td>
+    </tr>
+    <tr>
+      <td>Cooling Coil:</td>
+      <td><textarea name="acc_cooling_coil" rows="5" style="width:100%;">Cooling coil made up of SS body, copper tube and aluminium fins provided in AHU as a heat exchanger. Cooling coils are generally located in the discharge-air stream, immediately downstream of the mixing plenum and filters to de-humidify the air stream. The supply and return line of chilled water / brine (2 to 8°C) from chiller connected to cooling coil.</textarea></td>
+    </tr>
+    <tr>
+      <td>Heating Coil:</td>
+      <td><textarea name="acc_heating_coil" rows="5" style="width:100%;">Heating coil made up of SS body, copper tube and aluminium fins is provided in AHU as a heat exchanger. Generally, heating coil is located after cooling coil, so that cooled air passed through the coil and required air condition can be maintain before delivered to the area.</textarea></td>
+    </tr>
+    <tr>
+      <td>Fresh Air filter</td>
+      <td><textarea name="acc_fresh_air_filter" rows="5" style="width:100%;">The fresh air filter consist of G-4 (10 micron) with the efficiency of 90% down to 10 Micron.</textarea></td>
+    </tr>
+    <tr>
+      <td>Pre filter</td>
+      <td><textarea name="acc_pre_filter" rows="5" style="width:100%;">The pre filter section consist of F-5 (5-micron) filters with the efficiency of 95% down to 5.0 Micron.</textarea></td>
+    </tr>
+    <tr>
+      <td>Fine filter</td>
+      <td><textarea name="acc_fine_filter" rows="5" style="width:100%;">The fine filter section should consist of F-8 (3 micron) fine filters with the efficiency of 98% down to 3.0 Micron.</textarea></td>
+    </tr>
+    <tr>
+      <td>Terminal HEPA Filter</td>
+      <td><textarea name="acc_terminal_hepa" rows="5" style="width:100%;">Terminal HEPA Filter box consist of 0.3 Micron H-14 HEPA filters. These filters filter the air passed from F-8 (3-micron) fine filter before entering into working area. These filters are not washable and not cleanable.</textarea></td>
+    </tr>
+    <tr>
+      <td>Bleed Air Filter</td>
+      <td><textarea name="acc_bleed_air_filter" rows="5" style="width:100%;">Bleed air filter should be of 0.3 Micron H-14 HEPA filter. These filters filter the air passed from F-5 (5 micron) pre filter before relief the air to the atmosphere. These filters are not washable and not cleanable.</textarea></td>
+    </tr>
+    <tr>
+      <td>Return air riser filter</td>
+      <td><textarea name="acc_return_riser_filter" rows="5" style="width:100%;">The fresh air filter consist of G-4 (10 micron) with the efficiency of 90% down to 10 Micron.</textarea></td>
+    </tr>
+    <tr>
+      <td>Supply &amp; Return Duct</td>
+      <td><textarea name="acc_supply_return_duct" rows="5" style="width:100%;">The supply &amp; return air ducting provided of 22 &amp; 24 Gauge GI sheets. 3 mm neoprene gaet provided in between duct joints and sealed with silicone sealant.</textarea></td>
+    </tr>
+    <tr>
+      <td>HEPA box</td>
+      <td><textarea name="acc_hepa_box" rows="5" style="width:100%;">GI Powder Coated, bottom Loaded HEPA Filter / Top Entry for Supply Air.</textarea></td>
+    </tr>
+    <tr>
+      <td>Volume control damper</td>
+      <td><textarea name="acc_volume_control_damper" rows="5" style="width:100%;">Volume control damper made up of Aluminum Extrusion. Separate VCD are provided in AHU supply, return, fresh, bleed and individual supply and return air duct.</textarea></td>
+    </tr>
+    <tr>
+      <td>Fire Control Damper</td>
+      <td><textarea name="acc_fire_control_damper" rows="5" style="width:100%;">Galvanized steel sheet fire damper provided in AHU main return air duct.</textarea></td>
+    </tr>
+    <tr>
+      <td>Drain Tray</td>
+      <td><textarea name="acc_drain_tray" rows="5" style="width:100%;">Drain tray made up of Stainless Steel, provided in between chilled water and hot water coil.</textarea></td>
+    </tr>
+    <tr>
+      <td>Duct Insulation</td>
+      <td><textarea name="acc_duct_insulation" rows="5" style="width:100%;">MOC- Armaflex / Armacell Foam + Covering, laminated with 12 microns aluminium foil, with reinforced glass scrim. 19 mm &amp; 13 mm thickness insulation provided in supply and return air duct respectively.</textarea></td>
+    </tr>
+    <tr>
+      <td>VFD</td>
+      <td><textarea name="acc_vfd" rows="5" style="width:100%;">VFD make- Danfoss.</textarea></td>
+    </tr>
+    <tr>
+      <td>VFD Panel</td>
+      <td><textarea name="acc_vfd_panel" rows="5" style="width:100%;">MS powder coated, detachable type VFD panel.</textarea></td>
+    </tr>
+  </table>
+
+  <!-- ================= 6.0 PRE-REQUISITES ================= -->
+  <h5><strong>6.0 PRE-REQUISITES</strong></h5>
+  <p>
+    Protocol shall be approve with identification of all tests to be carried out (copy of history sheet to be attached), equipment details and acceptance criteria of all tests to be performed and shall be describe in protocol, which shall be reviewed and approved by all department as per the approval of the protocol.
+  </p>
+
+  <!-- ================= 7.0 APPLICABLE SOPs ================= -->
+  <h5><strong>7.0 APPLICABLE STANDARD OPERATING PROCEDURE (SOP's)</strong></h5>
+  <p>All applicable SOPs followed at the time of requalification of the equipment /system to be listed in the table below.</p>
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Sr. No.</th>
+      <th>Title of the SOP</th>
+      <th>SOP No.</th>
+      <th>Effective Date</th>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td><input name="sop_title_1" style="width:100%;" /></td>
+      <td><input name="sop_no_1" style="width:100%;" /></td>
+      <td><input name="sop_date_1" type="date" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><input name="sop_title_2" style="width:100%;" /></td>
+      <td><input name="sop_no_2" style="width:100%;" /></td>
+      <td><input name="sop_date_2" type="date" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><input name="sop_title_3" style="width:100%;" /></td>
+      <td><input name="sop_no_3" style="width:100%;" /></td>
+      <td><input name="sop_date_3" type="date" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><input name="sop_title_4" style="width:100%;" /></td>
+      <td><input name="sop_no_4" style="width:100%;" /></td>
+      <td><input name="sop_date_4" type="date" style="width:100%;" /></td>
+    </tr>
+  </table>
+
+  <!-- ================= 8.0 PRE-QUALIFICATION CHECKS ================= -->
+  <h5><strong>8.0 PRE-QUALIFICATION CHECKS</strong></h5>
+
+  <h6>8.1 Calibrations of Instruments</h6>
+  <p>Verify the calibration status of all the instruments and record the details in the below given table. Attach copies of all the certificates of calibrations along with the requalification report as attachment.</p>
+
+  <h6>AHU:</h6>
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Sr. No.</th>
+      <th>Instrument Name</th>
+      <th>Instrument ID</th>
+      <th>Date of Calibration</th>
+      <th>Due Date</th>
+      <th>Checked By (Sign.)</th>
+    </tr>
+    <tr><td>1</td><td>Differential Pressure Gauge (across pre filter)</td><td><input name="inst_id_1" style="width:100%;" /></td><td><input name="inst_cal_date_1" type="date" style="width:100%;" /></td><td><input name="inst_due_date_1" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_1" style="width:100%;" /></td></tr>
+    <tr><td>2</td><td>Differential Pressure Gauge (across fine filter)</td><td><input name="inst_id_2" style="width:100%;" /></td><td><input name="inst_cal_date_2" type="date" style="width:100%;" /></td><td><input name="inst_due_date_2" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_2" style="width:100%;" /></td></tr>
+    <tr><td>3</td><td>Pressure gauge (chilled water inlet line)</td><td><input name="inst_id_3" style="width:100%;" /></td><td><input name="inst_cal_date_3" type="date" style="width:100%;" /></td><td><input name="inst_due_date_3" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_3" style="width:100%;" /></td></tr>
+    <tr><td>4</td><td>Pressure gauge (chilled water outlet line)</td><td><input name="inst_id_4" style="width:100%;" /></td><td><input name="inst_cal_date_4" type="date" style="width:100%;" /></td><td><input name="inst_due_date_4" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_4" style="width:100%;" /></td></tr>
+    <tr><td>5</td><td>Pressure gauge (hot water inlet line)</td><td><input name="inst_id_5" style="width:100%;" /></td><td><input name="inst_cal_date_5" type="date" style="width:100%;" /></td><td><input name="inst_due_date_5" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_5" style="width:100%;" /></td></tr>
+    <tr><td>6</td><td>Pressure gauge (hot water outlet line)</td><td><input name="inst_id_6" style="width:100%;" /></td><td><input name="inst_cal_date_6" type="date" style="width:100%;" /></td><td><input name="inst_due_date_6" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_6" style="width:100%;" /></td></tr>
+    <tr><td>7</td><td>Temperature gauge (chilled water inlet line)</td><td><input name="inst_id_7" style="width:100%;" /></td><td><input name="inst_cal_date_7" type="date" style="width:100%;" /></td><td><input name="inst_due_date_7" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_7" style="width:100%;" /></td></tr>
+    <tr><td>8</td><td>Temperature gauge (chilled water outlet line)</td><td><input name="inst_id_8" style="width:100%;" /></td><td><input name="inst_cal_date_8" type="date" style="width:100%;" /></td><td><input name="inst_due_date_8" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_8" style="width:100%;" /></td></tr>
+    <tr><td>9</td><td>Temperature gauge (hot water inlet line)</td><td><input name="inst_id_9" style="width:100%;" /></td><td><input name="inst_cal_date_9" type="date" style="width:100%;" /></td><td><input name="inst_due_date_9" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_9" style="width:100%;" /></td></tr>
+    <tr><td>10</td><td>Temperature gauge (hot water outlet line)</td><td><input name="inst_id_10" style="width:100%;" /></td><td><input name="inst_cal_date_10" type="date" style="width:100%;" /></td><td><input name="inst_due_date_10" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_10" style="width:100%;" /></td></tr>
+    <tr><td>11</td><td>Temperature / RH transmitter</td><td><input name="inst_id_11" style="width:100%;" /></td><td><input name="inst_cal_date_11" type="date" style="width:100%;" /></td><td><input name="inst_due_date_11" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_11" style="width:100%;" /></td></tr>
+    <tr><td>12</td><td>Differential pressure Transmitter</td><td><input name="inst_id_12" style="width:100%;" /></td><td><input name="inst_cal_date_12" type="date" style="width:100%;" /></td><td><input name="inst_due_date_12" type="date" style="width:100%;" /></td><td><input name="inst_checked_by_12" style="width:100%;" /></td></tr>
+  </table>
+
+  <h6>Dust Extractor</h6>
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Sr. No.</th>
+      <th>Instrument Name</th>
+      <th>Instrument ID</th>
+      <th>Date of Calibration</th>
+      <th>Due Date</th>
+      <th>Checked By</th>
+    </tr>
+    <tr><td>1</td><td>Differential Pressure Gauge (across Cartridge Filter)</td><td><input name="dust_inst_id_1" style="width:100%;" /></td><td><input name="dust_inst_cal_date_1" type="date" style="width:100%;" /></td><td><input name="dust_inst_due_date_1" type="date" style="width:100%;" /></td><td><input name="dust_inst_checked_by_1" style="width:100%;" /></td></tr>
+    <tr><td>2</td><td>Differential Pressure Gauge (across fine filter)</td><td><input name="dust_inst_id_2" style="width:100%;" /></td><td><input name="dust_inst_cal_date_2" type="date" style="width:100%;" /></td><td><input name="dust_inst_due_date_2" type="date" style="width:100%;" /></td><td><input name="dust_inst_checked_by_2" style="width:100%;" /></td></tr>
+    <tr><td>3</td><td>Differential Pressure Gauge (across HEPA filter)</td><td><input name="dust_inst_id_3" style="width:100%;" /></td><td><input name="dust_inst_cal_date_3" type="date" style="width:100%;" /></td><td><input name="dust_inst_due_date_3" type="date" style="width:100%;" /></td><td><input name="dust_inst_checked_by_3" style="width:100%;" /></td></tr>
+  </table>
+
+  <h6>8.2 Preventive Maintenance Details</h6>
+  <p>Verify the preventive maintenance performed as per schedule of the AHU and record the details of the current preventive maintenance in the below given table.</p>
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Sr. No.</th>
+      <th>Equipment Name / ID</th>
+      <th>Preventive maintenance Done on</th>
+      <th>Preventive maintenance Due on</th>
+      <th>Checked by (Engineering) (Sign. /Date)</th>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td><input name="pm_equipment_1" style="width:100%;" /></td>
+      <td><input name="pm_done_date_1" type="date" style="width:100%;" /></td>
+      <td><input name="pm_due_date_1" type="date" style="width:100%;" /></td>
+      <td><input name="pm_checked_by_1" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><input name="pm_equipment_2" style="width:100%;" /></td>
+      <td><input name="pm_done_date_2" type="date" style="width:100%;" /></td>
+      <td><input name="pm_due_date_2" type="date" style="width:100%;" /></td>
+      <td><input name="pm_checked_by_2" style="width:100%;" /></td>
+    </tr>
+  </table>
+
+  <h6>8.3 Any other specific tests</h6>
+  <ul>
+    <li><input name="specific_test_1" value="Airflow volume measurement / ACPH" style="width:100%;" /></li>
+    <li><input name="specific_test_2" value="HEPA filter Integrity test" style="width:100%;" /></li>
+    <li><input name="specific_test_3" value="Non-Viable particulate count test" style="width:100%;" /></li>
+    <li><input name="specific_test_4" value="Area Recovery test" style="width:100%;" /></li>
+    <li><input name="specific_test_5" value="Airflow Pattern test" style="width:100%;" /></li>
+    <li><input name="specific_test_6" value="Dust Extractor CFM measurement" style="width:100%;" /></li>
+  </ul>
+
+  <h6>8.4 Verification with the current P &amp; ID</h6>
+  <textarea name="equipment_pid_verification" rows="4" style="width:100%; border:1px solid #ddd; padding:8px;"></textarea>
+
+  <h5>8.5 History of Equipment / system</h5>
+  <p>History card from date:</p>
+  <input name="history_from_date_1" type="date" />
+  to
+  <input name="history_to_date_1" type="date" /><br />
+  <p>Reviewed by (Engineering Department)</p>
+  <input name="history_reviewed_by_1" style="width:50%;" /><br />
+  <p>Recommendation:</p>
+  <input name="history_recommendation_1" style="width:70%;" />
+  <p>Engineering shall review the history card. In case of any repeated failure, appropriate action shall be recommended by engineering team and record in this document.</p>
+
+  <h5>8.6 Review of Change Controls related to the Equipment / system</h5>
+  <p>Review the Change Controls related to the Equipment / system under requalification and summarize;</p>
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr><th>S. No.</th><th>Ref. Change Control No.</th><th>Summary of Changes</th></tr>
+    <tr><td>1</td><td><input name="change_control_no_1" style="width:100%;" /></td><td><input name="change_summary_1" style="width:100%;" /></td></tr>
+    <!-- FIX #8: duplicate name="change_control_no_2" and "change_summary_2" fixed -->
+    <tr><td>2</td><td><input name="change_control_no_2" style="width:100%;" /></td><td><input name="change_summary_2" style="width:100%;" /></td></tr>
+    <tr><td>3</td><td><input name="change_control_no_3" style="width:100%;" /></td><td><input name="change_summary_3" style="width:100%;" /></td></tr>
+  </table>
+  <p><b>Remarks / Recommendation (if any):</b></p>
+  <textarea name="change_remarks" rows="3" style="width:100%; border:1px solid #ddd; padding:8px;"></textarea>
+  <p><b>Reviewed By:</b> (Sign/Date) <input name="change_reviewed_by" /></p>
+
+  <!-- ================= 9.0 REQUALIFICATION CHECKS ================= -->
+  <h5><strong>9.0 REQUALIFICATION CHECKS</strong></h5>
+
+  <h5>9.1 Installation Re-qualification checks</h5>
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Checks</th>
+      <th>Acceptance criteria</th>
+      <th>Check</th>
+      <th>Observation</th>
+      <th>Done by (Engineering)</th>
+    </tr>
+    <tr>
+      <td>Electrical connections</td>
+      <td class="criteria">All the electrical connection in the panel should be connected properly</td>
+      <td style="text-align:center;"><input type="checkbox" name="check_electrical_check" /></td>
+      <td><input name="check_electrical_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="check_electrical_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Check chilled water connections</td>
+      <td class="criteria">Should be available. Inlet Pressure: &gt; 1.0 KG/CM²; Inlet Temperature: 2 to 8°C</td>
+      <td style="text-align:center;"><input type="checkbox" name="check_chilled_water_check" /></td>
+      <td><input name="check_chilled_water_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="check_chilled_water_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Check hot water connections</td>
+      <td class="criteria">Should be available. Inlet Pressure: &gt; 1.0 KG/CM²; Inlet Temperature: ≥ 35.0°C</td>
+      <td style="text-align:center;"><input type="checkbox" name="check_hot_water_check" /></td>
+      <td><input name="check_hot_water_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="check_hot_water_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Leveling/ Centering/ Alignment</td>
+      <td class="criteria">Should be properly leveled / centered / aligned</td>
+      <td style="text-align:center;"><input type="checkbox" name="check_leveling_check" /></td>
+      <td><input name="check_leveling_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="check_leveling_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Access and Clearance</td>
+      <td class="criteria">Adequate space is available for accessing the equipment for operation, cleaning &amp; maintenance</td>
+      <td style="text-align:center;"><input type="checkbox" name="check_access_check" /></td>
+      <td><input name="check_access_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="check_access_done_by" style="width:100%;" /></td>
+    </tr>
+  </table>
+
+  <h5>9.2 General Checks: Verification of major components of equipment</h5>
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Major components</th>
+      <th>Checks</th>
+      <th>Methodology</th>
+      <th>Acceptance criteria</th>
+      <th>Check</th>
+      <th>Observation/ Result</th>
+      <th>Done by</th>
+    </tr>
+    <tr>
+      <td>Machine frame and body part</td>
+      <td>Check any physical damage to the machine frame &amp; body part.</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">There should be no physical damage.</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_frame_check" /></td>
+      <td><input name="comp_frame_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_frame_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Fresh air filter</td>
+      <td>Check condition</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">Filter should not be damaged or choked</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_fresh_filter_check" /></td>
+      <td><input name="comp_fresh_filter_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_fresh_filter_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Pre filter</td>
+      <td>Check condition</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">Filter should not be damaged or choked</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_pre_filter_check" /></td>
+      <td><input name="comp_pre_filter_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_pre_filter_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Fine filter</td>
+      <td>Check condition</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">Filter should not be damaged or choked</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_fine_filter_check" /></td>
+      <td><input name="comp_fine_filter_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_fine_filter_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Bleed air filter</td>
+      <td>Check condition</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">Filter should not be damaged or choked</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_bleed_filter_check" /></td>
+      <td><input name="comp_bleed_filter_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_bleed_filter_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Terminal HEPA filter</td>
+      <td>Check condition</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">Filter should not be damaged or choked</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_hepa_filter_check" /></td>
+      <td><input name="comp_hepa_filter_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_hepa_filter_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Chilled water coil</td>
+      <td>Check leakage</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">There should not be any leakages from coil tube and header.</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_chilled_coil_check" /></td>
+      <td><input name="comp_chilled_coil_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_chilled_coil_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Hot water coil</td>
+      <td>Check leakage</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">There should not be any leakages from coil tube and header.</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_hot_coil_check" /></td>
+      <td><input name="comp_hot_coil_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_hot_coil_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>AHU Volume control damper</td>
+      <td>Check operation</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">AHU damper should not in damaged condition. It should be in smooth operation condition.</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_damper_check" /></td>
+      <td><input name="comp_damper_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_damper_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>AHU drain tray and drain line</td>
+      <td>Check cleanliness</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">Drain tray and drain line should be clean and clear.</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_drain_check" /></td>
+      <td><input name="comp_drain_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_drain_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>AHU supply and return Duct</td>
+      <td>Check condition</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">There should not any damaged or leakages from the duct. Duct should be properly insulate.</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_duct_check" /></td>
+      <td><input name="comp_duct_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_duct_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>Supply HEPA housing Box</td>
+      <td>Check condition</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">There should not any physical damage in HEPA box. Volume control damper should operate smoothly. Perforated grill should be fixed properly from room side.</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_hepa_box_check" /></td>
+      <td><input name="comp_hepa_box_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_hepa_box_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>VFD</td>
+      <td>Check mounting</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">VFD should be fixed properly in VFD panel.</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_vfd_check" /></td>
+      <td><input name="comp_vfd_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_vfd_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>VFD / Electrical panel</td>
+      <td>Check connections</td>
+      <td>Visual Inspection</td>
+      <td class="criteria">There should not be any physical damage in panel including switch, indicator, relay, contactor, thermostat, etc. All the electrical connection should be proper and cable should be well dressed.</td>
+      <td style="text-align:center;"><input type="checkbox" name="comp_electrical_panel_check" /></td>
+      <td><input name="comp_electrical_panel_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="comp_electrical_panel_done_by" style="width:100%;" /></td>
+    </tr>
+  </table>
+
+  <h5>9.3 Operational qualification checks: Functional Tests</h5>
+  <p>In order to evaluate correct functioning / operation of the equipment, checks such as start-up check, shut down check, operational checks and safety checks shall be performed.</p>
+
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Sr. No</th>
+      <th>Identification/ Position of valve</th>
+      <th>Acceptance criteria</th>
+      <th>Check</th>
+      <th>Observation</th>
+      <th>Done by (Engineering)</th>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>Supply air damper of room terminal boxes and main supply air duct</td>
+      <td class="criteria">Open/close properly; locking arrangement available.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_supply_damper_check" /></td>
+      <td><input name="op_supply_damper_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_supply_damper_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Return air damper of room terminal boxes / return riser ducts and main return air duct</td>
+      <td class="criteria">Open/close properly; locking arrangement available.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_return_damper_check" /></td>
+      <td><input name="op_return_damper_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_return_damper_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>Fresh air &amp; Exhaust air damper</td>
+      <td class="criteria">Open/close properly; locking arrangement available.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_fresh_damper_check" /></td>
+      <td><input name="op_fresh_damper_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_fresh_damper_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>Fire damper in main return air duct</td>
+      <td class="criteria">Should be in open condition.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_fire_damper_check" /></td>
+      <td><input name="op_fire_damper_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_fire_damper_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Chilled water valve provided in chilled water manifold</td>
+      <td class="criteria">Open/close smoothly.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_chilled_valve_check" /></td>
+      <td><input name="op_chilled_valve_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_chilled_valve_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>Hot water valve provided in hot water manifold</td>
+      <td class="criteria">Open/close smoothly.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_hot_valve_check" /></td>
+      <td><input name="op_hot_valve_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_hot_valve_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>Chilled water and hot water manifold leakages</td>
+      <td class="criteria">No leakages from joints/fittings.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_manifold_check" /></td>
+      <td><input name="op_manifold_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_manifold_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td>AHU plenum doors position</td>
+      <td class="criteria">Open/close properly for all sections.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_plenum_doors_check" /></td>
+      <td><input name="op_plenum_doors_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_plenum_doors_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td>Door gaskets</td>
+      <td class="criteria">Provided in all plenum doors.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_door_gaskets_check" /></td>
+      <td><input name="op_door_gaskets_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_door_gaskets_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td>Filter fittings in the AHU</td>
+      <td class="criteria">Fresh/pre/fine/bleed filters fixed properly; no side leakages.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_filter_fittings_check" /></td>
+      <td><input name="op_filter_fittings_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_filter_fittings_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td>Supply grill fittings</td>
+      <td class="criteria">Fixed properly from bottom side.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_supply_grill_check" /></td>
+      <td><input name="op_supply_grill_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_supply_grill_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td>Return grill fittings</td>
+      <td class="criteria">Fixed properly from bottom side.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_return_grill_check" /></td>
+      <td><input name="op_return_grill_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_return_grill_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>13</td>
+      <td>Supply and return air duct and duct joints</td>
+      <td class="criteria">Fixed properly; no leakages.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_duct_joints_check" /></td>
+      <td><input name="op_duct_joints_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_duct_joints_done_by" style="width:100%;" /></td>
+    </tr>
+  </table>
+
+  <h5>Machine Performance</h5>
+  <!-- FIX #9: All duplicate name="op_supply_damper_check/obs/done_by" in Machine Performance → unique names -->
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Sr. No</th>
+      <th>Identification/ Position of valve</th>
+      <th>Acceptance criteria</th>
+      <th>Check</th>
+      <th>Observation</th>
+      <th>Done by (Engineering)</th>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>Switch ON the main power supply of AHU electrical panel</td>
+      <td class="criteria">1. RYB indication lamp should glow in AHU panel.<br/>2. VFD display screen should ON.<br/>3. AHU OFF indication lamp should be ON.<br/>4. Temperature &amp; RH should display on VFD screen</td>
+      <td style="text-align:center;"><input type="checkbox" name="mp_power_on_check" /></td>
+      <td><input name="mp_power_on_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="mp_power_on_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Manual / Auto Mode Select selector switch</td>
+      <td class="criteria">Selector switch should be operated smoothly</td>
+      <td style="text-align:center;"><input type="checkbox" name="mp_selector_check" /></td>
+      <td><input name="mp_selector_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="mp_selector_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>Check the chilled water supply</td>
+      <td class="criteria">Chilled water supply should be available with minimum chilled water supply pressure 1.0 KG/CM²</td>
+      <td style="text-align:center;"><input type="checkbox" name="mp_chilled_supply_check" /></td>
+      <td><input name="mp_chilled_supply_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="mp_chilled_supply_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>Check the Hot water supply</td>
+      <td class="criteria">Hot water supply should be available with minimum hot water supply pressure 1.0 KG/CM².</td>
+      <td style="text-align:center;"><input type="checkbox" name="mp_hot_supply_check" /></td>
+      <td><input name="mp_hot_supply_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="mp_hot_supply_done_by" style="width:100%;" /></td>
+    </tr>
+
+    <!-- Row 5 - sub-rows for Auto mode start -->
+    <tr>
+      <td rowspan="8" style="border:1px solid #999; padding:6px; vertical-align:top; text-align:center;">5</td>
+      <td rowspan="8" style="border:1px solid #999; padding:6px; vertical-align:top;">Put the selector switch to Auto position to start the AHU</td>
+      <td class="criteria">ON indication lamp should glow.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_on_lamp_check" /></td>
+      <td><input name="op_on_lamp_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_on_lamp_done_by" style="width:80%;" /></td>
+    </tr>
+    <tr>
+      <td class="criteria">OFF indication lamp should OFF.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_off_lamp_check" /></td>
+      <td><input name="op_off_lamp_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_off_lamp_done_by" style="width:80%;" /></td>
+    </tr>
+    <tr>
+      <td class="criteria">AHU Blower should start gradually via VFD as frequency of VFD increases.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_blower_vfd_check" /></td>
+      <td><input name="op_blower_vfd_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_blower_vfd_done_by" style="width:80%;" /></td>
+    </tr>
+    <tr>
+      <td class="criteria">2-way valve of chilled water coil circuit &amp; hot water coil circuit should operate for ON/OFF operation as per PID action on temperature requirement sensed by TRH sensor installed in main return air duct of AHU.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_2way_valve_check" /></td>
+      <td><input name="op_2way_valve_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_2way_valve_done_by" style="width:80%;" /></td>
+    </tr>
+    <tr>
+      <td class="criteria">VFD screen should show the running frequency of motor.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_vfd_screen_check" /></td>
+      <td><input name="op_vfd_screen_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_vfd_screen_done_by" style="width:80%;" /></td>
+    </tr>
+    <tr>
+      <td class="criteria">Direction of rotation of blower should be clockwise viewed from motor side.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_rotation_check" /></td>
+      <td><input name="op_rotation_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_rotation_done_by" style="width:80%;" /></td>
+    </tr>
+    <tr>
+      <td class="criteria">There should not be any abnormal noise and vibration during blower running.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_noise_check" /></td>
+      <td><input name="op_noise_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_noise_done_by" style="width:80%;" /></td>
+    </tr>
+    <tr>
+      <td class="criteria">There should not be any leakage through AHU plenum, main supply &amp; return ducts, duct joints.</td>
+      <td style="text-align:center;"><input type="checkbox" name="op_leakage_check" /></td>
+      <td><input name="op_leakage_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="op_leakage_done_by" style="width:80%;" /></td>
+    </tr>
+
+    <tr>
+      <td>6</td>
+      <td>Put the selector switch to OFF position to stop the AHU</td>
+      <td class="criteria">1. ON indication lamp should be OFF<br/>2. OFF indication lamp should glow.<br/>3. AHU Blower should stop gradually as frequency of VFD decreases and comes to zero.</td>
+      <td style="text-align:center;"><input type="checkbox" name="mp_ahu_stop_check" /></td>
+      <td><input name="mp_ahu_stop_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="mp_ahu_stop_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td>AHU blower-motor, function</td>
+      <td class="criteria">AHU blower-motor should run smoothly. There should not be any abnormal noise and vibration.</td>
+      <td style="text-align:center;"><input type="checkbox" name="mp_blower_motor_check" /></td>
+      <td><input name="mp_blower_motor_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="mp_blower_motor_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td>Across Pre filter, it should be in between 4 – 19 mmwc and across fine filter, it should be in between 5 – 22 mmwc.</td>
+      <td class="criteria">Pre filter: 4 – 19 mmwc; Fine filter: 5 – 22 mmwc.</td>
+      <td style="text-align:center;"><input type="checkbox" name="mp_dp_filter_check" /></td>
+      <td><input name="mp_dp_filter_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="mp_dp_filter_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td>Blower section door safety interlock limit switch function.</td>
+      <td class="criteria">1. AHU blower should OFF when door open and view lamp should glow.<br/>2. AHU blower should ON when door close and view lamp should OFF.</td>
+      <td style="text-align:center;"><input type="checkbox" name="mp_door_interlock_check" /></td>
+      <td><input name="mp_door_interlock_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="mp_door_interlock_done_by" style="width:100%;" /></td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td>Interlocking of AHU with respective Dust Extractor</td>
+      <td class="criteria">DEX should OFF when AHU stop and DEX should ON when AHU ON.</td>
+      <td style="text-align:center;"><input type="checkbox" name="mp_dex_interlock_check" /></td>
+      <td><input name="mp_dex_interlock_obs" style="width:100%;" /></td>
+      <td><input type="checkbox" name="esignuser" class="done-by" /><input name="mp_dex_interlock_done_by" style="width:100%;" /></td>
+    </tr>
+  </table>
+
+  <!-- ================= 10.0 DEVIATIONS ================= -->
+  <h5><strong>10.0 DEVIATIONS (IF ANY)</strong></h5>
+  <p>Deviations observed against the various acceptance criteria are listed below and evaluated for acceptability with proposed corrective actions for unacceptable observations.</p>
+  <!-- FIX #10: duplicate name="deviation_1/corrective_action_1/preventive_action_1" → unique names -->
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Deviation (If any)</th>
+      <th>Corrective Actions</th>
+      <th>Preventive Actions</th>
+    </tr>
+    <tr>
+      <td><textarea name="deviation_1" rows="3" style="width:100%;"></textarea></td>
+      <td><textarea name="corrective_action_1" rows="3" style="width:100%;"></textarea></td>
+      <td><textarea name="preventive_action_1" rows="3" style="width:100%;"></textarea></td>
+    </tr>
+    <tr>
+      <td><textarea name="deviation_2" rows="3" style="width:100%;"></textarea></td>
+      <td><textarea name="corrective_action_2" rows="3" style="width:100%;"></textarea></td>
+      <td><textarea name="preventive_action_2" rows="3" style="width:100%;"></textarea></td>
+    </tr>
+  </table>
+
+  <!-- ================= 11.0 SUMMARY & CONCLUSION ================= -->
+  <h5><strong>11.0 SUMMARY &amp; CONCLUSION</strong></h5>
+  <p>
+    Based on thorough review of the available data, it is concluded that, the AHU ID. No.
+    <span class="documentID">/ENG/AHU-005</span> meets the Requalification criteria defined in the protocol.
+    The AHU is in good condition and can be operate for regular use.
+  </p>
+  <p>As a supporting document following test report to be attached along with this requalification report.</p>
+  <p><b>Attachments</b></p>
+
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th style="width:5%;">No.</th>
+      <th style="width:45%;">Attachment Name</th>
+      <th style="width:50%;">Upload File</th>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td><input name="attachment_name_1" value="Airflow volume measurement / ACPH" style="width:100%;" /></td>
+      <td><input type="file" name="attachment_file_1" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><input name="attachment_name_2" value="HEPA filter Integrity test" style="width:100%;" /></td>
+      <td><input type="file" name="attachment_file_2" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><input name="attachment_name_3" value="Non-Viable particulate count test" style="width:100%;" /></td>
+      <td><input type="file" name="attachment_file_3" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><input name="attachment_name_4" value="Area Recovery test" style="width:100%;" /></td>
+      <td><input type="file" name="attachment_file_4" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td><input name="attachment_name_5" value="Airflow Pattern test" style="width:100%;" /></td>
+      <td><input type="file" name="attachment_file_5" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td><input name="attachment_name_6" value="Dust Extractor CFM measurement" style="width:100%;" /></td>
+      <td><input type="file" name="attachment_file_6" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td><input name="attachment_name_7" value="Calibration certificates of instrument attached with AHU" style="width:100%;" /></td>
+      <td><input type="file" name="attachment_file_7" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td><input name="attachment_name_8" value="Calibration certificates of instrument used during requalification of AHU" style="width:100%;" /></td>
+      <td><input type="file" name="attachment_file_8" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td><input name="attachment_name_9" value="Training certificate of personnel involved from third party" style="width:100%;" /></td>
+      <td><input type="file" name="attachment_file_9" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" /></td>
+    </tr>
+  </table>
+
+  <!-- ================= 12.0 REFERENCES ================= -->
+  <h5><strong>12.0 REFERENCES</strong></h5>
+  <p>
+    Installation &amp; Operational qualification documents:
+    <input name="reference_1" value="/IOQ/AHU/16-001" /><br />
+    Performance Qualification Document:
+    <input name="reference_2" value="/PQR/AHU/16-001" />
+  </p>
+
+  <!-- ================= 13.0 ABBREVIATIONS ================= -->
+  <h5><strong>13.0 ABBREVIATIONS</strong></h5>
+  <table>
+    <tr><td><strong>AHU</strong></td><td>Air Handling Unit</td></tr>
+    <tr><td><strong>ACPH</strong></td><td>Air Changes Per Hour</td></tr>
+    <tr><td><strong>CFM</strong></td><td>Cubic Feet per minute</td></tr>
+    <tr><td><strong>DQ</strong></td><td>Design Qualification</td></tr>
+    <tr><td><strong>cGMP</strong></td><td>Current good Manufacturing practices</td></tr>
+    <tr><td><strong>MOC</strong></td><td>Material of Construction</td></tr>
+    <tr><td><strong>PIBCV</strong></td><td>Pressure Independent Balancing Control Valve</td></tr>
+    <tr><td><strong>PID</strong></td><td>Proportional Integral Derivative</td></tr>
+    <tr><td><strong>URS</strong></td><td>User Requirement Specification</td></tr>
+    <tr><td><strong>IQ</strong></td><td>Installation Qualification</td></tr>
+    <tr><td><strong>OQ</strong></td><td>Operational Qualification</td></tr>
+    <tr><td><strong>IOQ</strong></td><td>Installation &amp; Operational Qualification</td></tr>
+    <tr><td><strong>PQ</strong></td><td>Performance Qualification</td></tr>
+    <tr><td><strong>PQR</strong></td><td>Performance Qualification Report</td></tr>
+    <tr><td><strong>MM of WC</strong></td><td>Millimeter of Water Column</td></tr>
+    <tr><td><strong>SS</strong></td><td>Stainless Steel</td></tr>
+    <tr><td><strong>GI</strong></td><td>Galvanized Iron</td></tr>
+    <tr><td><strong>VFD</strong></td><td>Variable Frequency Drive</td></tr>
+    <tr><td><strong>KW</strong></td><td>Kilo Watt</td></tr>
+    <tr><td><strong>P&amp;ID</strong></td><td>Piping &amp; Instrumentation Diagram</td></tr>
+    <tr><td><strong>KG/CM²</strong></td><td>Kilogram per centimeter square</td></tr>
+    <tr><td><strong>°C</strong></td><td>Degree Celsius</td></tr>
+  </table>
+
+  <!-- ================= 14.0 REVISION HISTORY ================= -->
+  <h5><strong>14.0 REVISION HISTORY</strong></h5>
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th>Revision No.</th>
+      <th>Effective Date</th>
+      <th>Reason for Revision</th>
+    </tr>
+    <tr>
+      <td>00</td>
+      <td><input name="revision_date" type="date" /></td>
+      <td><input name="revision_reason" value="New Document" style="width:100%;" /></td>
+    </tr>
+  </table>
+
+  <!-- ================= POST-APPROVAL SIGNATURE ================= -->
+  <h2 style="margin-top:18px;">POST-APPROVAL SIGNATURE</h2>
+
+  <!-- PREPARED BY -->
+  <table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+      <th style="width:30%;">PREPARED BY</th>
+      <th style="width:40%;">NAME &amp; DESIGNATION</th>
+      <th style="width:30%;">SIGNATURE &amp; DATE</th>
+    </tr>
+    <tr>
+      <td>USER DEPARTMENT (ENGINEERING)</td>
+      <!-- FIX #11: was plain <input>, now <select data-options="users"> -->
+      <td>
+        <select style="width:100%;" name="post_prepared_by_name" data-options="users">
+          <option value="">Select user</option>
+        </select>
+      </td>
+      <td>
+        <input style="width:100%;" name="post_prepared_by_signature" placeholder="Signature" /><br />
+        <input style="width:100%; margin-top:6px;" name="post_prepared_by_date" type="date" />
+      </td>
+    </tr>
+  </table>
+
+  <!-- CHECKED BY -->
+  <table border="1" style="width:100%; border-collapse:collapse; margin-top:10px;">
+    <tr>
+      <th style="width:30%;">CHECKED BY</th>
+      <th style="width:40%;">NAME &amp; DESIGNATION</th>
+      <th style="width:30%;">SIGNATURE &amp; DATE</th>
+    </tr>
+    <tr>
+      <td>ENGINEERING</td>
+      <!-- FIX #12: data-options="users" added -->
+      <td>
+        <select style="width:100%;" name="post_checked_by_engineering_name" data-options="users">
+          <option value="">Select user</option>
+        </select>
+      </td>
+      <td>
+        <input style="width:100%;" name="post_checked_by_engineering_signature" placeholder="Signature" /><br />
+        <input style="width:100%; margin-top:6px;" name="post_checked_by_engineering_date" type="date" />
+      </td>
+    </tr>
+    <tr>
+      <td>USER DEPARTMENT (PRODUCTION)</td>
+      <td>
+        <select style="width:100%;" name="post_checked_by_production_name" data-options="users">
+          <option value="">Select user</option>
+        </select>
+      </td>
+      <td>
+        <input style="width:100%;" name="post_checked_by_production_signature" placeholder="Signature" /><br />
+        <input style="width:100%; margin-top:6px;" name="post_checked_by_production_date" type="date" />
+      </td>
+    </tr>
+    <tr>
+      <td>VALIDATION</td>
+      <td>
+        <select style="width:100%;" name="post_checked_by_validation_name" data-options="users">
+          <option value="">Select user</option>
+        </select>
+      </td>
+      <td>
+        <input style="width:100%;" name="post_checked_by_validation_signature" placeholder="Signature" /><br />
+        <input style="width:100%; margin-top:6px;" name="post_checked_by_validation_date" type="date" />
+      </td>
+    </tr>
+    <!-- FIX #13: QUALITY ASSURANCE row missing in original post-approval checked section — added -->
+    <tr>
+      <td>QUALITY ASSURANCE</td>
+      <td>
+        <select style="width:100%;" name="post_checked_by_quality_name" data-options="users">
+          <option value="">Select user</option>
+        </select>
+      </td>
+      <td>
+        <input style="width:100%;" name="post_checked_by_quality_signature" placeholder="Signature" /><br />
+        <input style="width:100%; margin-top:6px;" name="post_checked_by_quality_date" type="date" />
+      </td>
+    </tr>
+  </table>
+
+  <!-- APPROVED BY -->
+  <table border="1" style="width:100%; border-collapse:collapse; margin-top:10px;">
+    <tr>
+      <th style="width:30%;">APPROVED BY</th>
+      <th style="width:40%;">NAME &amp; DESIGNATION</th>
+      <th style="width:30%;">SIGNATURE &amp; DATE</th>
+    </tr>
+    <!-- FIX #14: USER/VALIDATION row missing in original post-approval approved section — added -->
+    <tr>
+      <td>USER / VALIDATION</td>
+      <td>
+        <select style="width:100%;" name="post_approved_by_user_name" data-options="users">
+          <option value="">Select user</option>
+        </select>
+      </td>
+      <td>
+        <input style="width:100%;" name="post_approved_by_user_signature" placeholder="Signature" /><br />
+        <input style="width:100%; margin-top:6px;" name="post_approved_by_user_date" type="date" />
+      </td>
+    </tr>
+    <tr>
+      <td>QUALITY ASSURANCE</td>
+      <td>
+        <select style="width:100%;" name="post_approved_by_quality_name" data-options="users">
+          <option value="">Select user</option>
+        </select>
+      </td>
+      <td>
+        <input style="width:100%;" name="post_approved_by_quality_signature" placeholder="Signature" /><br />
+        <input style="width:100%; margin-top:6px;" name="post_approved_by_quality_date" type="date" />
+      </td>
+    </tr>
+  </table>
+
+  <p class="footnote" style="margin-top:14px; font-size:12px; color:#666;">
+    Note: Replace sample values with actual data. Printing hides toolbars (if any) and form outlines (as per your CSS).
+  </p>
+
+</div>

@@ -1,0 +1,526 @@
+<div id="content" class="editable fromedit" contenteditable="false">
+
+<!-- HEADER -->
+<table border="1" style="width:100%; border-collapse:collapse;">
+<tr>
+<td rowspan="4" style="width:15%; text-align:center;">
+<img src="http://localhost/storage/lupin-logo.png" style="height:200px; width:auto;">
+</td>
+<td colspan="3" style="text-align:center; font-weight:bold;">
+LUPIN LIMITED
+</td>
+</tr>
+
+<tr>
+<td colspan="3" style="text-align:center; font-weight:bold;">
+PERFORMANCE QUALIFICATION PROTOCOL
+</td>
+</tr>
+
+<tr>
+<td style="width:25%; padding:6px;">
+        <strong>FACILITY / SECTION</strong><br>
+        <input style="width:100%;" name="facility_section" />
+      </td>
+<td style="width:30%; padding:6px;">
+        <strong>EQUIPMENT / SYSTEM NAME</strong><br>
+        <input style="width:100%;" name="equipment_name" />
+      </td>
+<td style="width:30%; padding:6px;">
+        <strong>EQUIPMENT / SYSTEM ID.</strong><br>
+        <input style="width:100%;" name="equipment_id" />
+      </td>
+</tr>
+
+<tr>
+<td style="padding:6px;">
+        <strong>DOCUMENT NO.</strong><br>
+        <select name="document_id" data-options="documents" style="width:100%;">
+          <option value="">-- Select Document --</option>
+        </select>
+        <!-- <input name="document_no" style="width:100%; margin-top:6px;" placeholder="Document number" /> -->
+      </td>
+<td>
+    <strong>VERSION</strong><br>
+    <input name="version" value="00" style="width:100%;">
+</td>
+<td>
+    <strong>PAGE NO.</strong><br>
+    <input name="page_no" value="Auto" style="width:100%;">
+</td>
+</tr>
+</table>
+
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- PRE APPROVAL SIGNATURE                                  -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h3>PRE APPROVAL SIGNATURE</h3>
+
+<!-- Prepared By -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+    <tr>
+        <th>Prepared By (Department)</th>
+        <th>Name &amp; Designation</th>
+        <th>Signature &amp; Date</th>
+    </tr>
+    <tr>
+        <td>User / Validation</td>
+        <td>
+            <select name="prepared_by_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="prepared_by_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="prepared_by_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+</table>
+
+<!-- Checked By — Engineering / Production / Validation / QA -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+    <tr>
+        <th>Checked By (Department)</th>
+        <th>Name &amp; Designation</th>
+        <th>Signature &amp; Date</th>
+    </tr>
+    <tr>
+        <td>Engineering</td>
+        <td>
+            <select name="checked_by_engineering_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="checked_by_engineering_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="checked_by_engineering_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+    <tr>
+        <td>Production</td>
+        <td>
+            <select name="checked_by_production_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="checked_by_production_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="checked_by_production_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+    <tr>
+        <td>User / Validation</td>
+        <td>
+            <select name="checked_by_validation_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="checked_by_validation_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="checked_by_validation_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+    <tr>
+        <td>User / Quality Assurance</td>
+        <td>
+            <select name="approved_by_user_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="approved_by_user_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="approved_by_user_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+    <tr>
+        <td>Quality Assurance</td>
+        <td>
+            <select name="approved_by_quality_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="approved_by_quality_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="approved_by_quality_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+</table>
+<p style="margin-top:12px;">
+    <b>EFFECTIVE DATE:</b>
+    <input name="effective_date" type="date" style="margin-left:8px;">
+</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- TABLE OF CONTENTS                                       -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h3>TABLE OF CONTENTS</h3>
+<table border="0" style="width:100%;">
+    <tr><td>1.0 OBJECTIVE</td><td style="text-align:right;">3</td></tr>
+    <tr><td>2.0 SCOPE</td><td style="text-align:right;">3</td></tr>
+    <tr><td>3.0 RESPONSIBILITY</td><td style="text-align:right;">3</td></tr>
+    <tr><td>4.0 EQUIPMENT / SYSTEM IDENTIFICATION / DESCRIPTION</td><td style="text-align:right;">4</td></tr>
+    <tr><td>5.0 METHODOLOGY</td><td style="text-align:right;">5</td></tr>
+    <tr><td>6.0 DEVIATION / OOS (IF ANY)</td><td style="text-align:right;">5</td></tr>
+    <tr><td>7.0 SUMMARY AND CONCLUSION</td><td style="text-align:right;">5</td></tr>
+    <tr><td>8.0 REFERENCES</td><td style="text-align:right;">6</td></tr>
+    <tr><td>9.0 ABBREVIATIONS</td><td style="text-align:right;">6</td></tr>
+    <tr><td>10.0 ATTACHMENTS</td><td style="text-align:right;">6</td></tr>
+    <tr><td>11.0 REVISION HISTORY</td><td style="text-align:right;">6</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 1.0 OBJECTIVE                                           -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>1.0 OBJECTIVE</h4>
+<p style="line-height:2;">
+    To establish documentary evidence to demonstrate that
+    <input name="objective_machine_name" style="width:200px; border:none; border-bottom:1px solid #000; outline:none;">
+    machine ID No.
+    <input name="objective_machine_id" style="width:150px; border:none; border-bottom:1px solid #000; outline:none;">
+    located at
+    <input name="objective_machine_location" style="width:200px; border:none; border-bottom:1px solid #000; outline:none;">
+    in the facility of Lupin is qualified for performance as per this protocol.
+</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 2.0 SCOPE                                               -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>2.0 SCOPE</h4>
+<p>The scope of this document is applicable for:</p>
+<p style="line-height:2;">
+    The performance qualification of
+    <input name="scope_machine_name" style="width:200px; border:none; border-bottom:1px solid #000; outline:none;">
+    machine I.D No.
+    <input name="scope_machine_id" style="width:150px; border:none; border-bottom:1px solid #000; outline:none;">
+    under the following condition/s:
+</p>
+<ul>
+    <li>New / first installation</li>
+    <li>Major modification after installation</li>
+    <li>Shifted from one location to another</li>
+</ul>
+<p>This protocol evaluates performance considering worst case scenarios and key parameters.</p>
+<p>Challenges of Key points / parameters</p>
+<p>Challenges of worst case scenario for each equipment.</p>
+<p>Reporting and handling the deviations observed (if any).</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 3.0 RESPONSIBILITY                                      -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>3.0 RESPONSIBILITY</h4>
+<p style="line-height:2;">
+    Responsibilities of different department/ personnel involved in different activities related to the performance qualification of
+    <input name="responsibility_machine_name" style="width:200px; border:none; border-bottom:1px solid #000; outline:none;">
+    machine I.D No.
+    <input name="responsibility_machine_id" style="width:150px; border:none; border-bottom:1px solid #000; outline:none;">
+    is defined below:
+</p>
+
+<p><b>Validation Department</b></p>
+<ul>
+    <li>Preparation of PQ Protocol in consultation with Engineering / Projects if required.</li>
+    <li>Checking the protocol for accuracy and adequacy prior to the approval.</li>
+    <li>Preparation of PQ Report.</li>
+</ul>
+
+<p><b>Engineering / Production Department</b></p>
+<ul>
+    <li>Providing required information to Validation department for preparation of the protocol.</li>
+    <li>Execution of protocol in-coordination with user department.</li>
+    <li>Checking the protocol and report for adequacy and accuracy.</li>
+</ul>
+
+<p><b>Quality Assurance Department</b></p>
+<ul>
+    <li>Providing guidance, wherever required to the related departments.</li>
+    <li>Review and approval of the protocol.</li>
+    <li>Review and approval of the performance qualification report.</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 4.0 EQUIPMENT IDENTIFICATION                            -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>4.0 EQUIPMENT/ SYSTEM IDENTIFICATION/ DESCRIPTION</h4>
+<p style="line-height:2;">
+    The subjected equipment/System is identified as
+    <input name="equip_desc_name" style="width:200px; border:none; border-bottom:1px solid #000; outline:none;">
+    machine I.D No.
+    <input name="equip_desc_id" style="width:150px; border:none; border-bottom:1px solid #000; outline:none;">
+    located
+    <input name="equip_desc_location" style="width:150px; border:none; border-bottom:1px solid #000; outline:none;">
+    at Facility.
+</p>
+
+<table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+        <td style="width:40%;"><b>Model No</b></td>
+        <td><input name="equip_model_no" style="width:100%;"></td>
+    </tr>
+    <tr>
+        <td><b>Serial No</b></td>
+        <td><input name="equip_serial_no" style="width:100%;"></td>
+    </tr>
+    <tr>
+        <td><b>In-house Equipment No</b></td>
+        <td><input name="equip_inhouse_no" style="width:100%;"></td>
+    </tr>
+    <tr>
+        <td><b>Supplier / Manufacturer</b></td>
+        <td><input name="equip_supplier" style="width:100%;"></td>
+    </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 5.0 METHODOLOGY                                         -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>5.0 METHODOLOGY</h4>
+<table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+        <th style="width:33%;">Procedure</th>
+        <th style="width:33%;">Observation</th>
+        <th style="width:33%;">Acceptance Criteria</th>
+    </tr>
+    <tr>
+        <td><textarea name="methodology_procedure" style="width:100%; min-height:80px;"></textarea></td>
+        <td><textarea name="methodology_observation" style="width:100%; min-height:80px;"></textarea></td>
+        <td><textarea name="methodology_acceptance" style="width:100%; min-height:80px;"></textarea></td>
+    </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 6.0 DEVIATION                                           -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>6.0 DEVIATION / OOS (IF ANY)</h4>
+<textarea name="deviation_oos" style="width:100%; height:100px;"></textarea>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 7.0 SUMMARY AND CONCLUSION                              -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>7.0 SUMMARY AND CONCLUSION</h4>
+<p>
+    On completion of PQ activity, the data generated shall be collected, compiled, critically reviewed,
+    evaluated; any deviations observed shall be discussed and resolved. Based on the final results and
+    discussions a brief summary (PQ Report) shall be prepared and shall contain the following:
+</p>
+<ul>
+    <li>Objective</li>
+    <li>Methodology</li>
+    <li>Observations / results and evaluation</li>
+    <li>Deviation and corrective actions taken</li>
+    <li>Conclusion</li>
+</ul>
+<p>The discussion of PQ results (PQ Report) shall be enclosed as Attachment-1.</p>
+
+<textarea name="summary_conclusion" style="width:100%; height:120px;" placeholder="Enter summary and conclusion here..."></textarea>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 8.0 REFERENCES                                          -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>8.0 REFERENCES</h4>
+<p>Following documents have been referred in preparation and execution of this protocol:</p>
+<table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+        <th>Sr. No.</th>
+        <th>Document Title</th>
+        <th>Document No.</th>
+    </tr>
+    <tr>
+        <td style="text-align:center;">1</td>
+        <td><input name="ref_title_1" value="SOP of Equipment Qualification" style="width:100%;"></td>
+        <td><input name="ref_docno_1" value="SOP_SKM_QA_070136" style="width:100%;"></td>
+    </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 9.0 ABBREVIATIONS                                       -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>9.0 ABBREVIATIONS</h4>
+<table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+        <th>Abbreviation</th>
+        <th>Full Form</th>
+    </tr>
+    <tr>
+        <td>PQ</td>
+        <td>Performance Qualification</td>
+    </tr>
+    <tr>
+        <td>SOP</td>
+        <td>Standard Operating Procedure</td>
+    </tr>
+    <tr>
+        <td>OOS</td>
+        <td>Out of Specification</td>
+    </tr>
+    <tr>
+        <td>QA</td>
+        <td>Quality Assurance</td>
+    </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 10.0 ATTACHMENTS                                        -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>10.0 ATTACHMENTS</h4>
+<p>The documents generated in performance qualification as explained in the above sections shall be enclosed as attachment with this document.</p>
+<table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+        <th>Attachment No.</th>
+        <th>Attachment Name</th>
+        <th>Attachment Type / Description</th>
+        <th>Applicable (Yes/NA)</th>
+        <th>Upload File</th>
+    </tr>
+    <tr>
+        <td style="text-align:center;">1</td>
+        <td><input name="attachment_name_1" value="Discussion of PQ results (PQ Report)" style="width:100%;"></td>
+        <td><input name="attachment_type_1" value="PQ Report" style="width:100%;"></td>
+        <td>
+            <select name="attachment_applicable_1" style="width:100%;">
+                <option value="Yes">Yes</option>
+                <option value="NA">NA</option>
+            </select>
+        </td>
+        <td><input type="file" name="attachment_file_1" style="width:100%;"></td>
+    </tr>
+    <tr>
+        <td style="text-align:center;">2</td>
+        <td><input name="attachment_name_2" style="width:100%;"></td>
+        <td><input name="attachment_type_2" style="width:100%;"></td>
+        <td>
+            <select name="attachment_applicable_2" style="width:100%;">
+                <option value="Yes">Yes</option>
+                <option value="NA">NA</option>
+            </select>
+        </td>
+        <td><input type="file" name="attachment_file_2" style="width:100%;"></td>
+    </tr>
+    <tr>
+        <td style="text-align:center;">3</td>
+        <td><input name="attachment_name_3" style="width:100%;"></td>
+        <td><input name="attachment_type_3" style="width:100%;"></td>
+        <td>
+            <select name="attachment_applicable_3" style="width:100%;">
+                <option value="Yes">Yes</option>
+                <option value="NA">NA</option>
+            </select>
+        </td>
+        <td><input type="file" name="attachment_file_3" style="width:100%;"></td>
+    </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- 11.0 REVISION HISTORY                                   -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h4>11.0 REVISION HISTORY</h4>
+<table border="1" style="width:100%; border-collapse:collapse;">
+    <tr>
+        <th>Revision No.</th>
+        <th>Effective Date</th>
+        <th>Reason for Revision</th>
+        <th>Revised By</th>
+    </tr>
+    <tr>
+        <td style="text-align:center;"><input name="revision_no_1" value="00" style="width:60px; text-align:center;"></td>
+        <td><input type="date" name="revision_date_1" style="width:100%;"></td>
+        <td><input name="revision_reason_1" value="New Document" style="width:100%;"></td>
+        <td><input name="revision_by_1" style="width:100%;"></td>
+    </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- POST APPROVAL SIGNATURE                                 -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<h3 class="post-approval-section">POST APPROVAL SIGNATURE</h3>
+
+<!-- Post Prepared By -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+    <tr>
+        <th>Prepared By (Department)</th>
+        <th>Name &amp; Designation</th>
+        <th>Signature &amp; Date</th>
+    </tr>
+    <tr>
+        <td>User / Validation</td>
+        <td>
+            <select name="post_prepared_by_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="post_prepared_by_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="post_prepared_by_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+</table>
+
+<!-- Post Checked & Approved By -->
+<table border="1" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+    <tr>
+        <th>Checked / Approved By (Department)</th>
+        <th>Name &amp; Designation</th>
+        <th>Signature &amp; Date</th>
+    </tr>
+    <tr>
+        <td>Engineering</td>
+        <td>
+            <select name="post_checked_by_engineering_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="post_checked_by_engineering_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="post_checked_by_engineering_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+    <tr>
+        <td>Production</td>
+        <td>
+            <select name="post_checked_by_production_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="post_checked_by_production_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="post_checked_by_production_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+    <tr>
+        <td>User / Validation</td>
+        <td>
+            <select name="post_checked_by_validation_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="post_checked_by_validation_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="post_checked_by_validation_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+    <tr>
+        <td>Quality Assurance</td>
+        <td>
+            <select name="post_approved_by_quality_name" data-options="users" style="width:100%;">
+                <option value="">Select user</option>
+            </select>
+        </td>
+        <td>
+            <input name="post_approved_by_quality_signature" style="width:100%;" placeholder="Signature">
+            <br>
+            <input type="date" name="post_approved_by_quality_date" style="width:100%; margin-top:6px;">
+        </td>
+    </tr>
+</table>
+
+</div>

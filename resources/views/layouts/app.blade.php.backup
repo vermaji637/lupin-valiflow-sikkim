@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+
+{{-- Include Head --}}
+@include('common.head')
+
+<body id="page-top">
+
+    <!-- Page Wrapper -->
+    <div id="wrapper">
+
+        <!-- Sidebar -->
+        @include('common.sidebar')
+        <!-- End of Sidebar -->
+
+        <!-- Content Wrapper -->
+        <div id="content-wrapper" class="d-flex flex-column">
+
+            <!-- Main Content -->
+            <div id="content">
+
+                <!-- Topbar -->
+                @include('common.header')
+                <!-- End of Topbar -->
+
+                <!-- Begin Page Content -->
+                @yield('content')
+                <!-- /.container-fluid -->
+
+            </div>
+            <!-- End of Main Content -->
+
+            <!-- Footer -->
+            @include('common.footer')
+            <!-- End of Footer -->
+
+        </div>
+        <!-- End of Content Wrapper -->
+
+    </div>
+    <!-- End of Page Wrapper -->
+
+    <!-- Scroll to Top Button-->
+    <a class="scroll-to-top rounded" href="#page-top">
+        <i class="fas fa-angle-up"></i>
+    </a>
+
+    <!-- Logout Modal-->
+    @include('common.logout-modal')
+
+    <!-- Bootstrap core JavaScript-->
+    <script src="{{asset('js/app.js')}}"></script>
+    <!-- Custom scripts for all pages-->
+    <script src="{{asset('admin/js/sb-admin-2.min.js')}}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+
+      document.addEventListener('DOMContentLoaded', function () {
+
+    let formToSubmit = null;
+    const modalEl = document.getElementById('esignModal');
+    const modal = new bootstrap.Modal(modalEl);
+    const passwordInput = document.getElementById('esign_password');
+    const errorBox = document.getElementById('esignError');
+
+    // Attach modal trigger to forms
+    document.querySelectorAll('form.esign-required').forEach(form => {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            formToSubmit = this;
+            passwordInput.value = '';
+            errorBox.innerText = '';
+            modal.show();
+        });
+    });
+
+    document.getElementById('confirmEsign').addEventListener('click', function () {
+        const password = passwordInput.value;
+
+        fetch("{{ route('esign.validate') }}", {
+            method: "POST",
+            // 🔥 VERY IMPORTANT
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "X-CSRF-TOKEN": "{{ csrf_token() }}"
+            },
+            body: JSON.stringify({ password })
+        })
+        .then(res => {
+            console.log("Status:", res.status);
+            return res.json();
+        })
+        .then(data => {
+            console.log("Response:", data);
+
+            if (data.success) {
+                modal.hide();
+                formToSubmit.submit(); // submit original form
+            } else {
+                errorBox.innerText = data.message || "Incorrect password";
+            }
+        })
+        .catch(error => {
+            console.error("Fetch error:", error);
+            errorBox.innerText = "Something went wrong, try again.";
+        });
+    });
+
+});
+document.addEventListener('DOMContentLoaded', function () {
+
+    let formToSubmit = null; // Will hold the original form
+    const modalEl = document.getElementById('esignModal');
+    const modal = new bootstrap.Modal(modalEl);
+    const passwordInput = document.getElementById('esign_password');
+    const errorBox = document.getElementById('esignError');
+
+    // Intercept ONLY forms with esign-required class
+    document.querySelectorAll('form.esign-required').forEach(form => {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault(); // Stop original submit
+            formToSubmit = this;
+            passwordInput.value = '';
+            errorBox.innerText = '';
+            modal.show();
+        });
+    });
+
+    // Confirm password and submit
+    document.getElementById('confirmEsign').addEventListener('click', function() {
+        const password = passwordInput.value;
+
+        fetch("{{ route('esign.validate') }}", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-TOKEN": "{{ csrf_token() }}"
+            },
+            body: JSON.stringify({ password })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                modal.hide();
+                formToSubmit.submit(); // Submit the original form
+            } else {
+                errorBox.innerText = "Incorrect password";
+            }
+        })
+        .catch(() => {
+            errorBox.innerText = "Something went wrong, try again.";
+        });
+    });
+  
+
+});
+
+
+function fillToday(){
+      const today = new Date().toISOString().slice(0,10);
+      document.querySelectorAll('input[type="date"]').forEach(el=>{ if(!el.value) el.value = today; });
+    }
+    function clearInputs(){
+      document.querySelectorAll('input[type="text"], input[type="date"], .input').forEach(el=>{
+        if(el.tagName.toLowerCase()==='textarea'){ el.value=''; el.textContent=''; }
+        else if(el.type==='date'){ el.value=''; }
+        else if(el.classList.contains('input')){ el.value=''; }
+        else { el.value=''; }
+      });
+    }
+
+    function addMultipleRows(tableId, col1Text, col2Text, countInputId) {
+  let count = document.getElementById(countInputId).value;
+  count = parseInt(count);
+
+  if (isNaN(count) || count < 1) return;
+
+  let table = document.getElementById(tableId);
+
+  for (let i = 0; i < count; i++) {
+    let row = table.insertRow(-1);
+    let cell1 = row.insertCell(0);
+    let cell2 = row.insertCell(1);
+    let cell3 = row.insertCell(2);
+
+    cell1.contentEditable = "true";
+    cell2.contentEditable = "true";
+
+    cell1.innerText =  " ";
+    cell2.innerText = " ";
+    cell3.innerHTML = '<button type="button" class=" btn-danger " onclick="deleteRow(this)"> <i class="fa-solid fa-trash"></i></button>';
+  }
+}
+
+function deleteRow(btn) {
+  let row = btn.parentNode.parentNode;
+  row.remove();
+}
+
+function copyCriteria(checkbox)
+{
+    let row = checkbox.closest("tr");
+
+    // Get exact criteria text
+    let text = row.querySelector(".criteria").getAttribute("data-text");
+
+    // Remove "Should be available." from text
+    text = text.replace(/^Should be available\.\s*/i, '');
+
+    let obs = row.querySelector(".observation");
+
+    if (checkbox.checked)
+    {
+        obs.value = text;     // cleaned text
+        obs.readOnly = true;
+    }
+    else
+    {
+        obs.value = "";
+        obs.readOnly = false;
+    }
+}
+ window.loggedInUser = {
+    id: 123,
+    name: "Rahul",
+    email: "rahul@example.com",
+    role: "admin"
+  };
+function engineeringCheck(checkbox) {
+console.log(window.loggedInUser);
+          let row = checkbox.closest("tr");
+          let doneByInput  = row.querySelector(".done-by");
+
+          if (checkbox.checked) {
+              // ====== API SE USER NAME LENA HAI ======
+              // Yaha par aapko backend API call lagani hogi
+              // Example: /api/get-logged-user
+              // Response me user ka name aayega
+
+              // For now demo ke liye static name use kar rahe hain
+            let today = new Date();
+        let formattedDate = today.toLocaleDateString('en-GB'); // DD/MM/YYYY
+
+        doneByInput.value = loggedInUser.name + " - " + formattedDate;
+        doneByInput.readOnly = true;
+          } else {
+                  doneByInput.value = "";
+        doneByInput.readOnly = false;;
+          }
+      }
+
+
+
+</script>
+
+
+
+    @yield('scripts')
+    
+@stack('scripts')
+</body>
+
+</html>
