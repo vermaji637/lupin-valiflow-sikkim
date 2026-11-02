@@ -22,10 +22,10 @@
                     <i class="fas fa-plus"></i>
                     Add User
                 </a>
-                <a href="{{ route('users.export') }}" class="btn btn-success btn-compact toolbar-chip">
+                <!-- <a href="{{ route('users.export') }}" class="btn btn-success btn-compact toolbar-chip">
                     <i class="fas fa-file-excel"></i>
                     Export
-                </a>
+                </a> -->
             </div>
         </div>
 
@@ -72,7 +72,7 @@
                             name="search"
                             value="{{ request('search') }}"
                             class="form-control"
-                            placeholder="Name, email, mobile, or role"
+                            placeholder="Name, designation & department, email, mobile, or role"
                         >
                     </div>
                     <div class="col-lg-3 mb-3">
@@ -106,6 +106,8 @@
                     <thead>
                         <tr>
                             <th style="min-width: 220px;">User</th>
+                            <th style="min-width: 160px;">Designation</th>
+                            <th style="min-width: 160px;">Department</th>
                             <th style="min-width: 240px;">Contact</th>
                             <th style="min-width: 160px;">Role</th>
                             <th style="min-width: 120px;">Status</th>
@@ -129,6 +131,8 @@
                                         </div>
                                     </div>
                                 </td>
+                                <td>{{ $user->designation ?: '—' }}</td>
+                                <td>{{ $user->department_name ?: '—' }}</td>
                                 <td>
                                     <div class="user-contact-line">{{ $user->email }}</div>
                                     <div class="user-meta">{{ $user->mobile_number ?: 'No mobile number' }}</div>
@@ -174,7 +178,7 @@
                                             Edit
                                         </a>
 
-                                        @can('change-any-user-password')
+                                        <!-- @can('change-any-user-password')
                                             <button
                                                 type="button"
                                                 class="btn btn-light btn-compact"
@@ -184,7 +188,7 @@
                                                 <i class="fas fa-key"></i>
                                                 Password
                                             </button>
-                                        @endcan
+                                        @endcan -->
 
                                         {{-- <form method="POST" action="{{ route('users.destroy', ['user' => $user->id]) }}" class="d-inline esign-required">
                                             @csrf
@@ -200,7 +204,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="5" class="text-center py-5 text-muted">No users found for the selected filters.</td>
+                                <td colspan="7" class="text-center py-5 text-muted">No users found for the selected filters.</td>
                             </tr>
                         @endforelse
                     </tbody>

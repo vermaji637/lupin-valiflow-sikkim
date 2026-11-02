@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Template;
+use App\Services\DocxDownloadProtection;
 use App\Services\DocxTemplateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -145,7 +146,10 @@ class TemplateController extends Controller
         $absolutePath = storage_path('app/public/' . ltrim((string) $template->docx_template_path, '/'));
         abort_unless(is_file($absolutePath), 404);
 
-        return response()->download($absolutePath, basename($absolutePath));
+        $lockedPath = app(DocxDownloadProtection::class)->protectedCopy($absolutePath);
+
+        return response()->download($lockedPath, basename($absolutePath))
+            ->deleteFileAfterSend($lockedPath !== $absolutePath);
     }
 
     public function convertDocxToHtml(Request $request, Template $template)
@@ -190,6 +194,7 @@ class TemplateController extends Controller
             'target_template_type' => ['nullable', 'in:dq,ioq,pq,facility,pqr'],
         ]);
 
+        Storage::disk('public')->makeDirectory('templates/docx');
         $path = $request->file('docx_file')->store('templates/docx', 'public');
         $absolutePath = storage_path('app/public/' . $path);
         $docxService = app(DocxTemplateService::class);
@@ -287,6 +292,7 @@ class TemplateController extends Controller
         $template->name = $request->name;
 
         if ($request->hasFile('docx_file')) {
+            Storage::disk('public')->makeDirectory('templates/docx');
             $newPath = $request->file('docx_file')->store('templates/docx', 'public');
             $absolutePath = storage_path('app/public/' . $newPath);
             $docxService = app(DocxTemplateService::class);

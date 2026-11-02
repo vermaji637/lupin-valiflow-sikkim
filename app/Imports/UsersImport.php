@@ -20,6 +20,7 @@ class UsersImport implements ToModel, WithHeadingRow
         $user = new User([
             "first_name" => $row['first_name'],
             "last_name" => $row['last_name'],
+            "designation" => $row['designation'] ?? null,
             "email" => $row['email'],
             "mobile_number" => $row['mobile_number'],
             "role_id" => 2, // User Type User

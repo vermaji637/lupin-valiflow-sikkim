@@ -3,8 +3,9 @@
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="description" content="">
-    <meta name="author" content="">
+    <meta name="description" content="Valiflow Protocol Control Suite - Developed by Ecowiztech Solution Pvt. Ltd.">
+    <meta name="author" content="Ecowiztech Solution Pvt. Ltd.">
+    <meta name="copyright" content="© {{ date('Y') }} Ecowiztech Solution Pvt. Ltd.™ All Rights Reserved.">
 
     <!-- CSRF Token -->
     <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -12,7 +13,7 @@
     <title>{{ config('app.name', 'Laravel') }} | @yield('title', 'Workspace')</title>
 
     {{-- ICON --}}
-    <link rel="shortcut icon" type="image/jpg" href="{{ asset('images/icon.png') }}"/>
+    <link rel="shortcut icon" type="image/png" href="{{ asset('images/lupin-logo.png') }}"/>
 
     <!-- Font Awesome UI KIT-->
     <!-- <script src="https://kit.fontawesome.com/f75ab26951.js" crossorigin="anonymous"></script> -->

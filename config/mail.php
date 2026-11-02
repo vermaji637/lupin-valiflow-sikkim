@@ -33,16 +33,53 @@ return [
     |
     */
 
+    /*
+     * SMTP CONFIGURATION GUIDE
+     * -------------------------
+     * All values below come from your .env file.
+     * To switch from log (testing) to real email:
+     *   Change MAIL_MAILER=log  to  MAIL_MAILER=smtp  in .env
+     *
+     * Example .env for internal company relay (no username/password):
+     *   MAIL_HOST=172.21.34.19
+     *   MAIL_PORT=25
+     *   MAIL_USERNAME=
+     *   MAIL_PASSWORD=
+     *   MAIL_ENCRYPTION=null
+     *   MAIL_FROM_ADDRESS=noreply@lupin.in
+     *
+     * Example .env for authenticated SMTP:
+     *   MAIL_HOST=172.21.34.19
+     *   MAIL_PORT=587
+     *   MAIL_USERNAME=noreply@lupin.in
+     *   MAIL_PASSWORD=yourpassword
+     *   MAIL_ENCRYPTION=tls
+     *   MAIL_FROM_ADDRESS=noreply@lupin.in
+     *
+     * After changing .env always run:
+     *   php artisan config:clear
+     */
+
     'mailers' => [
         'smtp' => [
             'transport' => 'smtp',
             'host' => env('MAIL_HOST', 'smtp.mailgun.org'),
-            'port' => env('MAIL_PORT', 587),
-            'encryption' => env('MAIL_ENCRYPTION', 'tls'),
+            // 'port' => env('MAIL_PORT', 587),
+            'port' => env('MAIL_PORT', 25),
+            // 'encryption' => env('MAIL_ENCRYPTION', 'tls'),
+            'encryption' => env('MAIL_ENCRYPTION') ?: null,
+            
             'username' => env('MAIL_USERNAME'),
             'password' => env('MAIL_PASSWORD'),
             'timeout' => null,
             'auth_mode' => null,
+            'stream' => [
+               'ssl' => [
+               'allow_self_signed' => true,
+               'verify_peer' => false,
+               'verify_peer_name' => false,
+              ],
+            ],
         ],
 
         'ses' => [

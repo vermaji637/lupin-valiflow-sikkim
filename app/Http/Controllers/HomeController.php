@@ -5,9 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use App\Rules\MatchOldPassword;
+use App\Services\PasswordExpiryService;
+use App\Services\PasswordHistoryService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\ValidationException;
 
 class HomeController extends Controller
 {
@@ -96,15 +99,21 @@ class HomeController extends Controller
         try {
             DB::beginTransaction();
 
-            #Update Password
-            User::find(auth()->user()->id)->update(['password'=> Hash::make($request->new_password)]);
-            
-            #Commit Transaction
+            $user = User::find(auth()->user()->id);
+            $history = app(PasswordHistoryService::class);
+            $history->assertNotReused($user, $request->new_password, 'new_password');
+            $history->rememberCurrent($user);
+
+            $user->update(['password' => Hash::make($request->new_password)]);
+            app(PasswordExpiryService::class)->markPasswordChanged($user);
+
             DB::commit();
 
-            #Return To Profile page with success
             return back()->with('success', 'Password Changed Successfully.');
-            
+
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (\Throwable $th) {
             DB::rollBack();
             return back()->with('error', $th->getMessage());

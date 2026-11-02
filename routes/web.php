@@ -64,7 +64,7 @@ Route::post('/setup-password/{token}', [App\Http\Controllers\Auth\PasswordSetupC
 // All protected routes require authentication
 Route::middleware(['auth'])->group(function () {
 
-    Route::get('/home', [ReportController::class, 'myApprovalDashboard'])->name('home');
+    Route::get('/home', [ReportController::class, 'myApprovalDashboard'])->name('home'); // approval dashboard home
 
     // Masters Routes
     Route::post('/equipment/import/preview', [EquipmentController::class, 'importPreview'])
@@ -113,11 +113,24 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/notifications', [NotificationController::class, 'index'])
         ->name('notifications.index');
 
+    Route::get('/notifications/{id}', [NotificationController::class, 'show'])
+        ->name('notifications.show');
+
     Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead'])
         ->name('notifications.read');
 
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead'])
         ->name('notifications.readAll');
+
+    Route::post('/notifications/clear-all', [NotificationController::class, 'destroyAll'])
+        ->name('notifications.destroyAll');
+
+    Route::post('/notifications/{id}/delete', [NotificationController::class, 'destroy'])
+        ->name('notifications.destroy');
+
+    Route::get('/notifications/{id}/delete', function () {
+        return redirect()->route('notifications.index');
+    });
 
     // Admin Documents
     Route::get('/admin/documents', [DocumentController::class, 'adminIndex'])->name('admin.documents');
@@ -151,6 +164,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/templates/create', [TemplateController::class, 'create'])->name('templates.create');
     Route::post('/templates', [TemplateController::class, 'store'])->name('templates.store');
 
+    // DOCX template import — upload Word templates and convert to fillable fields
     Route::get('/templates/docx-import/create', [DocxImportController::class, 'createTemplate'])->name('templates.docx-import.create');
     Route::post('/templates/docx-import', [DocxImportController::class, 'uploadTemplate'])->name('templates.docx-import.upload');
 
@@ -191,16 +205,33 @@ Route::middleware(['auth'])->group(function () {
 
     Route::get('/protocol',
         [ReportController::class, 'allProtocol'])
+        ->middleware('permission:protocol-all')
         ->name('protocol');
 
+    Route::get('/protocol/revalidation',
+        [ReportController::class, 'revalidationProtocols'])
+        ->middleware('permission:protocol-revalidation|protocol-all')
+        ->name('protocol.revalidation');
+
+    Route::get('/protocol/requalification',
+        [ReportController::class, 'requalificationProtocols'])
+        ->middleware('permission:protocol-requalification|protocol-all')
+        ->name('protocol.requalification');
+
+    // Protocol DOCX import — create a report from an uploaded Word document
     Route::get('/protocol/docx-import', [DocxImportController::class, 'createFromProtocol'])
+        ->middleware('permission:protocol-fill-new-equipment|protocol-revalidation|protocol-requalification')
         ->name('protocol.docx-import.create');
     Route::post('/protocol/docx-import', [DocxImportController::class, 'storeFromProtocol'])
+        ->middleware('permission:protocol-fill-new-equipment|protocol-revalidation|protocol-requalification')
         ->name('protocol.docx-import.store');
 
+    // New Equipment Qualification — upload, preview, edit, and save DOCX files
     Route::get('/protocol/new-equipment-qualification', [NewEquipmentQualificationController::class, 'index'])
+        ->middleware('permission:protocol-new-equipment|protocol-fill-new-equipment')
         ->name('protocol.new-equipment-qualification.index');
     Route::post('/protocol/new-equipment-qualification/upload', [NewEquipmentQualificationController::class, 'upload'])
+        ->middleware('permission:protocol-new-equipment|protocol-fill-new-equipment')
         ->name('protocol.new-equipment-qualification.upload');
     Route::get('/protocol/new-equipment-qualification/{newEquipmentQualification}/view', [NewEquipmentQualificationController::class, 'view'])
         ->name('protocol.new-equipment-qualification.view');
@@ -208,17 +239,34 @@ Route::middleware(['auth'])->group(function () {
         ->name('protocol.new-equipment-qualification.file');
     Route::get('/protocol/new-equipment-qualification/{newEquipmentQualification}/preview-html', [NewEquipmentQualificationController::class, 'previewHtml'])
         ->name('protocol.new-equipment-qualification.preview-html');
+    Route::get('/protocol/new-equipment-qualification/{newEquipmentQualification}/text-targets', [NewEquipmentQualificationController::class, 'textTargets'])
+        ->name('protocol.new-equipment-qualification.text-targets');
     Route::get('/protocol/new-equipment-qualification/{newEquipmentQualification}/download', [NewEquipmentQualificationController::class, 'download'])
         ->name('protocol.new-equipment-qualification.download');
     Route::post('/protocol/new-equipment-qualification/{newEquipmentQualification}/save-as', [NewEquipmentQualificationController::class, 'saveAs'])
         ->name('protocol.new-equipment-qualification.save-as');
+    Route::post('/protocol/new-equipment-qualification/{newEquipmentQualification}/send-for-approval', [NewEquipmentQualificationController::class, 'sendForApproval'])
+        ->name('protocol.new-equipment-qualification.send-for-approval');
+    Route::post('/protocol/new-equipment-qualification/{newEquipmentQualification}/approve', [NewEquipmentQualificationController::class, 'approve'])
+        ->name('protocol.new-equipment-qualification.approve');
+    Route::post('/protocol/new-equipment-qualification/{newEquipmentQualification}/send-back', [NewEquipmentQualificationController::class, 'sendBack'])
+        ->name('protocol.new-equipment-qualification.send-back');
+    Route::post('/protocol/new-equipment-qualification/{newEquipmentQualification}/reject', [NewEquipmentQualificationController::class, 'reject'])
+        ->name('protocol.new-equipment-qualification.reject');
 
     Route::get('/reports/{report}', [ReportController::class, 'show'])->name('reports.show')
         ->where(['report' => '[0-9]+']);
 
+    // Report DOCX import — upload, fill fields, preview, and download filled document
     Route::get('/reports/{report}/docx-import', [DocxImportController::class, 'showUploadForm'])->name('reports.docx-import.upload-form');
     Route::post('/reports/{report}/docx-import', [DocxImportController::class, 'upload'])->name('reports.docx-import.upload');
     Route::get('/reports/{report}/docx-import/fill', [DocxImportController::class, 'showFillForm'])->name('reports.docx-import.fill-form');
+    Route::get('/reports/{report}/docx-import/fill-from-protocol/{sourceReport}', [DocxImportController::class, 'fillFromApprovedProtocol'])
+        ->name('reports.docx-import.fill-from-protocol')
+        ->where(['report' => '[0-9]+', 'sourceReport' => '[0-9]+']);
+    Route::post('/reports/{report}/docx-import/draft', [DocxImportController::class, 'saveDraft'])
+        ->name('reports.docx-import.draft')
+        ->where(['report' => '[0-9]+']);
     Route::post('/reports/{report}/docx-import/fill', [DocxImportController::class, 'fill'])->name('reports.docx-import.fill');
     Route::get('/reports/{report}/preview-html', [DocxImportController::class, 'fetchPreviewHtml'])
         ->name('reports.preview-html');
@@ -228,11 +276,17 @@ Route::middleware(['auth'])->group(function () {
 
     Route::get('/reports/{report}/after-preapproval', [ReportController::class, 'reportfillAfterPreaAprove'])->name('reports.preapprovalfill');
 
+    // Report approval actions — e-sign approve, send back for correction, or permanently reject
     Route::post('/reports/{report}/approve', [ReportController::class, 'approve'])->name('reports.approve')
+        ->middleware('permission:protocol-approve')
         ->where(['report' => '[0-9]+']);
 
-    // Reject step (POST) - optional
+    Route::post('/reports/{report}/send-back', [ReportController::class, 'sendBack'])->name('reports.sendBack')
+        ->middleware('permission:protocol-send-back')
+        ->where(['report' => '[0-9]+']);
+
     Route::post('/reports/{report}/reject', [ReportController::class, 'reject'])->name('reports.reject')
+        ->middleware('permission:protocol-reject')
         ->where(['report' => '[0-9]+']);
 
     Route::get('/reports/{report}/edit-after-pre', [ReportController::class, 'editAfterPreApproved'])
@@ -254,7 +308,7 @@ Route::middleware(['auth'])->group(function () {
         ->name('reports.submitToPost')
         ->where(['report' => '[0-9]+']);
 
-    Route::get('/dashboard/pending', [ReportController::class, 'myPendingApprovals'])->name('reports.pending');
+    Route::get('/dashboard/pending', [ReportController::class, 'myPendingApprovals'])->name('reports.pending'); // current user's pending approval queue
 
     // ================================
     // Added from Project B - Returned workflow handling
@@ -321,6 +375,7 @@ Route::middleware(['auth'])->group(function () {
 
     Route::middleware(['auth', 'is_admin'])->prefix('admin')->group(function () {
         Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('admin.audit.logs');
+        Route::get('/audit-logs/pdf', [AuditLogController::class, 'downloadPdf'])->name('admin.audit.logs.pdf');
         Route::get('/security-policy', [SecurityPolicyController::class, 'index'])->name('admin.security-policy');
         Route::post('/security-policy', [SecurityPolicyController::class, 'update'])->name('admin.security-policy.update');
         Route::get('/roles/{roleId}/permissions',

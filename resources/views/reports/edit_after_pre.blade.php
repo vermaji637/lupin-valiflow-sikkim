@@ -4,7 +4,7 @@
 @php
      @endphp
 <div class="container">
-  <h2>Edit After Pre-Approval: Report #{{ $report->id }}</h2>
+  <h2>Edit After Pre-Approval: {{ $report->displayCode() }}</h2>
 
   <form method="POST" action="{{ route('reports.submitToPost', $report) }}" enctype="multipart/form-data">
     @csrf

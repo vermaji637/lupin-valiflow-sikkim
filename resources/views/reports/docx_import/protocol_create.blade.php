@@ -1,6 +1,13 @@
 @extends('layouts.app')
 
-@section('title', 'Import VIVA DOCX')
+@php
+    $sectionTitle = ($importSourceSectionTitle ?? '') !== ''
+        ? $importSourceSectionTitle
+        : (($importSourceLabel ?? '') !== '' ? $importSourceLabel : 'Pre-Approved DOCX (VIVA)');
+    $isNeqFill = ($importSource ?? '') === 'new_equipment_qualification';
+@endphp
+
+@section('title', $isNeqFill ? $sectionTitle : ('Import ' . $sectionTitle))
 
 @section('content')
 <div class="container-fluid py-4">
@@ -16,10 +23,19 @@
             <div class="card shadow border-0">
                 <div class="card-header py-3" style="background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);">
                     <h5 class="mb-0 font-weight-bold text-white">
-                        <i class="fas fa-file-import mr-2"></i> Import Pre-Approved DOCX (VIVA)
+                        <i class="fas fa-file-import mr-2"></i>
+                        {{ $isNeqFill ? $sectionTitle : ('Import ' . $sectionTitle) }}
                     </h5>
                     <p class="mb-0 text-white-50 small mt-1">
-                        Upload a VIVA pre-approved document. PRE approval is skipped; you will fill blank fields and submit directly for POST approval.
+                        @if($isNeqFill)
+                            Upload a pre-approved New Equipment Qualification document. Blank fields will open for fill; filled VIVA content stays locked. Then submit for POST approval.
+                        @elseif(($importSource ?? '') === 'requalification')
+                            Upload a Requalification document. Select the pre-approval users first. The document stays locked until pre-approval is complete, then fill and Fill with DOCX open.
+                        @elseif(($importSourceLabel ?? '') !== '')
+                            Upload a {{ $importSourceLabel }} document. PRE approval is skipped; you will fill blank fields and submit directly for POST approval.
+                        @else
+                            Upload a VIVA pre-approved document. PRE approval is skipped; you will fill blank fields and submit directly for POST approval.
+                        @endif
                     </p>
                 </div>
 
@@ -43,14 +59,16 @@
                           enctype="multipart/form-data"
                           id="protocolImportForm">
                         @csrf
+                        <input type="hidden" name="import_source" value="{{ $importSource ?? '' }}">
 
                         <div class="card mb-4 border">
                             <div class="card-header">Document Mapping</div>
                             <div class="card-body">
                                 <div class="row g-3">
-                                    <div class="col-md-6">
+                                    {{-- <div class="col-md-6">
                                         <label class="form-label font-weight-bold">Approved Document</label>
-                                        <select class="form-control" name="document_id" id="import_document_id">
+                                        <select class="form-control" name="document_id" id="import_document_id"
+                                                data-details-url-template="{{ url('/admin/documents/__ID__/details') }}">
                                             <option value="">-- Select Approved Document --</option>
                                             @foreach($documents as $document)
                                                 <option value="{{ $document->id }}"
@@ -70,14 +88,28 @@
                                     <div class="col-md-4">
                                         <label class="form-label font-weight-bold">Facility / Section</label>
                                         <input type="text" name="facility_section" id="import_facility_section" class="form-control" value="{{ old('facility_section') }}">
+                                    </div> --}}
+                                    <div class="col-md-6">
+                                        <label class="form-label font-weight-bold">Equipment Name <span class="text-danger">*</span></label>
+                                        <input type="text" name="equipment_name" id="import_equipment_name" class="form-control"
+                                               value="{{ old('equipment_name') }}" required>
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label font-weight-bold">Equipment Name</label>
-                                        <input type="text" name="equipment_name" id="import_equipment_name" class="form-control" value="{{ old('equipment_name') }}">
+                                    <div class="col-md-6">
+                                        <label class="form-label font-weight-bold">Equipment ID <span class="text-danger">*</span></label>
+                                        <input type="text" name="equipment_id" id="import_equipment_id" class="form-control"
+                                               value="{{ old('equipment_id') }}" required>
                                     </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label font-weight-bold">Equipment ID</label>
-                                        <input type="text" name="equipment_id" id="import_equipment_id" class="form-control" value="{{ old('equipment_id') }}">
+                                    <div class="col-md-6">
+                                        <label class="form-label font-weight-bold">Document Number</label>
+                                        <input type="text" name="protocol_document_no" id="import_protocol_document_no" class="form-control"
+                                               value="{{ old('protocol_document_no') }}"
+                                               placeholder="Optional — also auto-read from DOCX if present">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label font-weight-bold">Reference Protocol No</label>
+                                        <input type="text" name="reference_protocol_no" id="import_reference_protocol_no" class="form-control"
+                                               value="{{ old('reference_protocol_no') }}"
+                                               placeholder="Optional — also auto-read from DOCX if present">
                                     </div>
                                 </div>
                             </div>
@@ -109,33 +141,33 @@
         </div>
     </div>
 </div>
+@endsection
 
+@push('scripts')
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    const select = document.getElementById('import_document_id');
-    if (!select) return;
-
-    select.addEventListener('change', function () {
-        const opt = select.options[select.selectedIndex];
-        if (!opt || !opt.value) return;
-
-        const facility = document.getElementById('import_facility_section');
-        const eqName   = document.getElementById('import_equipment_name');
-        const eqId     = document.getElementById('import_equipment_id');
-
-        if (facility && opt.dataset.facility) facility.value = opt.dataset.facility;
-        if (eqName && opt.dataset.equipmentName) eqName.value = opt.dataset.equipmentName;
-        if (eqId && opt.dataset.equipmentId) eqId.value = opt.dataset.equipmentId;
-    });
-
-    const form = document.getElementById('protocolImportForm');
-    const btn  = document.getElementById('btnUpload');
+(function () {
+    var form = document.getElementById('protocolImportForm');
+    var btn = document.getElementById('btnUpload');
     if (form && btn) {
         form.addEventListener('submit', function () {
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm mr-1"></span> Uploading...';
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Uploading…';
         });
     }
-});
+
+    var select = document.getElementById('import_document_id');
+    if (!select) return;
+
+    select.addEventListener('change', function () {
+        var opt = select.options[select.selectedIndex];
+        if (!opt || !opt.value) return;
+        var facility = document.getElementById('import_facility_section');
+        var eqName = document.getElementById('import_equipment_name');
+        var eqId = document.getElementById('import_equipment_id');
+        if (facility) facility.value = opt.getAttribute('data-facility') || '';
+        if (eqName) eqName.value = opt.getAttribute('data-equipment-name') || '';
+        if (eqId) eqId.value = opt.getAttribute('data-equipment-id') || '';
+    });
+})();
 </script>
-@endsection
+@endpush

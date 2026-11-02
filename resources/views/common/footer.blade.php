@@ -3,7 +3,7 @@
 <footer class="sticky-footer bg-white">
     <div class="footer-surface d-flex flex-column flex-md-row align-items-center justify-content-between">
         <div class="copyright my-auto">
-            <span>{{ config('app.name', 'Lupin') }} © {{ date('Y') }}</span>
+            <span>© {{ date('Y') }} {{ config('app.name', 'Lupin') }}. All Rights Reserved. | Powered by <strong style="color: #0f4c81; font-weight: 800;">Ecowiztech Solution Pvt. Ltd.™</strong></span>
         </div>
         <div class="text-muted small mt-2 mt-md-0">
             Premium workflow workspace for approvals, documents, and audit-ready reporting.

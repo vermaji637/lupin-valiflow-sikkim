@@ -8,7 +8,7 @@
 </a>
 
 <div class="container">
-  <h2>Report #{{ $report->id }} - {{ $template->name }}</h2>
+  <h2>{{ $report->displayCode() }} - {{ $template->name }}</h2>
   <div class="border p-3">{!! $bodyHtml !!}</div>
 </div>
 

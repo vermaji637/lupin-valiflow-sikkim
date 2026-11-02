@@ -52,6 +52,18 @@
                         </div>
 
                         <div class="form-field">
+                            <label class="form-label" for="designation">Designation</label>
+                            <input type="text" id="designation" name="designation" class="form-control @error('designation') is-invalid @enderror" placeholder="Enter designation" value="{{ old('designation', $user->designation) }}">
+                            @error('designation')<span class="form-error">{{ $message }}</span>@enderror
+                        </div>
+
+                        <div class="form-field">
+                            <label class="form-label" for="department_name">Department</label>
+                            <input type="text" id="department_name" name="department_name" class="form-control @error('department_name') is-invalid @enderror" placeholder="Enter department" value="{{ old('department_name', $user->department_name) }}">
+                            @error('department_name')<span class="form-error">{{ $message }}</span>@enderror
+                        </div>
+
+                        <div class="form-field">
                             <label class="form-label" for="email"><span class="form-required">*</span>Email Address</label>
                             <input type="email" id="email" name="email" class="form-control @error('email') is-invalid @enderror" placeholder="Enter email address" value="{{ old('email', $user->email) }}">
                             @error('email')<span class="form-error">{{ $message }}</span>@enderror

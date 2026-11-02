@@ -44,7 +44,18 @@ class PermissionSeeder extends Seeder
             'protocol-create',
             'protocol-view',
             'protocol-approve',
+            'protocol-send-back',
+            'protocol-reject',
             'protocol-all',
+            'protocol-new-equipment',
+            'protocol-fill-new-equipment',
+            'protocol-neq-view',
+            'protocol-neq-download',
+            'protocol-revalidation',
+            'protocol-requalification',
+            'protocol-view-approved',
+            'protocol-view-returned',
+            'protocol-view-rejected',
             'protocol-preapproved',
             'protocol-postprocessing',
             'protocol-approved',
@@ -57,8 +68,9 @@ class PermissionSeeder extends Seeder
         ];
 
         foreach($permissions as $permission){
-            Permission::create([
-                'name' => $permission
+            Permission::firstOrCreate([
+                'name' => $permission,
+                'guard_name' => 'web',
             ]);
         }
 

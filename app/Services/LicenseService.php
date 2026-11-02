@@ -171,9 +171,12 @@ class LicenseService
             return $this->invalid('License key does not match the activation token.');
         }
 
-        $expectedFingerprint = $this->getMachineFingerprint();
-        if (($payload['machine_fingerprint'] ?? null) !== $expectedFingerprint) {
-            return $this->invalid('This activation token was issued for a different machine.');
+        if (config('license.bind_machine', false)) {
+            $expectedFingerprint = $this->getMachineFingerprint();
+            $tokenFingerprint = (string) ($payload['machine_fingerprint'] ?? '');
+            if ($tokenFingerprint === '' || ! hash_equals($tokenFingerprint, $expectedFingerprint)) {
+                return $this->invalid('This activation token was issued for a different machine.');
+            }
         }
 
         if (!empty($payload['issued_at']) && Carbon::parse($payload['issued_at'])->isFuture()) {
@@ -217,20 +220,27 @@ class LicenseService
     public function getMachineFingerprint(): string
     {
         $profile = $this->getMachineProfile();
+        $parts = [];
 
-        return hash('sha256', implode('|', [
-            $profile['hostname'] ?? '',
-            $profile['machine_guid'] ?? '',
-            $profile['machine_id'] ?? '',
-            $profile['os_family'] ?? '',
-            $profile['architecture'] ?? '',
-            $profile['app_path'] ?? '',
-        ]));
+        if (config('license.include_hostname', false)) {
+            $parts[] = $profile['hostname'] ?? '';
+            $parts[] = $profile['computer_name'] ?? '';
+        }
+
+        $parts[] = $profile['machine_guid'] ?? '';
+        $parts[] = $profile['machine_id'] ?? '';
+        $parts[] = $profile['os_family'] ?? '';
+        $parts[] = $profile['architecture'] ?? '';
+        $parts[] = $profile['app_path'] ?? '';
+
+        return hash('sha256', implode('|', $parts));
     }
 
     public function getMachineProfile(): array
     {
         return [
+            // ========== THIS IS FOR CLIENT ==========
+            // Client PC hostname (example: LLHODES1913). On local, it is skipped in the fingerprint.
             'hostname' => gethostname() ?: php_uname('n'),
             'computer_name' => getenv('COMPUTERNAME') ?: null,
             'os_family' => PHP_OS_FAMILY,

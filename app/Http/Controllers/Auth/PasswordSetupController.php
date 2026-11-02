@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Services\PasswordHistoryService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Carbon\Carbon;
 
 class PasswordSetupController extends Controller
 {
@@ -32,29 +34,31 @@ class PasswordSetupController extends Controller
      * Save new password (ONE TIME ONLY)
      */
     public function setup(Request $request)
-    { 
+    {
         $request->validate([
-           // 'token'    => 'required',
-            'password' => 'required|min:8|confirmed'
+            'password' => 'required|min:8|confirmed',
         ]);
 
-        $user = DB::table('users')
+        $userRow = DB::table('users')
             ->where('password_setup_token', $request->token)
             ->whereNull('password_setup_used_at')
             ->first();
 
-     //dd( $user);
-
-        if (!$user) {
+        if (! $userRow) {
             return abort(403, 'Password setup link already used or invalid.');
         }
 
+        $user = User::query()->findOrFail($userRow->id);
+        $history = app(PasswordHistoryService::class);
+        $history->assertNotReused($user, $request->password);
+        $history->rememberCurrent($user);
+
         DB::table('users')->where('id', $user->id)->update([
-            'password'                 => Hash::make($request->password),
-            'password_setup_used_at'   => Carbon::now(),
-            //'password_setup_token'     => NULL,
-            //'password_setup_expires_at'=> NULL,
-            'updated_at'               => Carbon::now()
+            'password' => Hash::make($request->password),
+            'password_changed_at' => Carbon::now(),
+            'password_expiry_reminders_sent' => json_encode([]),
+            'password_setup_used_at' => Carbon::now(),
+            'updated_at' => Carbon::now(),
         ]);
 
         return redirect()->route('login')

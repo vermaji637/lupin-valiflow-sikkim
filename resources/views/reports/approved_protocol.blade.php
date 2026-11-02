@@ -40,7 +40,7 @@
                 <div class="row">
                     <div class="col-lg-3 mb-3">
                         <label class="small text-muted">Search</label>
-                        <input type="text" name="search" value="{{ request('search') }}" class="form-control" placeholder="ID / Equipment / Facility / Template">
+                        <input type="text" name="search" value="{{ request('search') }}" class="form-control" placeholder="REQ5 / Title / Equipment">
                     </div>
                     <div class="col-lg-3 mb-3">
                         <label class="small text-muted">Status</label>
@@ -85,7 +85,7 @@
                             <tr>
                                 <th>Protocol No</th>
                                 <th>Document No</th>
-                                <th>Template</th>
+                                <th>Protocol Title</th>
                                 <th>Equipment Name</th>
                                 <th>Facility Section</th>
                                 <th>Status</th>
@@ -98,7 +98,7 @@
                             <tr>
                                 <td>{{ $report->id ?? 'N/A' }}</td>
                                 <td>{{ $report->document?->title ?? $report->document_no ?? 'N/A' }}</td>
-                                <td>{{ $report->template->name ?? $report->template->title ?? 'N/A' }}</td>
+                                <td>{{ $report->protocol_title !== '' ? $report->protocol_title : 'N/A' }}</td>
                                 <td>{{ $report->equipment_name ?? 'N/A' }}</td>
                                 <td>{{ $report->facility_section ?? 'N/A' }}</td>
                                 <td>

@@ -40,6 +40,7 @@ class Kernel extends HttpKernel
             \App\Http\Middleware\VerifyCsrfToken::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
             \App\Http\Middleware\AutoLogoutMiddleware::class,
+            \App\Http\Middleware\EnsurePasswordNotExpired::class,
             \App\Http\Middleware\EnsureLicenseIsValid::class,
         ],
 

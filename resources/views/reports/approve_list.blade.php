@@ -40,7 +40,7 @@
                 <div class="row">
                     <div class="col-lg-3 mb-3">
                         <label class="small text-muted">Search</label>
-                        <input type="text" name="search" value="{{ request('search') }}" class="form-control" placeholder="ID / Equipment / Facility / Template">
+                        <input type="text" name="search" value="{{ request('search') }}" class="form-control" placeholder="REQ5 / Title / Equipment">
                     </div>
                     <div class="col-lg-3 mb-3">
                         <label class="small text-muted">Status</label>
@@ -83,10 +83,7 @@
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Facility/Section</th>
-                            <th>Document No</th>
-                            <th>Template</th>
-                            <th>Version</th>
+                            <th>Protocol Title</th>
                             <th>Equipment Name</th>
                             <th>Equipment ID</th>
                             <th>Created</th>
@@ -106,15 +103,21 @@
                                     'rejected'     => 'bg-danger',
                                     default        => 'bg-secondary'
                                 };
+                                $equipmentName = trim((string) ($r->equipment_name ?? ''));
+                                if ($equipmentName === '' && $r->document?->equipment) {
+                                    $equipmentName = trim((string) ($r->document->equipment->equipment_name ?? ''));
+                                }
+                                $equipmentId = trim((string) ($r->equipment_id ?? ''));
+                                if ($equipmentId === '' && $r->document?->equipment) {
+                                    $equipmentId = trim((string) ($r->document->equipment->equipment_id ?? ''));
+                                }
+                                $protocolTitle = $r->protocol_title;
                             @endphp
                             <tr>
                                 <td><a href="{{ route('reports.show', $r) }}">{{ $r->id }}</a></td>
-                                <td>{{ $r->facility_section }}</td>
-                                <td>{{ $r->document?->title }}</td>
-                                <td>{{ $r->template->name ?? $r->template->title ?? '-' }}</td>
-                                <td>{{ $r->version }}</td>
-                                <td>{{ $r->equipment_name }}</td>
-                                <td>{{ $r->equipment_id }}</td>
+                                <td>{{ $protocolTitle !== '' ? $protocolTitle : '-' }}</td>
+                                <td>{{ $equipmentName !== '' ? $equipmentName : '-' }}</td>
+                                <td>{{ $equipmentId !== '' ? $equipmentId : '-' }}</td>
                                 <td>{{ optional($r->created_at)->format('d-m-Y h:i A') }}</td>
                                 <td><span class="badge {{ $badgeClass }} text-light">{{ $status }}</span></td>
                                 <td>
@@ -125,7 +128,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="10" class="text-center py-5 text-muted">No approved protocols found for the current filters.</td>
+                                <td colspan="7" class="text-center py-5 text-muted">No approved protocols found for the current filters.</td>
                             </tr>
                         @endforelse
                     </tbody>

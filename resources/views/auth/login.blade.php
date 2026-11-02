@@ -28,23 +28,26 @@
 
                 <div class="auth-metrics">
                     <div class="auth-metric">
-                        <span class="auth-metric-value">2-Stage</span>
-                        <span class="auth-metric-label">Pre and post approval flow</span>
+                        <span class="auth-metric-value">Step by Step</span>
+                        <span class="auth-metric-label">post approval workflow</span>
                     </div>
                     <div class="auth-metric">
                         <span class="auth-metric-value">PDF</span>
                         <span class="auth-metric-label">Report and offer generation</span>
                     </div>
                     <div class="auth-metric">
-                        <span class="auth-metric-value">ACL</span>
-                        <span class="auth-metric-label">Role and permission controls</span>
+                        <span class="auth-metric-value">RBAC</span>
+                        <span class="auth-metric-label">Role-based permission access</span>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="auth-footer-note">
-            Designed for quality, engineering, validation, and approval operations.
+            Designed for quality, engineering, validation, and approval operations.<br>
+            <span style="display: inline-block; margin-top: 4px; font-size: 12px; color: rgba(255, 255, 255, 0.88);">
+                Valiflow™ Platform by <strong style="color: #f7d79d; font-weight: 700;">Ecowiztech Solution Pvt. Ltd.™</strong>
+            </span>
         </div>
     </section>
 
@@ -116,15 +119,11 @@
                 </button>
             </form>
 
-            <div class="auth-separator">or continue with</div>
-
-            <a href="{{ route('google.login') }}" class="auth-google">
-                <i class="fab fa-google"></i>
-                <span>Login with Google</span>
-            </a>
-
             <div class="auth-meta">
                 Authorized users only. Activity may be monitored and logged.
+                <div style="margin-top: 10px; font-size: 12px; color: #475569; font-weight: 500;">
+                    © {{ date('Y') }} {{ config('app.name', 'Lupin') }}. All Rights Reserved. | Powered by <strong style="color: #0f4c81; font-weight: 800;">Ecowiztech Solution Pvt. Ltd.™</strong>
+                </div>
             </div>
         </div>
     </section>

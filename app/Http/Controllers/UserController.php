@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
-use App\Models\Company;
 use App\Exports\UsersExport;
 use App\Imports\UsersImport;
 use Illuminate\Http\Request;
@@ -15,6 +14,8 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Mail;
+use App\Services\PasswordExpiryService;
+use App\Services\PasswordHistoryService;
 
 class UserController extends Controller
 {
@@ -48,6 +49,8 @@ class UserController extends Controller
             $query->where(function ($userQuery) use ($search) {
                 $userQuery->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('designation', 'like', "%{$search}%")
+                    ->orWhere('department_name', 'like', "%{$search}%")
                     ->orWhere('email', 'like', "%{$search}%")
                     ->orWhere('mobile_number', 'like', "%{$search}%")
                     ->orWhereHas('roles', function ($roleQuery) use ($search) {
@@ -81,11 +84,9 @@ class UserController extends Controller
      */
     public function create()
     {
-        $roles = Role::all();
-		$Companies = Company::all();
-
-
-        return view('users.add', ['roles' => $roles,'Companies'=>$Companies ]);
+        return view('users.add', [
+            'roles' => Role::orderBy('name')->get(),
+        ]);
     }
     public function showForm()
     {
@@ -120,6 +121,8 @@ class UserController extends Controller
         $validated = $request->validate([
             'first_name'    => 'required|string|max:255',
             'last_name'     => 'required|string|max:255',
+            'designation'     => 'nullable|string|max:255',
+            'department_name' => 'nullable|string|max:255',
             'email'         => 'required|email|unique:users,email',
             'mobile_number' => 'required|numeric|digits:10',
             'role_id'       => 'required|exists:roles,id',
@@ -140,9 +143,13 @@ class UserController extends Controller
         $user = User::create([
             'first_name'    => $request->first_name,
             'last_name'     => $request->last_name,
-            'email'         => $request->email,
-            'mobile_number' => $request->mobile_number,
-            'role_id'       => $request->role_id,
+            'designation'     => $request->designation,
+            'department_name' => $request->department_name,
+            'designation_id'  => null,
+            'department_id'   => null,
+            'email'           => $request->email,
+            'mobile_number'   => $request->mobile_number,
+            'role_id'         => $request->role_id,
             'status'        => $request->status,
             'password'      => '',
             'password_setup_token'            => $token,
@@ -161,6 +168,15 @@ class UserController extends Controller
         app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
 
         $link = url('/setup-password/' . $token);
+        // SMTP MAIL TRIGGER — Password Setup Email
+        // This line sends the "Set Your Password" email to the new user.
+        // Email is sent using MAIL_* values from .env file.
+        // If MAIL_MAILER=log in .env, email content appears in
+        // storage/logs/laravel.log instead of actually being sent.
+        // To send real email: set MAIL_MAILER=smtp and fill MAIL_HOST,
+        // MAIL_PORT, MAIL_FROM_ADDRESS etc in .env
+        // Example of what gets sent: resources/views/emails/password-setup.blade.php
+        //   (or whatever the actual blade view name is — check the Mailable class)
         Mail::to($user->email)->send(new \App\Mail\PasswordSetupLink($link));
 
         DB::commit();
@@ -218,10 +234,9 @@ class UserController extends Controller
      */
     public function edit(User $user)
     {
-        $roles = Role::all();
         return view('users.edit')->with([
-            'roles' => $roles,
-            'user'  => $user
+            'roles' => Role::orderBy('name')->get(),
+            'user' => $user,
         ]);
     }
 
@@ -236,6 +251,8 @@ class UserController extends Controller
     $request->validate([
         'first_name'    => 'required|string|max:255',
         'last_name'     => 'required|string|max:255',
+        'designation'     => 'nullable|string|max:255',
+        'department_name' => 'nullable|string|max:255',
         'email'         => 'required|email|unique:users,email,' . $user->id,
         'mobile_number' => 'required|numeric|digits:10',
         'role_id'       => 'required|exists:roles,id',
@@ -252,9 +269,13 @@ class UserController extends Controller
         $user->update([
             'first_name'    => $request->first_name,
             'last_name'     => $request->last_name,
-            'email'         => $request->email,
-            'mobile_number' => $request->mobile_number,
-            'role_id'       => (int) $request->role_id, // keep in sync
+            'designation'     => $request->designation,
+            'department_name' => $request->department_name,
+            'designation_id'  => null,
+            'department_id'   => null,
+            'email'           => $request->email,
+            'mobile_number'   => $request->mobile_number,
+            'role_id'         => (int) $request->role_id, // keep in sync
             'status'        => $request->status,
         ]);
 
@@ -338,9 +359,15 @@ class UserController extends Controller
             'password' => 'required|min:8|confirmed',
         ]);
 
+        $history = app(PasswordHistoryService::class);
+        $history->assertNotReused($user, $request->password);
+        $history->rememberCurrent($user);
+
         $user->update([
             'password' => Hash::make($request->password),
         ]);
+
+        app(PasswordExpiryService::class)->markPasswordChanged($user);
 
         return redirect()
             ->back()

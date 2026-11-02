@@ -56,7 +56,7 @@
 
     {{-- ================= HEADER ================= --}}
      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
-        <h3 class="mb-2 mb-md-0">Report #{{ $report->id }}</h3>
+        <h3 class="mb-2 mb-md-0">{{ $report->displayCode() }}</h3>
 
         <div class="d-flex align-items-center flex-wrap">
             @if(empty($report->docx_import_path))
@@ -78,19 +78,19 @@
             @endif
 
             @if($report->docx_import_status === 'completed' && $report->docx_filled_path)
-                <a href="{{ route('reports.downloadApprovedWord', $report->id) }}" class="btn btn-success btn-icon-split shadow-sm mr-2 mb-2">
+                <!-- <a href="{{ route('reports.downloadApprovedWord', $report->id) }}" class="btn btn-success btn-icon-split shadow-sm mr-2 mb-2">
                     <span class="icon text-white-50">
                         <i class="fas fa-file-word"></i>
                     </span>
                     <span class="text">Download Filled DOCX</span>
-                </a>
-
+                </a> -->
+<!-- 
                 <a href="{{ route('reports.docx-import.download-pdf', $report) }}" class="btn btn-danger btn-icon-split shadow-sm mr-2 mb-2">
                     <span class="icon text-white-50">
                         <i class="fas fa-file-pdf"></i>
                     </span>
                     <span class="text">Download PDF</span>
-                </a>
+                </a> -->
             @endif
 
             <span class="badge bg-secondary text-dark mr-1 mb-2">
@@ -118,7 +118,7 @@
     @endif
 
 
-    {{-- ================= WORKFLOW VARIABLES ================= --}}
+    {{-- Workflow flags: who can approve, resubmit, or see status banners --}}
     @php
 
         $currentStep = $report->approvalSteps()
@@ -137,6 +137,7 @@
 
         $isPreReturned  = $report->status === 'pre_returned';
         $isPostReturned = $report->status === 'post_returned';
+        $isRejected     = $report->status === 'rejected';
 
         $isPreApproved  = $report->status === 'pre_approved';
         $isFinalApproved = $report->status === 'approved';
@@ -145,6 +146,7 @@
         $postSteps = $report->approvalSteps->where('stage','post')->sortBy('step_order');
 
         $docxPostStampPrefixes = [
+            // Maps POST step labels to reports.data prefix keys for DOCX stamp display
             'POST_PREPARED'    => 'post_prepared_by',
             'POST_ENGINEERING' => 'post_checked_by_engineering',
             'POST_PRODUCTION'  => 'post_checked_by_production',
@@ -246,17 +248,37 @@
             ✅ This Protocol is Fully Approved (Final Protocol)
         </div>
     @endif
+    {{-- ================= PERMANENTLY REJECTED ================= --}}
+    @if($isRejected)
+        <div class="alert alert-danger">
+            <strong>This protocol was rejected and is closed.</strong><br>
+            It cannot be edited or resubmitted.
+            @php
+                $rejectStep = $report->approvalSteps
+                    ->where('stage', $report->stage)
+                    ->filter(fn ($step) => !empty($step->rejected_at))
+                    ->sortByDesc('rejected_at')
+                    ->first();
+            @endphp
+            @if($rejectStep && $rejectStep->remark)
+                <div class="mt-2 mb-0"><strong>Remark:</strong> {{ $rejectStep->remark }}</div>
+            @endif
+        </div>
+    @endif
+
     {{-- ================= RETURNED TO CREATOR ================= --}}
     @if(($isPreReturned || $isPostReturned) && $isCreator)
 
-        <div class="alert alert-danger d-flex justify-content-between align-items-center">
+        <div class="alert alert-warning d-flex justify-content-between align-items-center">
             <div>
-                <strong>This Protocol was rejected.</strong><br>
+                <strong>This protocol was sent back for correction.</strong><br>
                 Please correct the form and resubmit.
             </div>
 
             @if($isPreReturned)
-                <a href="{{ route('reports.editReturnedPre',$report) }}"
+                <a href="{{ !empty($report->docx_import_path)
+                        ? route('reports.docx-import.fill-form', $report)
+                        : route('reports.editReturnedPre', $report) }}"
                    class="btn btn-primary">
                     Edit & Resubmit (PRE)
                 </a>
@@ -323,7 +345,7 @@
     @endif
 
 
-    {{-- ================= REPORT BODY ================= --}}
+    {{-- Report body: DOCX table preview, async fetch, or HTML template --}}
     @php
         $docxReadonlyHtml = !empty($docxPreviewHtml)
             ? $docxPreviewHtml
@@ -332,6 +354,7 @@
 
     @if(!empty($report->docx_import_path))
     @push('styles')
+    {{-- DOCX preview table styles — keeps cells readable inside premium-ui theme --}}
     <style>
     /* Match fill form table layout — premium-ui can break table display without !important */
     body.premium-app #reportReadonlyBody .docx-preview-wrapper {
@@ -405,10 +428,12 @@
     <div class="card mb-4">
         <div class="card-body" id="reportReadonlyBody">
             @if(!empty($report->docx_import_path) && !empty($docxReadonlyHtml))
+                {{-- Server-rendered DOCX table preview from buildShowPreviewHtml --}}
                 <div class="docx-preview-wrapper overflow-auto">
                     {!! $docxReadonlyHtml !!}
                 </div>
             @elseif(!empty($report->docx_import_path))
+                {{-- Fallback: load preview HTML via AJAX when not pre-rendered --}}
                 <div class="docx-preview-wrapper overflow-auto" id="ap-preview">
                     <p class="text-muted mb-0">Loading document preview...</p>
                 </div>
@@ -442,7 +467,7 @@
     </div>
 
 
-    {{-- ================= APPROVE / REJECT SECTION ================= --}}
+    {{-- E-sign approve and reject forms for the current pending approver --}}
     @if($isPending && $isCurrentApprover)
 
         <div class="card border-success mb-4">
@@ -452,6 +477,14 @@
                     You are the current approver
                 </h5>
 
+                @php
+                    $canApprove = \App\Services\SidebarPermissionService::userCan('protocol-approve');
+                    $canSendBack = \App\Services\SidebarPermissionService::userCan('protocol-send-back');
+                    $canReject = \App\Services\SidebarPermissionService::userCan('protocol-reject');
+                @endphp
+
+                @if($canApprove)
+                {{-- Approve: POST to reports.approve with e-sign password --}}
                 <form method="POST"
                       action="{{ route('reports.approve',$report) }}"
                       class="d-inline esign-required">
@@ -461,15 +494,60 @@
                         Approve
                     </button>
                 </form>
+                @endif
 
+                @if($canSendBack)
                 <button type="button"
-        class="btn btn-danger ml-2"
-        onclick="var box=document.getElementById('rejectBox'); box.style.display = box.style.display === 'none' ? 'block' : 'none';">
-    Reject
-</button>
+                    class="btn btn-warning ml-2"
+                    onclick="toggleDecisionBox('sendBackBox');">
+                    Send Back
+                </button>
+                @endif
 
+                @if($canReject)
+                <button type="button"
+                    class="btn btn-danger ml-2"
+                    onclick="toggleDecisionBox('rejectBox');">
+                    Reject
+                </button>
+                @endif
+
+                @if(!$canApprove && !$canSendBack && !$canReject)
+                    <div class="alert alert-warning mb-0">
+                        You are the current approver, but no Approve / Send Back / Reject permission is assigned to your role.
+                    </div>
+                @endif
+
+@if($canSendBack)
+<div id="sendBackBox" style="display:none;" class="mt-3">
+    <form method="POST"
+          action="{{ route('reports.sendBack',$report) }}"
+          id="sendBackForm"
+          class="esign-required">
+        @csrf
+        <input type="hidden" name="password">
+
+        <div class="mb-2">
+            <label class="form-label">Send Back Reason <span class="text-danger">*</span></label>
+            <textarea id="sendBackRemark"
+                      name="remark"
+                      class="form-control"
+                      rows="3"
+                      placeholder="Enter reason to send back for correction..."></textarea>
+            <div id="sendBackNotification" class="alert alert-warning mt-2 py-2" style="display:none;">
+                Please enter a reason before sending back.
+            </div>
+        </div>
+
+        <button type="button" class="btn btn-warning" onclick="submitDecision('sendBack')">
+            Confirm Send Back
+        </button>
+    </form>
+</div>
+@endif
+
+@if($canReject)
 <div id="rejectBox" style="display:none;" class="mt-3">
-
     <form method="POST"
           action="{{ route('reports.reject',$report) }}"
           id="rejectForm"
@@ -489,16 +567,21 @@
                 <div class="invalid-feedback">{{ $message }}</div>
             @enderror
 
+            <div class="alert alert-danger mt-2 py-2 mb-0">
+                Reject will close this protocol. The filler cannot edit or resubmit it.
+            </div>
+
             <div id="rejectNotification" class="alert alert-warning mt-2 py-2" style="display:none;">
-                ⚠️ Please enter a reason before rejecting.
+                Please enter a reason before rejecting.
             </div>
         </div>
 
-        <button type="button" class="btn btn-danger" onclick="submitReject()">
+        <button type="button" class="btn btn-danger" onclick="submitDecision('reject')">
             Confirm Reject
         </button>
     </form>
 </div>
+@endif
 
             </div>
         </div>
@@ -533,6 +616,9 @@
                         <td>
                             {{ $step->user->first_name ?? '' }}
                             {{ $step->user->last_name ?? '' }}
+                            @if(!empty($step->user->designation))
+                                <div class="small text-muted">{{ $step->user->designation }}</div>
+                            @endif
                         </td>
                         <td>
                             @if($step->approved_at)
@@ -582,6 +668,9 @@
                             <td>
                                 {{ $step->user->first_name ?? '' }}
                                 {{ $step->user->last_name ?? '' }}
+                                @if(!empty($step->user->designation))
+                                    <div class="small text-muted">{{ $step->user->designation }}</div>
+                                @endif
                                 @if($stampedName)
                                     <div class="small text-muted mt-1">
                                         Stamped: {{ $stampedName }}
@@ -657,21 +746,40 @@
 </div>
 
 <script>
-function submitReject() {
-    const remark = document.getElementById('rejectRemark').value.trim();
-    const notification = document.getElementById('rejectNotification');
+function toggleDecisionBox(id) {
+    var target = document.getElementById(id);
+    if (!target) return;
+    var show = target.style.display === 'none' || target.style.display === '';
+    ['sendBackBox', 'rejectBox'].forEach(function (boxId) {
+        var box = document.getElementById(boxId);
+        if (box) box.style.display = 'none';
+    });
+    if (show) target.style.display = 'block';
+}
+
+function submitDecision(type) {
+    var remarkId = type === 'sendBack' ? 'sendBackRemark' : 'rejectRemark';
+    var noteId = type === 'sendBack' ? 'sendBackNotification' : 'rejectNotification';
+    var formId = type === 'sendBack' ? 'sendBackForm' : 'rejectForm';
+    var remarkEl = document.getElementById(remarkId);
+    var notification = document.getElementById(noteId);
+    var remark = remarkEl ? remarkEl.value.trim() : '';
 
     if (!remark) {
-        notification.style.display = 'block';
-        document.getElementById('rejectRemark').classList.add('is-invalid');
-        document.getElementById('rejectRemark').focus();
-        setTimeout(() => { notification.style.display = 'none'; }, 4000);
+        if (notification) notification.style.display = 'block';
+        if (remarkEl) {
+            remarkEl.classList.add('is-invalid');
+            remarkEl.focus();
+        }
+        setTimeout(function () {
+            if (notification) notification.style.display = 'none';
+        }, 4000);
         return;
     }
 
-    notification.style.display = 'none';
-    document.getElementById('rejectRemark').classList.remove('is-invalid');
-    document.getElementById('rejectForm').requestSubmit();
+    if (notification) notification.style.display = 'none';
+    if (remarkEl) remarkEl.classList.remove('is-invalid');
+    document.getElementById(formId).requestSubmit();
 }
 
 document.addEventListener('DOMContentLoaded', function () {

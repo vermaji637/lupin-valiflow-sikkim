@@ -53,14 +53,36 @@
                 @if(\App\Services\SidebarPermissionService::userCan('user-create'))
                 <a class="collapse-item" href="{{ App\Helpers\SidebarHelper::getRouteUrl('user-create') }}">Add New</a>
                 @endif
-                @if(\App\Services\SidebarPermissionService::userCan('user-import'))
+                {{-- @if(\App\Services\SidebarPermissionService::userCan('user-import'))
                 <a class="collapse-item" href="{{ App\Helpers\SidebarHelper::getRouteUrl('user-import') }}">Import Data</a>
-                @endif
-                @if(\App\Services\SidebarPermissionService::userCanAny(['security-policy-view', 'security-policy-edit']))
-                <a class="collapse-item" href="{{ App\Helpers\SidebarHelper::getRouteUrl('security-policy-view') }}">Password Policy</a>
-                @endif
+                @endif --}}
                 @if(\App\Services\SidebarPermissionService::userCan('role-list'))
                 <a class="collapse-item" href="{{ App\Helpers\SidebarHelper::getRouteUrl('role-list') }}">Roles</a>
+                @endif
+            </div>
+        </div>
+    </li>
+    @endif
+
+    <!-- Nav Item - Settings -->
+    @if(\App\Services\SidebarPermissionService::userHasAnyPermissionInGroup('settings'))
+    <hr class="sidebar-divider">
+
+    <div class="sidebar-heading">
+        Settings
+    </div>
+    <li class="nav-item {{ request()->routeIs('admin.security-policy') ? 'active' : '' }}">
+        <a class="nav-link collapsed menu-link" href="#" data-toggle="collapse" data-target="#settingsMenu"
+            aria-expanded="{{ request()->routeIs('admin.security-policy') ? 'true' : 'false' }}" aria-controls="settingsMenu">
+            <i class="fas fa-cog"></i>
+            <span class="menu-label">Settings</span>
+            <span class="menu-chevron"><i class="fas fa-chevron-right"></i></span>
+        </a>
+        <div id="settingsMenu" class="collapse {{ request()->routeIs('admin.security-policy') ? 'show' : '' }}" aria-labelledby="headingSettings" data-parent="#accordionSidebar">
+            <div class="collapse-inner rounded submenu-panel">
+                <h6 class="collapse-header">Settings:</h6>
+                @if(\App\Services\SidebarPermissionService::userCanAny(['security-policy-view', 'security-policy-edit']))
+                <a class="collapse-item {{ request()->routeIs('admin.security-policy') ? 'active' : '' }}" href="{{ App\Helpers\SidebarHelper::getRouteUrl('security-policy-view') }}">Security Policy</a>
                 @endif
             </div>
         </div>
@@ -70,12 +92,12 @@
 
 
     <!-- Nav Item - Masters -->
-    @if(\App\Services\SidebarPermissionService::userHasAnyPermissionInGroup('masters'))
+    <!-- @if(\App\Services\SidebarPermissionService::userHasAnyPermissionInGroup('masters')) -->
       <!-- Divider -->
-    <hr class="sidebar-divider">
+    <!-- <hr class="sidebar-divider"> -->
 
     <!-- Heading -->
-    <div class="sidebar-heading">
+    <!-- <div class="sidebar-heading">
         Masters
     </div>
     <li class="nav-item">
@@ -86,9 +108,9 @@
             <span class="menu-chevron"><i class="fas fa-chevron-right"></i></span>
         </a>
         <div id="masters" class="collapse" aria-labelledby="headingMasters" data-parent="#accordionSidebar">
-            <div class="collapse-inner rounded submenu-panel">
+            <div class="collapse-inner rounded submenu-panel"> -->
                 {{-- Permissions menu removed --}}
-                @if(\App\Services\SidebarPermissionService::userCan('equipment-list'))
+                <!-- @if(\App\Services\SidebarPermissionService::userCan('equipment-list'))
                 <a class="collapse-item" href="{{ App\Helpers\SidebarHelper::getRouteUrl('equipment-list') }}">Equipment Master</a>
                 <a class="collapse-item" href="{{ route('equipment.my-approved') }}">My Approved Equipment</a>
                 @endif
@@ -105,15 +127,15 @@
         </div>
 
     </li>
-    @endif
+    @endif -->
 
 
 <!-- Nav Item - QA Documents -->
-@if(\App\Services\SidebarPermissionService::userHasAnyPermissionInGroup('qa_documents'))
+<!-- @if(\App\Services\SidebarPermissionService::userHasAnyPermissionInGroup('qa_documents')) -->
             <!-- Divider -->
-<hr class="sidebar-divider">
+<!-- <hr class="sidebar-divider"> -->
 <!-- Heading -->
-<div class="sidebar-heading">
+<!-- <div class="sidebar-heading">
     QA Documents
 </div>
 <li class="nav-item">
@@ -131,8 +153,8 @@
             @endif
         </div>
     </div>
-</li>
-@endif
+</li> -->
+<!-- @endif -->
 
 
 
@@ -184,15 +206,17 @@
         <div id="protocol" class="collapse" aria-labelledby="headingProtocol" data-parent="#accordionSidebar">
             <div class="collapse-inner rounded submenu-panel">
 
-                @if(\App\Services\SidebarPermissionService::userCan('protocol-approve'))
+                <!-- @if(\App\Services\SidebarPermissionService::userCan('protocol-approve'))
                 <a class="collapse-item" href="{{ App\Helpers\SidebarHelper::getRouteUrl('protocol-approve') }}">Approve Protocol</a>
-                @endif
-                @if(\App\Services\SidebarPermissionService::userCan('protocol-all'))
+                @endif -->
+                {{-- @if(\App\Services\SidebarPermissionService::userCan('protocol-all'))
                 <a class="collapse-item" href="{{ route('protocol') }}">All Protocol</a>
-                @endif
+                @endif --}}
                 {{-- @if(\App\Services\SidebarPermissionService::userCan('protocol-preapproved'))
                 <a class="collapse-item" href="{{ route('preApproved') }}">Pre Approved Protocol</a>
                 @endif --}}
+                {{-- Hidden from sidebar; use All Protocol status filter instead --}}
+                {{--
                 @if(\App\Services\SidebarPermissionService::userCan('protocol-postprocessing'))
                 <a class="collapse-item" href="{{ route('PostproccesingPotocol') }}">Post Processing Protocol</a>
                 @endif
@@ -202,9 +226,33 @@
                 @if(\App\Services\SidebarPermissionService::userCan('protocol-my-pending'))
                 <a class="collapse-item" href="{{ route('reports.myPendingApprovals') }}">My Pending Approvals</a>
                 @endif
-                @if(\App\Services\SidebarPermissionService::userCan('protocol-all'))
+                --}}
+                @if(\App\Services\SidebarPermissionService::userCan('protocol-new-equipment'))
                 <a class="collapse-item" href="{{ route('protocol.new-equipment-qualification.index') }}">New Equipment Qualification</a>
                 @endif
+                {{-- Fill / view / download roles without full NEQ menu permission --}}
+                @if((\App\Services\SidebarPermissionService::userCan('protocol-fill-new-equipment')
+                    || \App\Services\SidebarPermissionService::userCan('protocol-neq-view')
+                    || \App\Services\SidebarPermissionService::userCan('protocol-neq-download'))
+                    && !\App\Services\SidebarPermissionService::userCan('protocol-new-equipment'))
+                <a class="collapse-item" href="{{ route('protocol.new-equipment-qualification.index') }}">New Equipment Qualification</a>
+                @endif
+                {{-- Former separate Fill entry (merged into NEQ) --}}
+                {{--
+                @if(\App\Services\SidebarPermissionService::userCan('protocol-fill-new-equipment'))
+                <a class="collapse-item" href="{{ route('protocol.docx-import.create', ['source' => 'new_equipment_qualification']) }}">Fill New Equipment Qualification</a>
+                @endif
+                --}}
+                @if(\App\Services\SidebarPermissionService::userCan('protocol-revalidation'))
+                <a class="collapse-item" href="{{ route('protocol.revalidation') }}">Revalidation</a>
+                @endif
+                @if(\App\Services\SidebarPermissionService::userCan('protocol-requalification'))
+                <a class="collapse-item" href="{{ route('protocol.requalification') }}">Requalification</a>
+                @endif
+                <!-- <a class="collapse-item" href="{{ route('protocol.docx-import.create') }}">Revalidation Qualification</a>
+
+                <a class="collapse-item" href="{{ route('protocol.docx-import.create') }}">Requalification</a>
+                 -->
             </div>
         </div>
     </li>

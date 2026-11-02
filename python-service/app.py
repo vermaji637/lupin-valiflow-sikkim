@@ -6,6 +6,7 @@ from doc_parser import (
     PARA_COLON_BLANK_RE,
     dedupe_colon_label,
     has_paragraph_blank,
+    is_locked_section_title,
     collect_paragraph_texts,
     iter_unique_textboxes,
     is_border_blank_paragraph,
@@ -14,6 +15,7 @@ from doc_parser import (
     is_paragraph_yes_no_radio,
     paragraph_yes_no_label,
     is_list_of_attachment_table,
+    is_attachment_upload_column,
     is_report_approval_block_table,
     get_table_column_headers,
     resolve_sl_no_column_index,
@@ -24,6 +26,8 @@ from doc_parser import (
     is_toc_table,
     is_toc_list_table,
     is_toc_entry_text,
+    is_equipment_section_banner_row,
+    is_repeated_column_header_row,
 )
 from report_generator import fill_docx, _normalize_text_value
 from pydantic import BaseModel, field_validator
@@ -35,26 +39,32 @@ import re
 import shutil
 import uuid
 import subprocess
+import base64
+from pathlib import Path
 
 logger = logging.getLogger("valiflow.docx")
 
 
-load_dotenv()
+DOTENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(dotenv_path=DOTENV_PATH, override=True)
 
 # ── Pydantic Models ──────────────────────────
 # FieldValue  — single field submission for /fill
 # FillRequest — full /fill payload: file_id + fields list
+# Pydantic model for one field value submitted to POST /fill.
 class FieldValue(BaseModel):
     location: str
     value: str
     locked: bool = False
     type: str = ""
 
+# Pydantic model for the full POST /fill payload (file_id + fields list).
 class FillRequest(BaseModel):
     file_id: str
     original_filename: str
     fields: List[FieldValue]
     attachment_links: Optional[dict[str, Any]] = None
+    equipment_id: Optional[str] = None
 
     @field_validator("attachment_links", mode="before")
     @classmethod
@@ -68,14 +78,77 @@ class FillRequest(BaseModel):
 
 app = FastAPI(title="Valiflow DOCX Service", version="1.0.0")
 
-UPLOAD_PATH = os.getenv("UPLOAD_PATH",
-    r"D:\lupin\valiflow-main (3)\valiflow-main\storage\app\public\templates\docx")
-GENERATED_REPORTS_PATH = os.getenv("GENERATED_REPORTS_PATH",
-    r"D:\lupin\valiflow-main (3)\valiflow-main\storage\app\public\generated_reports")
-ATTACHMENTS_PATH = os.getenv("ATTACHMENTS_PATH",
-    r"D:\lupin\valiflow-main (3)\valiflow-main\storage\app\public\attachments")
+PYTHON_SERVICE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = PYTHON_SERVICE_DIR.parent
+DEFAULT_PUBLIC_STORAGE = PROJECT_ROOT / "storage" / "app" / "public"
 
-LIBREOFFICE = r"C:\Program Files\LibreOffice\program\soffice.exe"
+
+def _project_storage_path(env_key: str, *relative_parts: str) -> str:
+    """Resolve storage dir from .env only when it belongs to this project tree."""
+    default = DEFAULT_PUBLIC_STORAGE.joinpath(*relative_parts)
+    configured = os.getenv(env_key, "").strip()
+    if configured:
+        path = Path(configured)
+        try:
+            resolved = path.resolve()
+            project_root = PROJECT_ROOT.resolve()
+            if resolved == default.resolve() or project_root in resolved.parents:
+                return str(resolved)
+        except OSError:
+            pass
+        logger.warning(
+            "Ignoring %s=%s (outside project); using %s",
+            env_key,
+            configured,
+            default,
+        )
+
+    return str(default)
+
+
+UPLOAD_PATH = _project_storage_path("UPLOAD_PATH", "templates", "docx")
+GENERATED_REPORTS_PATH = _project_storage_path(
+    "GENERATED_REPORTS_PATH",
+    "generated_reports",
+)
+ATTACHMENTS_PATH = _project_storage_path("ATTACHMENTS_PATH", "attachments")
+
+LIBREOFFICE = os.getenv("LIBREOFFICE_BIN", "soffice")
+REQUIRED_DIRS = [
+    UPLOAD_PATH,
+    GENERATED_REPORTS_PATH,
+    ATTACHMENTS_PATH,
+]
+
+
+def resolve_docx_template_path(file_id: str) -> str:
+    """Find template DOCX for preview/fill; restore from filled output when template is missing."""
+    for ext in (".docx", ".doc"):
+        candidate = os.path.join(UPLOAD_PATH, f"{file_id}{ext}")
+        if os.path.exists(candidate):
+            return candidate
+
+    filled_path = os.path.join(GENERATED_REPORTS_PATH, f"{file_id}_filled.docx")
+    if os.path.exists(filled_path):
+        os.makedirs(UPLOAD_PATH, exist_ok=True)
+        restored = os.path.join(UPLOAD_PATH, f"{file_id}.docx")
+        if not os.path.exists(restored):
+            shutil.copy2(filled_path, restored)
+            logger.info(
+                "Restored missing template from filled DOCX: %s -> %s",
+                filled_path,
+                restored,
+            )
+        return restored if os.path.exists(restored) else filled_path
+
+    raise HTTPException(status_code=404, detail=f"File nahi mila: {file_id}")
+
+
+@app.on_event("startup")
+# Create upload, generated-reports, and attachments directories on service start.
+def ensure_required_dirs() -> None:
+    for directory in REQUIRED_DIRS:
+        os.makedirs(directory, exist_ok=True)
 
 
 # ── convert_doc_to_docx() ───────────────────────────
@@ -87,18 +160,22 @@ LIBREOFFICE = r"C:\Program Files\LibreOffice\program\soffice.exe"
 #   2. Runs --headless --convert-to docx into the source directory
 #   3. Returns the .docx path or raises if conversion fails
 def convert_doc_to_docx(doc_path: str) -> str:
-    if not os.path.exists(LIBREOFFICE):
-        raise Exception("LibreOffice install nahi hai!")
-
     output_dir = os.path.dirname(doc_path)
-
-    result = subprocess.run([
+    command = [
         LIBREOFFICE,
         "--headless",
-        "--convert-to", "docx",
-        "--outdir", output_dir,
-        doc_path
-    ], capture_output=True, text=True, timeout=60)
+        "--convert-to",
+        "docx",
+        "--outdir",
+        output_dir,
+        doc_path,
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    except FileNotFoundError as exc:
+        raise Exception(
+            "LibreOffice binary not found. Set LIBREOFFICE_BIN or install LibreOffice."
+        ) from exc
 
     docx_path = doc_path.replace(".doc", ".docx")
 
@@ -116,6 +193,13 @@ def root():
     return {"status": "running", "service": "Valiflow Python Microservice"}
 
 
+# Browsers and Cursor probe /json/version. This service is not a browser debugger,
+# so answer 200 instead of leaving a 404 in the log.
+@app.get("/json/version")
+def json_version():
+    return {"status": "running", "service": "Valiflow Python Microservice"}
+
+
 # ── health() ────────────────────────────────────────
 # Detailed health check with configured storage paths and LibreOffice status.
 # Returns: JSON with status, upload_path, generated_reports_path, etc.
@@ -127,7 +211,7 @@ def health():
         "upload_path": UPLOAD_PATH,
         "generated_reports_path": GENERATED_REPORTS_PATH,
         "attachments_path": ATTACHMENTS_PATH,
-        "libreoffice": os.path.exists(LIBREOFFICE),
+        "libreoffice": bool(shutil.which(LIBREOFFICE) or os.path.exists(LIBREOFFICE)),
     }
 
 
@@ -143,6 +227,7 @@ def health():
 #   5. Returns file_id UUID and fillable_fields for Laravel to store on report
 @app.post("/parse")
 async def parse_document(file: UploadFile = File(...)):
+    # Reject uploads that are not .doc or .docx.
     if not file.filename.endswith(('.docx', '.doc')):
         raise HTTPException(
             status_code=400,
@@ -153,7 +238,9 @@ async def parse_document(file: UploadFile = File(...)):
     file_ext = os.path.splitext(file.filename)[1]
     save_filename = f"{file_id}{file_ext}"
     save_path = os.path.join(UPLOAD_PATH, save_filename)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
+    # Save uploaded bytes to UPLOAD_PATH as {uuid}.docx or {uuid}.doc.
     try:
         with open(save_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -164,6 +251,7 @@ async def parse_document(file: UploadFile = File(...)):
         )
 
     if save_path.endswith(".doc"):
+        # Convert legacy .doc to .docx via LibreOffice before parsing.
         try:
             save_path = convert_doc_to_docx(save_path)
         except Exception as e:
@@ -173,6 +261,7 @@ async def parse_document(file: UploadFile = File(...)):
             )
 
     try:
+        # Run doc_parser.parse_docx to detect fillable fields in body tables and paragraphs.
         result = parse_docx(save_path)
     except Exception as e:
         if os.path.exists(save_path):
@@ -182,8 +271,23 @@ async def parse_document(file: UploadFile = File(...)):
             detail=f"Parse error: {str(e)}"
         )
 
-    editable_count = sum(1 for f in result["fillable_fields"] if not f["locked"])
-    locked_count = sum(1 for f in result["fillable_fields"] if f["locked"])
+    editable_count = sum(1 for f in result["fillable_fields"] if not f.get("locked"))
+    locked_count = sum(1 for f in result["fillable_fields"] if f.get("locked"))
+    prefilled_count = sum(1 for f in result["fillable_fields"] if f.get("prefilled"))
+    # Count approver fields still eligible for e-stamp (not prefilled in template).
+    stamp_eligible_count = sum(
+        1 for f in result["fillable_fields"]
+        if f.get("approver_role") and f.get("stamp_eligible", True)
+    )
+
+    logger.info(
+        "DOCX parse field summary: total=%s locked=%s editable=%s prefilled_signature=%s stamp_eligible_approver=%s",
+        len(result["fillable_fields"]),
+        locked_count,
+        editable_count,
+        prefilled_count,
+        stamp_eligible_count,
+    )
 
     return {
         "status": "success",
@@ -196,6 +300,8 @@ async def parse_document(file: UploadFile = File(...)):
             "total_fields": len(result["fillable_fields"]),
             "editable_fields": editable_count,
             "locked_fields": locked_count,
+            "prefilled_signature_fields": prefilled_count,
+            "stamp_eligible_approver_fields": stamp_eligible_count,
         },
         "fields": result["fillable_fields"],
         "paragraphs": result["paragraphs"],
@@ -213,18 +319,7 @@ async def parse_document(file: UploadFile = File(...)):
 #   4. Returns output_filename for Laravel to store as docx_filled_path
 @app.post("/fill")
 async def fill_document(request: FillRequest):
-    template_path = None
-    for ext in [".docx", ".doc"]:
-        candidate = os.path.join(UPLOAD_PATH, f"{request.file_id}{ext}")
-        if os.path.exists(candidate):
-            template_path = candidate
-            break
-
-    if not template_path:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Template file not found: {request.file_id}"
-        )
+    template_path = resolve_docx_template_path(request.file_id)
 
     os.makedirs(GENERATED_REPORTS_PATH, exist_ok=True)
     output_filename = f"{request.file_id}_filled.docx"
@@ -240,11 +335,19 @@ async def fill_document(request: FillRequest):
         for f in request.fields
     ]
 
+    # Debug: print first few normalized field values to stdout.
     for field in field_values[:5]:
         print(f"Field value raw: {repr(field['value'])}")
 
     try:
-        result_path = fill_docx(template_path, field_values, output_path, request.attachment_links or {})
+        # Write user values into template; locked fields are skipped by report_generator.
+        result_path, repaired_values = fill_docx(
+            template_path,
+            field_values,
+            output_path,
+            request.attachment_links or {},
+            request.equipment_id or "",
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -259,6 +362,7 @@ async def fill_document(request: FillRequest):
         "file_id":           request.file_id,
         "output_filename":   output_filename,
         "output_path":       result_path,
+        "repaired_field_values": repaired_values,
         "summary": {
             "total_fields":   len(request.fields),
             "filled_fields":  filled_count,
@@ -282,21 +386,14 @@ async def preview_document(
     fields_json: Optional[str] = Form(None),
     mode: str = Form("edit"),
 ):
-    template_path = None
-    for ext in [".docx", ".doc"]:
-        candidate = os.path.join(UPLOAD_PATH, f"{file_id}{ext}")
-        if os.path.exists(candidate):
-            template_path = candidate
-            break
-
-    if not template_path:
-        raise HTTPException(status_code=404, detail=f"File nahi mila: {file_id}")
+    template_path = resolve_docx_template_path(file_id)
 
     try:
         # Always re-parse so new blank-detection rules apply; merge stored values by location.
         fresh = parse_docx(template_path)["fillable_fields"]
         stored = json.loads(fields_json) if fields_json else []
         stored_by_loc = {f.get("location"): f for f in stored if f.get("location")}
+        # Legacy para_{n} keys without _blank_ suffix — map by parent para index.
         legacy_para_by_index: dict[int, dict] = {}
         for sf in stored:
             sloc = sf.get("location") or ""
@@ -319,6 +416,19 @@ async def preview_document(
                 # Respect explicit locked flag from Laravel when present
                 if "locked" in sv:
                     ff["locked"] = sv["locked"]
+                # Laravel may upgrade approval-page Name cells to approver dropdowns after parse.
+                for meta_key in (
+                    "type",
+                    "widget",
+                    "approver_role",
+                    "signature_date_location",
+                    "stamp_eligible",
+                ):
+                    if meta_key not in sv:
+                        continue
+                    val = sv[meta_key]
+                    if meta_key == "stamp_eligible" or val not in (None, ""):
+                        ff[meta_key] = val
             else:
                 parent_para = ff.get("parent_para")
                 if parent_para is not None and parent_para in legacy_para_by_index:
@@ -332,6 +442,7 @@ async def preview_document(
         html = build_fill_html(template_path, fields, mode=mode)
         debug_widgets = _collect_widget_debug(fields)
         _log_widget_debug(debug_widgets)
+        # Return HTML for embedding in Laravel fill.blade.php (read-only; does not modify DOCX).
         return {"status": "success", "html": html, "debug_widgets": debug_widgets}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -339,11 +450,12 @@ async def preview_document(
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
+# Gray background for readonly preview cells.
+READONLY_BG = "#F9F9F9"
+DOCX_CELL_BORDER = "border:1px solid #000;padding:6px 8px;vertical-align:middle;"
 
-# ── _escape_html() ──────────────────────────────────
-# Escapes a string for safe embedding in HTML preview output.
-# Parameters: value — raw text from DOCX cell or paragraph
-# Returns: HTML-escaped string
+
+# Escape raw DOCX text for safe embedding in HTML preview output.
 def _escape_html(value: str) -> str:
     if not value:
         return ""
@@ -356,10 +468,6 @@ def _escape_html(value: str) -> str:
     )
 
 
-READONLY_BG = "#F9F9F9"
-DOCX_CELL_BORDER = "border:1px solid #000;padding:6px 8px;vertical-align:middle;"
-
-
 def _inline_cell_style(cell_style: str = "", *, readonly: bool = False, value_cell: bool = False) -> str:
     """Inline styles so approver view matches fill form without page-specific CSS."""
     parts = [DOCX_CELL_BORDER, cell_style]
@@ -369,9 +477,11 @@ def _inline_cell_style(cell_style: str = "", *, readonly: bool = False, value_ce
 
 
 def _is_readonly_mode(mode: str) -> bool:
+    # Preview mode "readonly" shows filled values without editable inputs.
     return (mode or "edit").strip().lower() == "readonly"
 
 
+# Convert ISO yyyy-mm-dd dates to dd-mm-yyyy for readonly preview display.
 def _format_readonly_date(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -382,6 +492,7 @@ def _format_readonly_date(value: str) -> str:
     return _escape_html(value)
 
 
+# Format a field value for readonly preview (checkbox marks, dates, multiline text).
 def _format_readonly_display(value, field: dict | None = None) -> str:
     raw = "" if value is None else str(value).strip()
     if field:
@@ -402,12 +513,14 @@ def _format_readonly_display(value, field: dict | None = None) -> str:
     return _escape_html(raw)
 
 
+# Wrap a readonly display value in a span with optional data-field location attribute.
 def _render_readonly_span(value, field: dict | None = None, location: str = "") -> str:
     display = _format_readonly_display(value, field)
     loc_attr = f' data-field="{_escape_html(location)}"' if location else ""
     return f'<span class="docx-readonly-value"{loc_attr}>{display}</span>'
 
 
+# Build a readonly table cell with gray background and optional data-field attribute.
 def _readonly_td(
     content: str,
     *,
@@ -532,7 +645,7 @@ def _render_paragraph_checkbox(para_index: int, para_text: str, field: dict, mod
     loc = _escape_html(f"para_{para_index}")
     label = _escape_html(_strip_checkbox_symbols(para_text))
     locked = _is_field_locked(field)
-    if _is_readonly_mode(mode) and not locked:
+    if _is_readonly_mode(mode):
         mark = _format_readonly_display(field.get("value", ""), field)
         return (
             f'<p class="docx-para docx-para-checkbox">'
@@ -555,6 +668,7 @@ def _render_paragraph_checkbox(para_index: int, para_text: str, field: dict, mod
     )
 
 
+# Render bordered text box content (History of Equipment, recommendation lines) as HTML.
 def _render_textbox_html(
     txbx_index: int,
     txbx_element,
@@ -728,6 +842,7 @@ def _render_textbox_html(
     )
 
 
+# Render multiple inline inputs for paragraphs with several dot/underscore blanks.
 def _render_paragraph_multi_blank(
     para_index: int, para_text: str, blank_fields: list, mode: str = "edit"
 ) -> str:
@@ -762,6 +877,7 @@ def _render_paragraph_multi_blank(
     return f'<p class="{css}">{"".join(parts)}</p>'
 
 
+# Render Yes/No radio pair for inline paragraph radio fields.
 def _render_paragraph_yes_no_radio(
     para_index: int, para_text: str, field: dict, mode: str = "edit"
 ) -> str:
@@ -815,6 +931,7 @@ def _render_radio_yes_no_cell(
 # ── _render_approver_cell() ─────────────────────────
 # Renders a placeholder user dropdown for signature-table Name & Designation cells.
 # Laravel fill.blade.php JS hydrates options from $users and syncs POST approver IDs.
+# Render locked Name/Signature/Date cells on the APPROVAL PAGE table (stamp placeholders).
 def _render_approval_stamp_cell(field: dict, mode: str = "edit") -> str:
     """Render locked Name / Signature / Date cells on the APPROVAL PAGE table."""
     location = field.get("location", "")
@@ -835,6 +952,7 @@ def _render_approval_stamp_cell(field: dict, mode: str = "edit") -> str:
     )
 
 
+# Render approver dropdown placeholder; Laravel JS hydrates options from users table.
 def _render_approver_cell(field: dict, mode: str = "edit") -> str:
     location = _escape_html(field.get("location", ""))
     role = _escape_html(field.get("approver_role", ""))
@@ -913,7 +1031,12 @@ def _render_field_input(
             f'style="width:100%;" placeholder="{ph}">{val}</textarea>'
         )
 
-    input_type = "date" if widget == "date" else "text"
+    if widget in ("datetime", "datetime-local"):
+        input_type = "datetime-local"
+    elif widget in ("date", "time"):
+        input_type = widget
+    else:
+        input_type = "text"
     style = "" if not inline else ""
     return (
         f'<input type="{input_type}" name="fields[{loc}]" class="{css_class}" '
@@ -931,6 +1054,13 @@ def _para_index_for_element(p_element, paragraphs) -> int | None:
     return None
 
 
+def _value_repeats_colon_label(para_text: str, value: str) -> bool:
+    """True when a stored value is just a second copy of the colon label."""
+    label = re.sub(r":\s*$", "", dedupe_colon_label(para_text or "")).strip().lower()
+    stored = re.sub(r"\s+", " ", (value or "").strip()).rstrip(":").lower()
+    return bool(label) and stored == label
+
+
 # ── _render_paragraph() ─────────────────────────────
 # Renders one body paragraph for the fill preview.
 # para_index must match doc_parser.py enumerate(doc.paragraphs) — not a body-walk counter.
@@ -941,6 +1071,10 @@ def _render_paragraph(
     field_map: dict,
     mode: str = "edit",
 ) -> str:
+    # 1.0 OBJECTIVE: and the other protocol headings are titles, not fill boxes.
+    if is_locked_section_title(para_text):
+        return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
+
     loc = f"para_{para_index}"
 
     blank_parts = sorted(
@@ -985,39 +1119,58 @@ def _render_paragraph(
                 "widget": infer_field_widget(display_label, "paragraph_blank"),
             }
 
-    if field and not _is_field_locked(field):
-        if _is_readonly_mode(mode):
-            display = _render_readonly_span(field.get("value", ""), field, loc)
-            label_text = field.get("label") or para_text
-            blank_source = (
-                para_text
-                if "{{BLANK}}" in para_text
-                else (label_text if "{{BLANK}}" in label_text else "")
-            )
-            if blank_source:
-                parts = blank_source.split("{{BLANK}}")
-                html_parts = [_escape_html(parts[0])]
-                for segment in parts[1:]:
-                    html_parts.append(display)
-                    html_parts.append(_escape_html(segment))
-                return f'<p class="docx-para">{"".join(html_parts)}</p>'
-            if PARA_COLON_BLANK_RE.search(dedupe_colon_label(para_text).strip()):
-                label_part = re.sub(r":\s*$", ": ", dedupe_colon_label(para_text))
-                return f'<p class="docx-para">{_escape_html(label_part)}{display}</p>'
-            match = PARA_BLANK_RE.search(para_text)
-            if match:
-                before = _escape_html(para_text[: match.start()])
-                after = _escape_html(para_text[match.end() :])
-                return f'<p class="docx-para">{before}{display}{after}</p>'
-            if para_text:
-                return f'<p class="docx-para">{_escape_html(para_text)} {display}</p>'
+    if field and _is_readonly_mode(mode):
+        # Locked-after-submit fields must still show their stored values on
+        # second/third approval readonly preview (Remarks dotted lines, Reviewed By, …).
+        display = _render_readonly_span(field.get("value", ""), field, loc)
+        label_text = field.get("label") or para_text
+        blank_source = (
+            para_text
+            if "{{BLANK}}" in para_text
+            else (label_text if "{{BLANK}}" in label_text else "")
+        )
+        if blank_source:
+            parts = blank_source.split("{{BLANK}}")
+            html_parts = [_escape_html(parts[0])]
+            for segment in parts[1:]:
+                html_parts.append(display)
+                html_parts.append(_escape_html(segment))
+            return f'<p class="docx-para">{"".join(html_parts)}</p>'
+        if PARA_COLON_BLANK_RE.search(dedupe_colon_label(para_text).strip()):
+            if _value_repeats_colon_label(para_text, field.get("value", "")):
+                return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
+            label_part = re.sub(r":\s*$", ": ", dedupe_colon_label(para_text))
+            return f'<p class="docx-para">{_escape_html(label_part)}{display}</p>'
+        match = PARA_BLANK_RE.search(para_text)
+        if match:
+            before = _escape_html(para_text[: match.start()])
+            after = _escape_html(para_text[match.end() :])
+            return f'<p class="docx-para">{before}{display}{after}</p>'
+        # Leader-dot / ellipsis-only lines: show value instead of empty template dots.
+        if PARA_BLANK_RE.fullmatch(para_text.strip() or "") or re.fullmatch(
+            r"[\s\.\u2026…]+", para_text or ""
+        ):
             return f'<p class="docx-para">{display}</p>'
+        if para_text:
+            # Prefer stored value when present; keep label text as context.
+            stored = (field.get("value") or "").strip()
+            if stored and stored.lower() not in para_text.lower():
+                return f'<p class="docx-para">{_escape_html(para_text)} {display}</p>'
+            if stored:
+                return f'<p class="docx-para">{display}</p>'
+            return f'<p class="docx-para">{_escape_html(para_text)}</p>'
+        return f'<p class="docx-para">{display}</p>'
 
+    if field and not _is_field_locked(field):
+        placeholder = re.sub(r"\{\{BLANK\}\}", "", (field.get("label") or "fill here"))[:80]
+        visible_label = re.sub(r":\s*$", "", dedupe_colon_label(para_text)).strip().lower()
+        if placeholder.strip().lower() == visible_label:
+            placeholder = " "
         inp = _render_field_input(
             loc,
             field,
             css_class="docx-input-inline",
-            placeholder=re.sub(r"\{\{BLANK\}\}", "", (field.get("label") or "fill here"))[:80],
+            placeholder=placeholder,
             value=field.get("value", ""),
             inline=True,
         )
@@ -1059,8 +1212,54 @@ def _render_paragraph(
             )
         return f'<p class="docx-para docx-para-editable">{inp}</p>'
 
+    # Locked in edit mode: show stored value (or template text) without an input.
+    if field and _is_field_locked(field):
+        locked_val = (field.get("value") or "").strip()
+        if locked_val:
+            if _value_repeats_colon_label(para_text, locked_val):
+                return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
+            if PARA_COLON_BLANK_RE.search(dedupe_colon_label(para_text).strip()):
+                label_part = re.sub(r":\s*$", ": ", dedupe_colon_label(para_text))
+                return (
+                    f'<p class="docx-para">'
+                    f"{_escape_html(label_part)}"
+                    f"{_render_readonly_span(locked_val, field, loc)}</p>"
+                )
+            return f'<p class="docx-para">{_render_readonly_span(locked_val, field, loc)}</p>'
+        if para_text:
+            return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
+        return ""
+
     if para_text:
-        return f'<p class="docx-para">{_escape_html(para_text)}</p>'
+        if not _is_readonly_mode(mode):
+            normalized = dedupe_colon_label(para_text)
+            display_label = re.sub(r":\s*$", "", normalized).strip()
+            if is_date_field_label(display_label) and (
+                PARA_COLON_BLANK_RE.search(normalized.strip())
+                or re.search(r"(?i)effective\s*date", para_text)
+            ):
+                pseudo = {
+                    "label": display_label or "Effective Date",
+                    "value": (field or {}).get("value", ""),
+                    "locked": False,
+                    "type": "paragraph_blank",
+                    "location": loc,
+                    "widget": "date",
+                }
+                inp = _render_field_input(
+                    loc,
+                    pseudo,
+                    css_class="docx-input-inline",
+                    placeholder="dd-mm-yyyy",
+                    value=pseudo.get("value", ""),
+                    inline=True,
+                )
+                label_part = re.sub(r":\s*$", ": ", normalized)
+                return (
+                    f'<p class="docx-para docx-para-editable">'
+                    f"{_escape_html(label_part)}{inp}</p>"
+                )
+        return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
 
     return ""
 
@@ -1187,11 +1386,38 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
     readonly = _is_readonly_mode(mode)
     sl_no_col = _table_sl_no_col_index(table)
     toc_table = is_toc_table(table) or is_toc_list_table(table)
+    col_headers = get_table_column_headers(table, is_report_approval_block_table(table))
 
     for r_idx, row in enumerate(table.rows):
         html.append("<tr>")
 
         cells = row.cells
+        # "Mechanical Adjustment:" / "Machine Performance:" are merged title rows.
+        # Col 0 is the Sr. No. column, so without this they render as the row number.
+        if r_idx > 0 and is_equipment_section_banner_row(row):
+            banner = dedupe_colon_label(cells[0].text.strip()) if cells else ""
+            colspan = len(cells) or 1
+            style = _inline_cell_style("font-weight:bold;", readonly=readonly)
+            html.append(
+                f'<td class="docx-cell" colspan="{colspan}" style="{style}">'
+                f"{_escape_html(banner)}</td>"
+            )
+            html.append("</tr>")
+            continue
+        if r_idx > 0 and is_repeated_column_header_row(row, col_headers):
+            seen_header: set[int] = set()
+            for cell in cells:
+                tc_id = id(cell._tc)
+                if tc_id in seen_header:
+                    continue
+                seen_header.add(tc_id)
+                style = _inline_cell_style("font-weight:bold;", readonly=readonly)
+                html.append(
+                    f'<td class="docx-cell" style="{style}">'
+                    f"{_escape_html(cell.text.strip())}</td>"
+                )
+            html.append("</tr>")
+            continue
         is_two_col = len(cells) == 2
         is_one_col = len(cells) == 1
         row_label = cells[0].text.strip() if cells else ""
@@ -1258,6 +1484,24 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                 html.append(_render_attachment_cell(field, mode))
                 continue
 
+            # List-of-attachment rows skipped at parse time (Dust Extractor, Area Recovery)
+            # still need a file control on the Attachment No. column.
+            header_label = col_headers[col_idx] if col_idx < len(col_headers) else ""
+            if (
+                not readonly
+                and r_idx > 0
+                and is_attachment_upload_column(table, header_label)
+                and (field is None or str(field.get("type", "")) == "attachment")
+            ):
+                upload_field = field or {
+                    "location": f"table_{t_idx}_row_{r_idx}_col_{col_idx}",
+                    "type": "attachment",
+                    "value": "",
+                    "label": "Attachment No.",
+                }
+                html.append(_render_attachment_cell(upload_field, mode))
+                continue
+
             if field and field.get("type") == "table_radio" and not _is_field_locked(field):
                 html.append(_render_radio_yes_no_cell(field["location"], field, text, mode))
                 continue
@@ -1268,7 +1512,10 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                 html.append(_render_radio_yes_no_cell(loc, pseudo, text, mode))
                 continue
 
-            if is_two_col and col_idx == 0 and not (field and not _is_field_locked(field)):
+            # Classic label|value 2-col rows: col_0 has no field metadata → static label.
+            # Grid cells (Deviation, etc.) always have a field — even when locked after fill —
+            # and must fall through so field["value"] is rendered with data-field.
+            if is_two_col and col_idx == 0 and field is None:
                 style = _inline_cell_style(cell_style, readonly=readonly)
                 html.append(
                     f'<td class="docx-cell" style="{style}"{rowspan_attr}>'
@@ -1436,6 +1683,7 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
     html_parts = [f'<div class="{preview_class}">']
     table_idx = 0
 
+    # Walk doc.element.body in document order — render tables and paragraphs as they appear.
     for child in doc.element.body:
         tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
 
@@ -1464,7 +1712,14 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                     or para_text_by_index.get(para_index, "")
                 )
                 txbx_index, txbx_element = textbox_by_parent_para[para_index]
-                if heading:
+                if heading and has_paragraph_blank(heading):
+                    field = field_map.get(f"para_{para_index}")
+                    rendered = _render_paragraph(
+                        para_index, heading, field, field_map, mode
+                    )
+                    if rendered:
+                        html_parts.append(rendered)
+                elif heading:
                     from doc_parser import _para_text_from_element as _parser_para_text
 
                     W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -1474,7 +1729,7 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                     )
                     if dedupe_colon_label(heading) != dedupe_colon_label(inner_heading):
                         html_parts.append(
-                            f'<p class="docx-para">{_escape_html(heading)}</p>'
+                            f'<p class="docx-para">{_escape_html(dedupe_colon_label(heading))}</p>'
                         )
                 html_parts.append(
                     _render_textbox_html(txbx_index, txbx_element, field_map, mode)
@@ -1499,8 +1754,97 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
 # ── docx_image_map() ──────────────────────────────
 # POST /docx-image-map — resolve embedded DOCX images with correct
 # relationship chains and Word crop rectangles for NEQ preview only.
+@app.post("/neq/save-as")
+async def neq_save_as(
+    file: UploadFile = File(...),
+    edits: str = Form("[]"),
+    table_ops: str = Form("[]"),
+    cell_edits: str = Form("[]"),
+    checkbox_ops: str = Form("[]"),
+    structure_ops: str = Form("[]"),
+    toc_lines: str = Form("[]"),
+):
+    """Apply indexed text edits from NEQ preview onto the original DOCX."""
+    # Delegate to neq_docx_save to patch DOCX bytes with preview edit list.
+    from neq_docx_save import apply_indexed_edits_to_docx
+
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty DOCX upload.")
+
+        try:
+            edits_list = json.loads(edits or "[]")
+            table_ops_list = json.loads(table_ops or "[]")
+            cell_edits_list = json.loads(cell_edits or "[]")
+            checkbox_ops_list = json.loads(checkbox_ops or "[]")
+            structure_ops_list = json.loads(structure_ops or "[]")
+            toc_lines_list = json.loads(toc_lines or "[]")
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Invalid edits JSON.") from exc
+
+        if not isinstance(edits_list, list):
+            raise HTTPException(status_code=400, detail="Edits payload must be a list.")
+        if not isinstance(table_ops_list, list):
+            raise HTTPException(status_code=400, detail="table_ops payload must be a list.")
+        if not isinstance(cell_edits_list, list):
+            raise HTTPException(status_code=400, detail="cell_edits payload must be a list.")
+        if not isinstance(checkbox_ops_list, list):
+            raise HTTPException(status_code=400, detail="checkbox_ops payload must be a list.")
+        if not isinstance(structure_ops_list, list):
+            raise HTTPException(status_code=400, detail="structure_ops payload must be a list.")
+        if not isinstance(toc_lines_list, list):
+            raise HTTPException(status_code=400, detail="toc_lines payload must be a list.")
+
+        output_bytes, stats = apply_indexed_edits_to_docx(
+            content,
+            edits_list,
+            table_ops_list,
+            cell_edits_list,
+            checkbox_ops_list,
+            structure_ops_list,
+            toc_lines_list,
+        )
+
+        # Return modified DOCX as base64 for Laravel to save as a new file.
+        return {
+            "status": "success",
+            "stats": stats,
+            "output_base64": base64.b64encode(output_bytes).decode("ascii"),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("neq/save-as failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/neq/text-targets")
+async def neq_text_targets(file: UploadFile = File(...)):
+    """Return body text targets with stable indexes for NEQ preview edit mapping."""
+    from neq_docx_save import serialize_text_targets
+
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty DOCX upload.")
+
+        targets = serialize_text_targets(content)
+        return {
+            "status": "success",
+            "targets": targets,
+            "count": len(targets),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("neq/text-targets failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.post("/docx-image-map")
 async def docx_image_map(file: UploadFile = File(...)):
+    # Resolve embedded images with crop rects for NEQ header logo preview.
     from neq_docx_preview import extract_image_placements
 
     try:

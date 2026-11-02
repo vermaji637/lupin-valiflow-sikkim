@@ -19,7 +19,7 @@ class CleanupOldAuditLogs extends Command
      *
      * @var string
      */
-    protected $description = 'Clean up audit logs older than 30 days';
+    protected $description = 'Audit log cleanup — DISABLED (logs are retained permanently)';
 
     /**
      * Execute the console command.
@@ -28,12 +28,9 @@ class CleanupOldAuditLogs extends Command
      */
     public function handle()
     {
-        $this->info('Starting audit logs cleanup...');
-        
-        $deletedCount = AuditLog::where('created_at', '<', now()->subDays(30))->delete();
-        
-        $this->info("Deleted {$deletedCount} audit log entries older than 30 days.");
-        
+        $this->warn('Audit log cleanup is DISABLED. Audit records are retained permanently.');
+        $this->info('No records were deleted.');
+
         return Command::SUCCESS;
     }
 }

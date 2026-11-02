@@ -17,7 +17,7 @@ return [
 
     // 'default' => env('DB_CONNECTION', 'mysql'),
 
-    'default' => 'sqlsrv',
+    'default' => env('DB_CONNECTION', 'sqlsrv'),
 
     /*
     |--------------------------------------------------------------------------
@@ -97,15 +97,20 @@ return [
 'sqlsrv' => [
     'driver'                    => 'sqlsrv',
     'host'                      => env('DB_HOST', '127.0.0.1'),
-    'port'                      => env('DB_PORT', '1433'),
+    'port'                      => env('DB_PORT') ?: null,
     'database'                  => env('DB_DATABASE'),
-    'username'                  => env('DB_USERNAME'),
-    'password'                  => env('DB_PASSWORD'),
+    // Blank username, or DB_AUTHENTICATION=windows, uses the Windows account running PHP.
+    'username'                  => (strtolower((string) env('DB_AUTHENTICATION', '')) === 'windows' || env('DB_USERNAME') === null || env('DB_USERNAME') === '')
+                                    ? null
+                                    : env('DB_USERNAME'),
+    'password'                  => (strtolower((string) env('DB_AUTHENTICATION', '')) === 'windows' || env('DB_USERNAME') === null || env('DB_USERNAME') === '')
+                                    ? null
+                                    : env('DB_PASSWORD'),
     'charset'                   => 'utf8',
     'prefix'                    => '',
     'prefix_indexes'            => true,
-    'trust_server_certificate'  => true,
-    'encrypt'                   => 'yes',
+    'trust_server_certificate'  => env('DB_TRUST_SERVER_CERTIFICATE', true),
+    'encrypt'                   => env('DB_ENCRYPT', 'yes'),
 ],
 
     ],

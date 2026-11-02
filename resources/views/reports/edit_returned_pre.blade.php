@@ -2,7 +2,7 @@
 
 @section('content')
 <div class="container">
-  <h2>Returned Report #{{ $report->id }} (Fix & Re-submit)</h2>
+  <h2>Returned {{ $report->displayCode() }} (Fix & Re-submit)</h2>
 
   @php
     $toolbarCssVersion = @filemtime(public_path('css/template-editor-toolbar.css')) ?: time();

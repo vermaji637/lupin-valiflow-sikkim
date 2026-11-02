@@ -1,18 +1,18 @@
 @extends('layouts.app')
 
-@section('title', request()->routeIs('protocol') ? 'All Protocol' : 'Pre Approved Protocol List')
+@section('title', $protocolListTitle ?? (request()->routeIs('protocol') ? 'All Protocol' : 'Pre Approved Protocol List'))
 
 @section('content')
 <div class="container-fluid">
 
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
         <h1 class="h3 mb-0 text-gray-800">
-            {{ request()->routeIs('protocol') ? 'All Protocol' : 'Pre Approved Protocol' }}
+            {{ $protocolListTitle ?? (request()->routeIs('protocol') ? 'All Protocol' : 'Pre Approved Protocol') }}
         </h1>
         <div class="d-flex gap-2">
-            @if(request()->routeIs('protocol'))
-                <a href="{{ route('protocol.docx-import.create') }}" class="btn btn-sm btn-primary shadow-sm mr-2">
-                    <i class="fas fa-file-import fa-sm text-white-50"></i> Import DOCX
+            @if(!empty($protocolImportSource ?? null))
+                <a href="{{ route('protocol.docx-import.create', ['source' => $protocolImportSource]) }}" class="btn btn-sm btn-primary shadow-sm mr-2">
+                    <i class="fas fa-file-import fa-sm text-white-50"></i> Import
                 </a>
             @endif
             <a href="{{ route('home') }}" class="d-none d-sm-inline-block btn btn-sm btn-secondary shadow-sm">
@@ -40,18 +40,22 @@
                                name="search"
                                value="{{ request('search') }}"
                                class="form-control"
-                               placeholder="ID / Equipment / Facility / Equip ID / Template">
+                               placeholder="Title">
                     </div>
 
                     <div class="col-md-2">
                         <label class="small text-muted">Status</label>
                         <select name="status" class="form-control">
                             <option value="">All</option>
-                            <option value="pre_pending"  {{ request('status')=='pre_pending'?'selected':'' }}>PRE_PENDING</option>
-                            <option value="post_pending" {{ request('status')=='post_pending'?'selected':'' }}>POST_PENDING</option>
-                            <option value="pre_approved" {{ request('status')=='pre_approved'?'selected':'' }}>PRE_APPROVED</option>
-                            <option value="approved"     {{ request('status')=='approved'?'selected':'' }}>APPROVED</option>
-                            <option value="rejected"     {{ request('status')=='rejected'?'selected':'' }}>REJECTED</option>
+                            @if(\App\Services\SidebarPermissionService::userCanAny(['protocol-view-approved', 'protocol-approved']))
+                            <option value="approved" {{ request('status')=='approved'?'selected':'' }}>Approved</option>
+                            @endif
+                            @if(\App\Services\SidebarPermissionService::userCanAny(['protocol-view-rejected', 'protocol-reject']))
+                            <option value="rejected" {{ request('status')=='rejected'?'selected':'' }}>Reject</option>
+                            @endif
+                            @if(\App\Services\SidebarPermissionService::userCanAny(['protocol-view-returned', 'protocol-send-back']))
+                            <option value="send_back" {{ request('status')=='send_back'?'selected':'' }}>Send Back</option>
+                            @endif
                         </select>
                     </div>
 
@@ -85,10 +89,7 @@
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Facility/Section</th>
-                            <th>Document No</th>
-                            <th>Template</th>
-                            <th>Version</th>
+                            <th>Protocol Title</th>
                             <th>Equipment Name</th>
                             <th>Equipment ID</th>
                             <th>Created</th>
@@ -123,22 +124,39 @@
                             $isCurrentApprover = $currentStep && ((int)$currentStep->user_id === (int)auth()->id());
                             $isCreator = ((int)$r->created_by === (int)auth()->id());
                             $isDocxImport = !empty($r->docx_import_path);
-                            $docxNeedsFill = $isDocxImport && ($r->docx_import_status === 'pending');
+                            $isReturnedForCorrection = in_array($r->status, ['pre_returned', 'post_returned'], true);
+                            $isPermanentlyRejected = $r->status === 'rejected';
+                            $docxNeedsFill = $isDocxImport && (
+                                $r->docx_import_status === 'pending' || $isReturnedForCorrection
+                            );
+
+                            $equipmentName = trim((string) ($r->equipment_name ?? ''));
+                            if ($equipmentName === '' && $r->document?->equipment) {
+                                $equipmentName = trim((string) ($r->document->equipment->equipment_name ?? ''));
+                            }
+
+                            $equipmentId = trim((string) ($r->equipment_id ?? ''));
+                            if ($equipmentId === '' && $r->document?->equipment) {
+                                $equipmentId = trim((string) ($r->document->equipment->equipment_id ?? ''));
+                            }
+
+                            $protocolTitle = $r->protocol_title;
                         @endphp
 
                         <tr>
-                            <td>{{ $r->id }}</td>
-                            <td>{{ $r->facility_section }}</td>
-                            <td>{{ $r->document?->title }}</td>
-                            <td>{{ $r->template->name ?? $r->template->title ?? '-' }}</td>
-                            <td>{{ $r->version }}</td>
-                            <td>{{ $r->equipment_name }}</td>
-                            <td>{{ $r->equipment_id }}</td>
+                            <td>{{ $r->displayCode() }}</td>
+                            <td>{{ $protocolTitle !== '' ? $protocolTitle : '-' }}</td>
+                            <td>{{ $equipmentName !== '' ? $equipmentName : '-' }}</td>
+                            <td>{{ $equipmentId !== '' ? $equipmentId : '-' }}</td>
                             <td>{{ optional($r->created_at)->format('d-m-Y h:i A') }}</td>
 
                             <td>
-                                @if($docxNeedsFill)
+                                @if($docxNeedsFill && $r->docx_import_status === 'pending')
                                     <span class="badge bg-warning text-dark">FILL PENDING</span>
+                                @elseif($isPermanentlyRejected)
+                                    <span class="badge bg-danger text-white">REJECTED</span>
+                                @elseif($docxNeedsFill && $isReturnedForCorrection)
+                                    <span class="badge bg-warning text-dark">SENT BACK — EDIT REQUIRED</span>
                                 @else
                                     <span class="{{ $badgeClass }}">
                                         {{ $status }}
@@ -151,16 +169,48 @@
 
                             <td class="text-end">
 
-                                {{-- DOCX import: creator must fill blank fields before POST approval --}}
+                                {{-- DOCX import: creator fills or re-edits via the same fill form as fresh import --}}
                                 @if($docxNeedsFill && $isCreator)
-                                    <a href="{{ route('reports.docx-import.fill-form', $r) }}" class="btn btn-sm btn-primary">
-                                        Fill &amp; Submit
-                                    </a>
+                                    @php
+                                        $requalPreGate = ($r->import_source ?? '') === 'requalification'
+                                            && in_array($r->status, ['pre_setup', 'pre_pending', 'pre_returned'], true)
+                                            && $r->stage !== 'post';
+                                    @endphp
+                                    @if($requalPreGate && $r->status === 'pre_pending')
+                                        <a href="{{ route('reports.show', $r) }}" class="btn btn-sm btn-secondary">
+                                            Pre Approval In Progress
+                                        </a>
+                                    @else
+                                        <a href="{{ route('reports.docx-import.fill-form', $r) }}" class="btn btn-sm btn-primary">
+                                            @if($requalPreGate)
+                                                Select Pre Approvers
+                                            @elseif($isReturnedForCorrection)
+                                                Edit &amp; Resubmit
+                                            @else
+                                                Fill &amp; Submit
+                                            @endif
+                                        </a>
+                                    @endif
 
                                 {{-- Current POST/PRE approver --}}
-                                @elseif($isCurrentApprover && !$docxNeedsFill)
+                                @elseif($isCurrentApprover && !$docxNeedsFill && \App\Services\SidebarPermissionService::userCan('protocol-approve'))
                                     <a href="{{ route('reports.show', $r->id) }}" class="btn btn-sm btn-warning">
                                         Approve Now
+                                    </a>
+
+                                @elseif($isCurrentApprover && !$docxNeedsFill)
+                                    <a href="{{ route('reports.show', $r->id) }}" class="btn btn-sm btn-info text-white">
+                                        @if($r->status === 'pre_pending')
+                                            Pending for Pre Approval
+                                        @else
+                                            Open
+                                        @endif
+                                    </a>
+
+                                {{-- Permanently rejected: view only --}}
+                                @elseif($isPermanentlyRejected)
+                                    <a href="{{ route('reports.show', $r->id) }}" class="btn btn-sm btn-secondary">
+                                        View
                                     </a>
 
                                 {{-- Final approved --}}
@@ -169,8 +219,8 @@
                                         View
                                     </a>
 
-                                {{-- Rejected and creator --}}
-                                @elseif(in_array($r->status, ['pre_returned', 'post_returned', 'rejected'], true) && $isCreator)
+                                {{-- Rejected HTML workflow (non-DOCX) --}}
+                                @elseif($isReturnedForCorrection && $isCreator && !$isDocxImport)
                                     <a href="{{ route('reports.show', $r->id) }}" class="btn btn-sm btn-danger">
                                         View / Resubmit
                                     </a>
@@ -187,6 +237,11 @@
                                         View
                                     </a>
 
+                                @elseif($r->status === 'pre_pending')
+                                    <a href="{{ route('reports.show', $r->id) }}" class="btn btn-sm btn-warning">
+                                        Pending for Pre Approval
+                                    </a>
+
                                 @else
                                     <a href="{{ route('reports.show', $r->id) }}" class="btn btn-sm btn-secondary">
                                         Open
@@ -198,7 +253,7 @@
 
                     @empty
                         <tr>
-                            <td colspan="10" class="text-center text-muted py-4">
+                            <td colspan="7" class="text-center text-muted py-4">
                                 No records found.
                             </td>
                         </tr>
@@ -207,9 +262,16 @@
                 </table>
             </div>
 
-            {{-- ✅ Pagination --}}
-            <div class="mt-3">
-                {{ $approvedReports->links() }}
+            {{-- Pagination: 10 per page --}}
+            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mt-3 gap-2">
+                <div class="text-muted small">
+                    Showing {{ $approvedReports->firstItem() ?? 0 }}
+                    to {{ $approvedReports->lastItem() ?? 0 }}
+                    of {{ $approvedReports->total() }} protocols
+                </div>
+                <div>
+                    {{ $approvedReports->onEachSide(1)->links() }}
+                </div>
             </div>
 
         </div>

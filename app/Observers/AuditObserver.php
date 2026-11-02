@@ -4,17 +4,32 @@
 
 namespace App\Observers;
 
+use App\Models\ReportApprovalStep;
 use App\Services\AuditLogger;
 
 class AuditObserver
 {
+    /** Low-level workflow rows — not shown in user-facing audit history. */
+    protected function shouldSkip($model): bool
+    {
+        return $model instanceof ReportApprovalStep;
+    }
+
     public function created($model)
     {
+        if ($this->shouldSkip($model)) {
+            return;
+        }
+
         $this->log('created', $model, null, $this->filterSensitiveFields($model->toArray()));
     }
 
     public function updated($model)
     {
+        if ($this->shouldSkip($model)) {
+            return;
+        }
+
         $this->log(
             'updated',
             $model,
@@ -25,6 +40,10 @@ class AuditObserver
 
     public function deleted($model)
     {
+        if ($this->shouldSkip($model)) {
+            return;
+        }
+
         $this->log('deleted', $model, $this->filterSensitiveFields($model->toArray()), null);
     }
 

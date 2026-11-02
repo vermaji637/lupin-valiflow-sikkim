@@ -49966,15 +49966,41 @@ module.exports = JSON.parse('{"name":"axios","version":"0.21.4","description":"P
             return;
         }
 
-        fetch(`/lupin/public/index.php/admin/documents/${documentId}/details`)
-            .then(response => response.json())
+        const urlTemplate = this.dataset.detailsUrlTemplate || '/admin/documents/__ID__/details';
+        const detailsUrl = urlTemplate.replace('__ID__', encodeURIComponent(documentId));
+
+        fetch(detailsUrl, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+            },
+        })
+            .then(async response => {
+                if (!response.ok) {
+                    const rawBody = await response.text();
+                    console.error('Document details request failed', {
+                        url: detailsUrl,
+                        status: response.status,
+                        body: rawBody,
+                    });
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                return response.json();
+            })
             .then(data => {
                 if (facility) facility.value = data.facility;
                 if (equipmentName) equipmentName.value = data.equipment_name;
-                if (equipmentId) equipmentId.value = data.equipment_code;
+                if (equipmentId) equipmentId.value = data.equipment_id || data.equipment_code || '';
+                const versionInput = document.querySelector('input[name="version"]');
+                if (versionInput && data.version) versionInput.value = data.version;
             })
             .catch(err => {
-                console.error(err);
+                console.error('Failed to load document details', {
+                    error: err,
+                    url: detailsUrl,
+                    documentId,
+                });
                 alert('Failed to load document details');
             });
     });

@@ -10,6 +10,8 @@ use App\Models\AuditLog;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -28,15 +30,16 @@ class AppServiceProvider extends ServiceProvider
      *
      * @return void
      */
-    public function boot()
+       public function boot()
     {
         Paginator::useBootstrap();
         $this->registerAuditObservers();
-
+        $this->ensureRequiredStorageDirectories();
+ 
         // Set Carbon locale and timezone
         Carbon::setLocale('en');
         date_default_timezone_set('Asia/Kolkata');
-
+ 
         // Share fresh SecurityPolicy to all views (no caching)
         view()->composer('*', function ($view) {
             try {
@@ -45,6 +48,11 @@ class AppServiceProvider extends ServiceProvider
                 $view->with('policy', null);
             }
         });
+ 
+        // Force email / url() links to use APP_URL (not localhost)
+        if ($root = config('app.url')) {
+            URL::forceRootUrl($root);
+        }
     }
 
     private function registerAuditObservers(): void
@@ -76,6 +84,32 @@ class AppServiceProvider extends ServiceProvider
             }
 
             $className::observe(AuditObserver::class);
+        }
+    }
+
+    private function ensureRequiredStorageDirectories(): void
+    {
+        $publicDirectories = [
+            'templates/docx',
+            'generated_reports',
+            'reports/attachments',
+            'reports/generated',
+            'reports/docx_attachments',
+            'new_equipment_qualifications',
+            'attachments',
+        ];
+
+        foreach ($publicDirectories as $directory) {
+            Storage::disk('public')->makeDirectory($directory);
+        }
+
+        $localDirectories = [
+            'temp',
+            'temp/equipment-imports',
+        ];
+
+        foreach ($localDirectories as $directory) {
+            Storage::disk('local')->makeDirectory($directory);
         }
     }
 }

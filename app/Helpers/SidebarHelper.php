@@ -56,7 +56,12 @@ class SidebarHelper
             'user_management' => [
                 'title' => 'User Management',
                 'icon' => 'fas fa-user-alt',
-                'permissions' => ['user-list', 'user-create', 'user-edit', 'user-delete', 'user-import', 'security-policy-view', 'security-policy-edit', 'role-list']
+                'permissions' => ['user-list', 'user-create', 'user-edit', 'user-delete', 'user-import', 'role-list']
+            ],
+            'settings' => [
+                'title' => 'Settings',
+                'icon' => 'fas fa-cog',
+                'permissions' => ['security-policy-view', 'security-policy-edit']
             ],
             'masters' => [
                 'title' => 'Masters', 
@@ -161,7 +166,8 @@ class SidebarHelper
     private static function getPermissionCategory($permissionName)
     {
         $categories = [
-            'user_management' => ['user-list', 'user-create', 'user-edit', 'user-delete', 'user-import', 'security-policy-view', 'security-policy-edit', 'role-list'],
+            'user_management' => ['user-list', 'user-create', 'user-edit', 'user-delete', 'user-import', 'role-list'],
+            'settings' => ['security-policy-view', 'security-policy-edit'],
             'masters' => ['permission-list', 'permission-create', 'permission-assign', 'equipment-list', 'equipment-create', 'protocol-type-list', 'facility-list', 'document-view', 'document-create'],
             'template' => ['template-create', 'template-view'],
             'protocol' => ['protocol-create', 'protocol-view', 'protocol-approve', 'protocol-all', 'protocol-preapproved', 'protocol-postprocessing', 'protocol-approved', 'protocol-my-pending'],

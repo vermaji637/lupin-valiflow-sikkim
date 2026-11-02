@@ -7,7 +7,9 @@ use App\Models\Document;
 use App\Models\ProtocolType;
 use App\Models\Equipment;
 use App\Models\Facility;
+use App\Models\Report;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class DocumentController extends Controller
 {
@@ -63,15 +65,36 @@ class DocumentController extends Controller
     }
 
     public function getDocumentDetails($id)
-{
-    $document = Document::with(['equipment', 'facility'])->findOrFail($id);
+    {
+        try {
+            $document = Document::with(['equipment', 'facility'])->findOrFail($id);
 
-    return response()->json([
-        'facility'        => $document->facility->facility_name ?? '',
-        'equipment_name'  => $document->equipment->equipment_name ?? '',
-        'equipment_code'  => $document->equipment->equipment_id ?? '',
-    ]);
-}
+            $latestVersion = Report::query()
+                ->where('document_no', $document->id)
+                ->whereNotNull('version')
+                ->orderByDesc('id')
+                ->value('version');
+
+            return response()->json([
+                'facility'        => (string) ($document->facility->facility_name ?? ''),
+                'equipment_name'  => (string) ($document->equipment->equipment_name ?? ''),
+                'equipment_id'    => (string) ($document->equipment->equipment_id ?? ''),
+                // keep legacy key for old JS readers
+                'equipment_code'  => (string) ($document->equipment->equipment_id ?? ''),
+                'version'         => (string) ($latestVersion ?? ''),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Failed loading document details', [
+                'document_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to load document details.',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
 
     public function create()
     {

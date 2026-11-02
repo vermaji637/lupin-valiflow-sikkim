@@ -30,9 +30,21 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
     'google' => [
-    'client_id'     => env('GOOGLE_CLIENT_ID'),
-    'client_secret' => env('GOOGLE_CLIENT_SECRET'),
-    'redirect'      => env('GOOGLE_REDIRECT_URI'),
-],
+        'client_id'     => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect'      => env('GOOGLE_REDIRECT_URI'),
+    ],
+
+    'sms' => [
+        'enabled' => env('SMS_ENABLED', false),
+        'driver' => env('SMS_DRIVER', 'log'),
+        'url' => env('SMS_URL'),
+        'api_key' => env('SMS_API_KEY'),
+        'sender' => env('SMS_SENDER', 'VALIFLOW'),
+    ],
+
+    // Restrict Editing password applied to every downloaded .docx.
+    // The stored working file stays unlocked so save and approval can still write it.
+    'docx_protection_password' => env('DOCX_PROTECTION_PASSWORD', ''),
 
 ];

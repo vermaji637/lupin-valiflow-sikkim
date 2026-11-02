@@ -89,6 +89,7 @@ class EquipmentController extends Controller
         );
 
         $this->clearEquipmentImportSession();
+        Storage::disk('local')->makeDirectory('temp/equipment-imports');
 
         $storedPath = $request->file('file')->store('temp/equipment-imports');
         $fullPath   = Storage::path($storedPath);

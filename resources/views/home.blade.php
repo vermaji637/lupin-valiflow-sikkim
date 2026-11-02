@@ -4,9 +4,12 @@
 
 @section('content')
 @php
-    $pendingCount = $pending->total();
-    $approvedCount = $approvedByMe->total();
-    $rejectedCount = $rejectedByMe->total();
+    $neqPending = $neqPending ?? collect();
+    $neqApproved = $neqApproved ?? collect();
+    $neqReturned = $neqReturned ?? collect();
+    $pendingCount = $pending->total() + $neqPending->count();
+    $approvedCount = $approvedByMe->total() + $neqApproved->count();
+    $rejectedCount = $rejectedByMe->total() + $neqReturned->count();
     $isAdminDashboard = $isAdminDashboard ?? !empty($adminProtocolActivity);
 @endphp
 
@@ -47,141 +50,6 @@
         </div>
     </section>
 
-    @if($isAdminDashboard)
-        <div class="row">
-            <div class="col-12 mb-4">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <div>
-                            <div class="section-title">All Protocol Activity</div>
-                            <div class="text-muted small mt-1">Admin overview of every protocol, current workflow state, and the latest responsible user.</div>
-                        </div>
-                        <span class="chip">
-                            <span class="status-dot" style="background:#0f4c81;"></span>
-                            {{ $adminProtocolStats['total'] ?? 0 }} total protocols
-                        </span>
-                    </div>
-                    <div class="card-body">
-                        <div class="metric-grid mb-4">
-                            <div class="metric-card">
-                                <span class="metric-label">All Protocols</span>
-                                <span class="metric-value">{{ $adminProtocolStats['total'] ?? 0 }}</span>
-                                <span class="metric-note">Entire protocol register</span>
-                            </div>
-                            <div class="metric-card">
-                                <span class="metric-label">In Progress</span>
-                                <span class="metric-value">{{ $adminProtocolStats['pending'] ?? 0 }}</span>
-                                <span class="metric-note">Awaiting PRE or POST approval</span>
-                            </div>
-                            <div class="metric-card">
-                                <span class="metric-label">Approved</span>
-                                <span class="metric-value">{{ $adminProtocolStats['approved'] ?? 0 }}</span>
-                                <span class="metric-note">Fully completed protocols</span>
-                            </div>
-                            <div class="metric-card">
-                                <span class="metric-label">Returned</span>
-                                <span class="metric-value">{{ $adminProtocolStats['returned'] ?? 0 }}</span>
-                                <span class="metric-note">Sent back for correction</span>
-                            </div>
-                        </div>
-
-                        @if($adminProtocolActivity->count() === 0)
-                            <div class="empty-state">
-                                <i class="fas fa-stream"></i>
-                                <div class="font-weight-bold mb-1">No protocol activity found.</div>
-                                <div>Protocol updates will appear here once users start creating and routing records.</div>
-                            </div>
-                        @else
-                            <div class="table-responsive">
-                                <table class="table table-bordered">
-                                    <thead>
-                                        <tr>
-                                            <th>ID</th>
-                                            <th>Protocol</th>
-                                            <th>Document</th>
-                                            <th>Created By</th>
-                                            <th>Current Activity</th>
-                                            <th>Current Owner</th>
-                                            <th>Updated</th>
-                                            <th class="text-right">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach($adminProtocolActivity as $report)
-                                            @php
-                                                $currentStep = $report->approvalSteps
-                                                    ->first(function ($step) use ($report) {
-                                                        return $step->stage === $report->stage && is_null($step->approved_at) && is_null($step->rejected_at);
-                                                    });
-
-                                                $ownerName = $currentStep?->user
-                                                    ? trim(($currentStep->user->first_name ?? '').' '.($currentStep->user->last_name ?? ''))
-                                                    : null;
-
-                                                $creatorName = $report->creator
-                                                    ? trim(($report->creator->first_name ?? '').' '.($report->creator->last_name ?? ''))
-                                                    : '-';
-
-                                                $activityLabel = match ($report->status) {
-                                                    'pre_pending' => 'Awaiting PRE approval',
-                                                    'pre_approved' => 'PRE approved',
-                                                    'pre_returned', 'returned_to_preparer' => 'Returned in PRE',
-                                                    'post_pending' => 'Awaiting POST approval',
-                                                    'post_returned' => 'Returned in POST',
-                                                    'approved' => 'Fully approved',
-                                                    default => strtoupper(str_replace('_', ' ', $report->status)),
-                                                };
-
-                                                $statusTone = match ($report->status) {
-                                                    'approved' => 'success',
-                                                    'pre_returned', 'post_returned', 'returned_to_preparer' => 'danger',
-                                                    'pre_approved' => 'info',
-                                                    'pre_pending', 'post_pending' => 'warning',
-                                                    default => 'secondary',
-                                                };
-
-                                                $documentLabel = $report->document?->doc_title ?: ($report->document?->title ?: '-');
-                                                $templateLabel = $report->template->name ?? 'Protocol';
-                                            @endphp
-                                            <tr>
-                                                <td>#{{ $report->id }}</td>
-                                                <td>
-                                                    <div class="dashboard-activity-stack">
-                                                        <span class="entity-primary">{{ $templateLabel }}</span>
-                                                        <span class="entity-secondary">{{ strtoupper($report->stage ?? '-') }} stage</span>
-                                                    </div>
-                                                </td>
-                                                <td>{{ $documentLabel }}</td>
-                                                <td>{{ $creatorName !== '' ? $creatorName : '-' }}</td>
-                                                <td>
-                                                    <span class="badge badge-{{ $statusTone }} protocol-status-badge">{{ $activityLabel }}</span>
-                                                </td>
-                                                <td>{{ $ownerName ?: 'Completed / Returned' }}</td>
-                                                <td>
-                                                    <div class="dashboard-activity-stack">
-                                                        <span>{{ optional($report->updated_at)->format('d M Y') }}</span>
-                                                        <span class="entity-secondary">{{ optional($report->updated_at)->format('h:i A') }}</span>
-                                                    </div>
-                                                </td>
-                                                <td class="text-right">
-                                                    <a href="{{ route('reports.show', $report) }}" class="btn btn-sm btn-primary">Open</a>
-                                                </td>
-                                            </tr>
-                                        @endforeach
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <div class="mt-4">
-                                {{ $adminProtocolActivity->links() }}
-                            </div>
-                        @endif
-                    </div>
-                </div>
-            </div>
-        </div>
-    @endif
-
     <div class="row">
         <div class="col-12 mb-4">
             <div class="card">
@@ -200,7 +68,7 @@
                     </span>
                 </div>
                 <div class="card-body">
-                    @if($pending->count() === 0)
+                    @if($pending->count() === 0 && $neqPending->count() === 0)
                         <div class="empty-state">
                             <i class="fas fa-inbox"></i>
                             <div class="font-weight-bold mb-1">{{ $isAdminDashboard ? 'No pending protocols.' : 'No pending approvals.' }}</div>
@@ -212,7 +80,7 @@
                                 <thead>
                                     <tr>
                                         <th>ID</th>
-                                        <th>Template</th>
+                                        <th>Protocol Title</th>
                                         @if($isAdminDashboard)
                                             <th>Created By</th>
                                             <th>Current Owner</th>
@@ -240,8 +108,8 @@
                                                 : '-';
                                         @endphp
                                         <tr>
-                                            <td>#{{ $r->id }}</td>
-                                            <td>{{ $r->template->name ?? '-' }}</td>
+                                            <td>{{ $r->displayCode() }}</td>
+                                            <td>{{ $r->protocol_title !== '' ? $r->protocol_title : '-' }}</td>
                                             @if($isAdminDashboard)
                                                 <td>{{ $pendingCreator !== '' ? $pendingCreator : '-' }}</td>
                                                 <td>{{ $pendingOwner !== '' ? $pendingOwner : '-' }}</td>
@@ -250,6 +118,35 @@
                                             <td>{{ strtoupper($r->stage) }}</td>
                                             <td class="text-right">
                                                 <a href="{{ route('reports.show', $r) }}" class="btn btn-sm btn-primary">
+                                                    Open Report
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                    @foreach($neqPending as $doc)
+                                        @php
+                                            $neqCreator = $doc->uploader
+                                                ? trim(($doc->uploader->first_name ?? '').' '.($doc->uploader->last_name ?? ''))
+                                                : '-';
+                                            $neqStep = $doc->approvals->sortBy('step_order')->first(function ($step) {
+                                                return ! empty($step->user_id) && is_null($step->approved_at) && is_null($step->rejected_at);
+                                            });
+                                            $neqOwner = $neqStep?->user
+                                                ? trim(($neqStep->user->first_name ?? '').' '.($neqStep->user->last_name ?? ''))
+                                                : '-';
+                                            $neqTitle = pathinfo((string) $doc->original_filename, PATHINFO_FILENAME);
+                                        @endphp
+                                        <tr>
+                                            <td>{{ $doc->display_code ?: ('NEQ'.$doc->id) }}</td>
+                                            <td>{{ $neqTitle !== '' ? $neqTitle : 'New Equipment Qualification' }}</td>
+                                            @if($isAdminDashboard)
+                                                <td>{{ $neqCreator !== '' ? $neqCreator : '-' }}</td>
+                                                <td>{{ $neqOwner !== '' ? $neqOwner : '-' }}</td>
+                                            @endif
+                                            <td>PENDING</td>
+                                            <td>NEQ</td>
+                                            <td class="text-right">
+                                                <a href="{{ route('protocol.new-equipment-qualification.view', $doc) }}" class="btn btn-sm btn-primary">
                                                     Open Report
                                                 </a>
                                             </td>
@@ -284,7 +181,7 @@
                     </span>
                 </div>
                 <div class="card-body">
-                    @if($approvedByMe->count() === 0)
+                    @if($approvedByMe->count() === 0 && $neqApproved->count() === 0)
                         <div class="empty-state">
                             <i class="fas fa-check-circle"></i>
                             <div class="font-weight-bold mb-1">{{ $isAdminDashboard ? 'No approved protocols yet.' : 'No approved reports yet.' }}</div>
@@ -296,7 +193,7 @@
                                 <thead>
                                     <tr>
                                         <th>ID</th>
-                                        <th>Template</th>
+                                        <th>Protocol Title</th>
                                         @if($isAdminDashboard)
                                             <th>Created By</th>
                                             <th>Completed On</th>
@@ -313,8 +210,8 @@
                                                 : '-';
                                         @endphp
                                         <tr>
-                                            <td>#{{ $r->id }}</td>
-                                            <td>{{ $r->template->name ?? '-' }}</td>
+                                            <td>{{ $r->displayCode() }}</td>
+                                            <td>{{ $r->protocol_title !== '' ? $r->protocol_title : '-' }}</td>
                                             @if($isAdminDashboard)
                                                 <td>{{ $approvedCreator !== '' ? $approvedCreator : '-' }}</td>
                                                 <td>{{ optional($r->updated_at)->format('d M Y h:i A') }}</td>
@@ -322,6 +219,28 @@
                                             <td>{{ strtoupper(str_replace('_', ' ', $r->status)) }}</td>
                                             <td class="text-right">
                                                 <a href="{{ route('reports.show', $r) }}" class="btn btn-sm btn-light">
+                                                    View
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                    @foreach($neqApproved as $doc)
+                                        @php
+                                            $neqCreator = $doc->uploader
+                                                ? trim(($doc->uploader->first_name ?? '').' '.($doc->uploader->last_name ?? ''))
+                                                : '-';
+                                            $neqTitle = pathinfo((string) $doc->original_filename, PATHINFO_FILENAME);
+                                        @endphp
+                                        <tr>
+                                            <td>{{ $doc->display_code ?: ('NEQ'.$doc->id) }}</td>
+                                            <td>{{ $neqTitle !== '' ? $neqTitle : 'New Equipment Qualification' }}</td>
+                                            @if($isAdminDashboard)
+                                                <td>{{ $neqCreator !== '' ? $neqCreator : '-' }}</td>
+                                                <td>{{ optional($doc->updated_at)->format('d M Y h:i A') }}</td>
+                                            @endif
+                                            <td>APPROVED</td>
+                                            <td class="text-right">
+                                                <a href="{{ route('protocol.new-equipment-qualification.view', $doc) }}" class="btn btn-sm btn-light">
                                                     View
                                                 </a>
                                             </td>
@@ -356,7 +275,7 @@
                     </span>
                 </div>
                 <div class="card-body">
-                    @if($rejectedByMe->count() === 0)
+                    @if($rejectedByMe->count() === 0 && $neqReturned->count() === 0)
                         <div class="empty-state">
                             <i class="fas fa-rotate-left"></i>
                             <div class="font-weight-bold mb-1">{{ $isAdminDashboard ? 'No returned protocols.' : 'No rejected reports.' }}</div>
@@ -368,7 +287,7 @@
                                 <thead>
                                     <tr>
                                         <th>ID</th>
-                                        <th>Template</th>
+                                        <th>Protocol Title</th>
                                         @if($isAdminDashboard)
                                             <th>Created By</th>
                                             <th>Returned On</th>
@@ -383,17 +302,46 @@
                                             $returnedCreator = $isAdminDashboard && $r->creator
                                                 ? trim(($r->creator->first_name ?? '').' '.($r->creator->last_name ?? ''))
                                                 : '-';
+                                            $isReturnedCreator = (int) $r->created_by === (int) auth()->id();
+                                            $isReturnedDocx = ! empty($r->docx_import_path);
                                         @endphp
                                         <tr>
-                                            <td>#{{ $r->id }}</td>
-                                            <td>{{ $r->template->name ?? '-' }}</td>
+                                            <td>{{ $r->displayCode() }}</td>
+                                            <td>{{ $r->protocol_title !== '' ? $r->protocol_title : '-' }}</td>
                                             @if($isAdminDashboard)
                                                 <td>{{ $returnedCreator !== '' ? $returnedCreator : '-' }}</td>
                                                 <td>{{ optional($r->updated_at)->format('d M Y h:i A') }}</td>
                                             @endif
                                             <td>{{ strtoupper(str_replace('_', ' ', $r->status)) }}</td>
                                             <td class="text-right">
-                                                <a href="{{ route('reports.show', $r) }}" class="btn btn-sm btn-light">
+                                                @if($isReturnedDocx && $isReturnedCreator)
+                                                    <a href="{{ route('reports.docx-import.fill-form', $r) }}" class="btn btn-sm btn-primary">
+                                                        Edit &amp; Resubmit
+                                                    </a>
+                                                @endif
+                                                <a href="{{ route('reports.show', ['report' => $r, 'view' => 1]) }}" class="btn btn-sm btn-light">
+                                                    View
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    @endforeach
+                                    @foreach($neqReturned as $doc)
+                                        @php
+                                            $neqCreator = $doc->uploader
+                                                ? trim(($doc->uploader->first_name ?? '').' '.($doc->uploader->last_name ?? ''))
+                                                : '-';
+                                            $neqTitle = pathinfo((string) $doc->original_filename, PATHINFO_FILENAME);
+                                        @endphp
+                                        <tr>
+                                            <td>{{ $doc->display_code ?: ('NEQ'.$doc->id) }}</td>
+                                            <td>{{ $neqTitle !== '' ? $neqTitle : 'New Equipment Qualification' }}</td>
+                                            @if($isAdminDashboard)
+                                                <td>{{ $neqCreator !== '' ? $neqCreator : '-' }}</td>
+                                                <td>{{ optional($doc->updated_at)->format('d M Y h:i A') }}</td>
+                                            @endif
+                                            <td>RETURNED</td>
+                                            <td class="text-right">
+                                                <a href="{{ route('protocol.new-equipment-qualification.view', $doc) }}" class="btn btn-sm btn-light">
                                                     View
                                                 </a>
                                             </td>

@@ -2,7 +2,9 @@ from docx import Document
 import regex as re
 import os
 
+# WordprocessingML namespace for raw OOXML walks (paragraphs, text boxes, runs).
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+# Drawing namespace for image-based checkbox controls inside paragraphs.
 DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 
 # Matches fill-in-the-blank placeholders in body paragraphs (underscores and dot leaders).
@@ -45,6 +47,7 @@ PARAGRAPH_CHECKLIST_RE = re.compile(
 # TOC table detection — skip only real table-of-contents tables.
 SECTION_TOC_LINE_RE = re.compile(r"^\d+\.\d+[\t\s]+[A-Z0-9/].*\d+\s*$", re.IGNORECASE)
 
+# Substrings that identify Prepared/Checked/Approved signature tables.
 SIGNATURE_TABLE_KEYWORDS = (
     "prepared by",
     "checked by",
@@ -65,7 +68,7 @@ ATTACHMENT_KEYWORDS = (
     "upload",
 )
 
-# Header table label → value cell is typically one column to the right on the same row.
+# Header table (label text, label col, value col) — value cell is one column right on same row.
 HEADER_FIELD_SPECS = (
     ("FACILITY/SECTION", 2, 2),
     ("EQUIPMENT/SYSTEM  NAME", 2, 4),
@@ -84,6 +87,7 @@ HEADER_FIELD_SPECS = (
 )
 
 
+# Lowercase and collapse whitespace for protocol cover label matching.
 def _normalize_cover_label(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower()).rstrip(":")
 
@@ -107,6 +111,7 @@ def _match_cover_label_cell(text: str) -> tuple[str, str] | None:
     return None
 
 
+# True when table looks like a protocol cover grid (Document Title, Equipment, Effective Date).
 def is_protocol_cover_table(table) -> bool:
     """First-page style cover grid: Document Title, Equipment, Facility, Effective Date."""
     if not table.rows or len(table.rows) < 2:
@@ -156,6 +161,7 @@ def _scan_cover_table_fields(
             fillable_fields.append({
                 "label": display,
                 "value": val_text,
+                # Cover cells with more than one character are treated as pre-filled and locked.
                 "locked": len(val_text) > 1,
                 "type": "protocol_cover",
                 "location": location,
@@ -165,6 +171,7 @@ def _scan_cover_table_fields(
     return skip
 
 
+# Walk ancestors to see if an OOXML node lives inside a w:txbxContent text box.
 def _element_in_textbox(element) -> bool:
     parent = element
     while parent is not None:
@@ -236,6 +243,7 @@ def iter_unique_textboxes(doc):
         txbx_index += 1
 
 
+# Count underlined tab characters used as fill-in blanks inside a paragraph element.
 def count_underlined_tab_blanks(p_element) -> int:
     """Count underlined tab characters used as fill-in blanks in Word."""
     count = 0
@@ -264,6 +272,7 @@ def is_border_blank_paragraph(p_element) -> bool:
     )
 
 
+# Choose date vs text widget for a text-box blank based on label keywords.
 def _infer_textbox_blank_widget(label: str, inner_text: str) -> str:
     ll = (label or inner_text or "").lower()
     if "from date" in ll or (ll.startswith("to ") or ll == "to"):
@@ -390,16 +399,19 @@ def _scan_textbox_fields(doc, fillable_fields: list) -> set[int]:
     return parent_paras
 
 
+# Return all underscore/dot-leader blank substrings in a paragraph.
 def find_paragraph_blanks(text: str) -> list:
     """Return all blank placeholder runs in a paragraph string."""
     return PARA_BLANK_RE.findall(text)
 
 
+# Yield regex match objects for each blank placeholder in document order.
 def iter_paragraph_blank_matches(text: str):
     """Yield regex match objects for each blank placeholder in order."""
     return list(PARA_BLANK_RE.finditer(text))
 
 
+# Collapse duplicated colon labels like EFFECTIVE DATE:EFFECTIVE DATE: into one label.
 def dedupe_colon_label(text: str) -> str:
     """
     Collapse duplicated colon labels such as 'EFFECTIVE DATE:EFFECTIVE DATE:' → 'EFFECTIVE DATE:'.
@@ -415,22 +427,86 @@ def dedupe_colon_label(text: str) -> str:
         left, right = parts[0].strip(), parts[1].strip().rstrip(":")
         if left.lower() == right.lower():
             return f"{left}:"
+    # Word sometimes repeats label tokens without a clean colon boundary.
+    prev = None
+    while prev != t:
+        prev = t
+        t = re.sub(
+            r"(?i)^((?:effective\s*date\s*:?\s*))\1+",
+            r"\1",
+            t,
+        ).strip()
     return t
 
 
+def _append_paragraph_blank_field(result: dict, para_index: int, text: str) -> None:
+    """Register a body paragraph colon/underscore blank (e.g. EFFECTIVE DATE:)."""
+    normalized = dedupe_colon_label(text)
+    display_label = re.sub(r":\s*$", "", normalized).strip() or normalized
+    entry = {
+        "label": display_label[:60],
+        "value": "",
+        "locked": False,
+        "type": "paragraph_blank",
+        "location": f"para_{para_index}",
+        "widget": infer_field_widget(display_label, "paragraph_blank"),
+    }
+    if "effective date" in display_label.lower():
+        entry["cover_field"] = "effective_date"
+    result["fillable_fields"].append(entry)
+
+    clean_text = PARA_BLANK_RE.sub("{{BLANK}}", normalized)
+    if PARA_COLON_BLANK_RE.search(normalized):
+        clean_text = re.sub(r":\s*$", ": {{BLANK}}", normalized)
+
+    result["paragraphs"].append({
+        "para_index": para_index,
+        "original_text": normalized,
+        "template_text": clean_text,
+        "blank_count": 1,
+        "locked": False,
+    })
+
+
+# True for Report No. style labels — must stay text fields, not date pickers.
 def is_report_number_label(label: str) -> bool:
     """True for column/cell labels like 'Report No.' — must stay a text field."""
     return bool(REPORT_NUMBER_LABEL_RE.search((label or "").strip()))
 
 
+# True when label contains "date" but is not a report-number column.
 def is_date_field_label(label: str) -> bool:
     """True when a label should use a date picker (excludes 'Report No.' headers)."""
     if is_report_number_label(label):
         return False
     ll = (label or "").lower()
-    return "date" in ll
+    if "date" not in ll:
+        return False
+    # Signature columns often say "Sign. / Date" — those are not date pickers.
+    if any(
+        k in ll
+        for k in (
+            "sign",
+            "signature",
+            "checked by",
+            "prepared by",
+            "approved by",
+            "done by",
+            "recorded by",
+        )
+    ):
+        # Still allow explicit date-only labels like "Approval Date".
+        if re.search(
+            r"(due\s*date|done\s*on|calibration\s*date|approval\s*date|"
+            r"effective\s*date|date\s*of\s*calibration)",
+            ll,
+        ):
+            return True
+        return False
+    return True
 
 
+# True when paragraph has underscore/dot blanks or a trailing colon with no value.
 def has_paragraph_blank(text: str) -> bool:
     """True when a paragraph contains dot/underscore blanks or a trailing colon blank."""
     if not text or not text.strip():
@@ -441,6 +517,7 @@ def has_paragraph_blank(text: str) -> bool:
     return bool(PARA_COLON_BLANK_RE.search(normalized.strip()))
 
 
+# True when table cell text matches Yes/No checkbox patterns.
 def is_checkbox_cell(text: str) -> bool:
     """True when a table cell contains a Yes/No checkbox pattern."""
     if not text or not text.strip():
@@ -448,6 +525,7 @@ def is_checkbox_cell(text: str) -> bool:
     return bool(CHECKBOX_CELL_RE.search(text))
 
 
+# True when cell is a Yes/No radio pair (same regex as checkbox cells).
 def is_yes_no_radio_cell(text: str) -> bool:
     """True when cell text is a Yes/No choice pattern (not plain department name)."""
     if not text or not text.strip():
@@ -455,6 +533,7 @@ def is_yes_no_radio_cell(text: str) -> bool:
     return bool(CHECKBOX_CELL_RE.search(text))
 
 
+# True for body paragraphs like "Training imparted: Yes □ No □".
 def is_paragraph_yes_no_radio(text: str) -> bool:
     """Paragraph lines like 'Training imparted: Yes □ No □'."""
     if not text or not text.strip():
@@ -462,6 +541,7 @@ def is_paragraph_yes_no_radio(text: str) -> bool:
     return bool(CHECKBOX_CELL_RE.search(text))
 
 
+# Extract the label text before the Yes/No choice group in a paragraph.
 def paragraph_yes_no_label(text: str) -> str:
     """Extract leading label before the Yes/No choice group."""
     parts = re.split(r"\s*:\s*", text, maxsplit=1)
@@ -470,6 +550,7 @@ def paragraph_yes_no_label(text: str) -> str:
     return re.sub(r"\s*(?:Yes|No)\b.*", "", text, flags=re.IGNORECASE).strip() or text[:60]
 
 
+# True when OOXML element contains a w:drawing (image-based form checkbox).
 def element_has_drawing_checkbox(element) -> bool:
     """True when OOXML element contains a w:drawing (image-based form checkbox)."""
     if element is None:
@@ -482,11 +563,13 @@ def paragraph_has_drawing_checkbox(para) -> bool:
     return element_has_drawing_checkbox(para._element)
 
 
+# True when paragraph label already starts with a checked box symbol.
 def paragraph_text_has_prechecked_symbol(text: str) -> bool:
     """True when paragraph label already contains a checked box symbol."""
     return bool(re.match(r"^[\u2611☑✓]", (text or "").strip()))
 
 
+# True for scope checklist lines (New/first installation, Major modification, etc.).
 def is_paragraph_checklist_item(text: str, para) -> bool:
     """Detect scope checklist lines like 'New/ first installation'."""
     t = (text or "").strip()
@@ -497,6 +580,7 @@ def is_paragraph_checklist_item(text: str, para) -> bool:
     return bool(PARAGRAPH_CHECKLIST_RE.match(t))
 
 
+# True for Comments/Remarks/Observation header labels that need a textarea below.
 def is_comments_header_label(label: str) -> bool:
     """Header labels that should have a textarea in the row below."""
     ll = re.sub(r":\s*$", "", (label or "").strip())
@@ -504,6 +588,7 @@ def is_comments_header_label(label: str) -> bool:
     return ll in ("comments", "comment", "remarks", "observation", "description")
 
 
+# True for single-column tables whose first row is Comments/Remarks/Observation.
 def is_comments_section_table(table) -> bool:
     """True for single-column tables whose first row is a Comments/Remarks header."""
     if not table.rows or len(table.rows) < 2:
@@ -514,6 +599,7 @@ def is_comments_section_table(table) -> bool:
     return is_comments_header_label(header)
 
 
+# True when any run in the cell is bold (typical for table header rows).
 def is_cell_bold(cell) -> bool:
     """True when a table cell's text is bold (header styling in Word)."""
     from docx.oxml.ns import qn
@@ -579,6 +665,7 @@ def is_two_col_grid_table(table) -> bool:
     return False
 
 
+# True for TOC lines like "1.0 OBJECTIVE …… 3" with leaders and trailing page number.
 def is_toc_entry_text(text: str) -> bool:
     """True for TOC lines such as '1.0 OBJECTIVE …… 3' (dot/ellipsis leaders + page)."""
     if not text or not text.strip():
@@ -599,6 +686,7 @@ def is_toc_entry_text(text: str) -> bool:
     return bool(has_leaders and has_trailing_page)
 
 
+# True for single-column tables where most rows are TOC entry lines.
 def is_toc_list_table(table) -> bool:
     """True for single-column tables whose rows are TOC entries."""
     if not table.rows:
@@ -617,6 +705,7 @@ def is_toc_list_table(table) -> bool:
     return content_rows >= 3 and toc_rows >= max(2, int(content_rows * 0.6))
 
 
+# True for Sl.No + Description + section-number table-of-contents tables.
 def is_toc_table(table) -> bool:
     """True for table-of-contents tables (Sl.No + Description + section numbers)."""
     if is_toc_list_table(table):
@@ -634,12 +723,14 @@ def is_toc_table(table) -> bool:
     return has_sl and has_desc and has_section
 
 
+# True when header row contains Prepared By / Checked By / Approved By keywords.
 def is_signature_table(header_row: list) -> bool:
     """True for Prepared By / Checked By / Approved By signature tables."""
     header_text = " ".join(header_row).lower()
     return any(kw in header_text for kw in SIGNATURE_TABLE_KEYWORDS)
 
 
+# True for typed certificate/document number columns (not file uploads).
 def is_certificate_number_column(header_label: str) -> bool:
     """True for typed certificate/document number columns (not file uploads)."""
     ll = (header_label or "").strip().lower()
@@ -652,6 +743,7 @@ def is_certificate_number_column(header_label: str) -> bool:
     return False
 
 
+# True when column expects a supporting document upload (certificate/proof/annexure).
 def is_attachment_column(header_label: str) -> bool:
     """
     True when a table column expects a supporting document upload (certificate/proof).
@@ -666,6 +758,7 @@ def is_attachment_column(header_label: str) -> bool:
     return any(kw in ll for kw in ATTACHMENT_KEYWORDS)
 
 
+# True for Sl.No + List of Attachment + Attachment No. tables.
 def is_list_of_attachment_table(table) -> bool:
     """True for Sl.No + List of Attachment + Attachment No. tables."""
     if not table.rows:
@@ -678,6 +771,7 @@ def is_list_of_attachment_table(table) -> bool:
     return "list of attachment" in text
 
 
+# True when this column should accept a file upload (includes List of Attachment No. col).
 def is_attachment_upload_column(table, header_label: str) -> bool:
     """
     True when this column should accept a file upload.
@@ -691,6 +785,7 @@ def is_attachment_upload_column(table, header_label: str) -> bool:
     return is_attachment_column(header_label)
 
 
+# True for unified APPROVAL PAGE tables: Role | Name | Signature | Date with workflow rows.
 def is_approval_page_table(table) -> bool:
     """
     True for unified APPROVAL PAGE tables: Role | Name | Signature | Date
@@ -726,6 +821,7 @@ def is_approval_page_table(table) -> bool:
     return False
 
 
+# Map APPROVAL PAGE role row labels to POST workflow approver field keys.
 def resolve_approval_page_role(row_label: str) -> str | None:
     """Map APPROVAL PAGE role row labels to POST workflow data keys."""
     rl = (row_label or "").strip().lower()
@@ -738,12 +834,30 @@ def resolve_approval_page_role(row_label: str) -> str | None:
     return None
 
 
+# True for Performed/Recorded/Complied rows on the Veeva approval-page table.
 def is_approval_page_performer_row(row_label: str) -> bool:
     """True for Performed/Recorded/Complied rows on the Veeva approval-page table."""
     rl = (row_label or "").strip().lower()
     return any(kw in rl for kw in ("performed", "recorded", "complied"))
 
 
+# Rows where the Name column is a user dropdown at fill time (signature/date stamp on approval).
+def is_approval_page_selectable_name_row(row_label: str) -> bool:
+    rl = (row_label or "").strip().lower()
+    return any(
+        kw in rl
+        for kw in (
+            "performed",
+            "recorded",
+            "complied",
+            "checked",
+            "reviewed",
+            "approved",
+        )
+    )
+
+
+# True for end-of-report Prepared/Checked/Approved blocks with Name/Signature/Date rows.
 def is_report_approval_block_table(table) -> bool:
     """
     True for end-of-report signature blocks: row0 title, row1 Name/Signature/Date, row2+ data.
@@ -758,6 +872,7 @@ def is_report_approval_block_table(table) -> bool:
     return "name" in r1 and ("signature" in r1 or "date" in r1)
 
 
+# True for department-style Prepared/Checked/Approved tables with a Department column.
 def is_department_signature_table(table, header_row: list) -> bool:
     """True for Prepared/Checked/Approved tables with a Department column (tables 1–3)."""
     if not is_signature_table(header_row):
@@ -768,6 +883,7 @@ def is_department_signature_table(table, header_row: list) -> bool:
     return "department" in h or "name & designation" in h
 
 
+# True for Qualification History sub-header rows containing Report No. and Approval Date.
 def is_qualification_subheader_row(row) -> bool:
     """True for Qualification History sub-header rows (Report No. | Approval Date)."""
     texts = [c.text.strip().lower() for c in row.cells]
@@ -776,12 +892,42 @@ def is_qualification_subheader_row(row) -> bool:
     return has_report_no and has_approval_date
 
 
+# Row index of Report No. / Approval Date sub-headers when present near top of table.
 def get_qualification_subheader_row_index(table) -> int | None:
     """Row index of Report No. / Approval Date sub-headers, if present."""
     for row_index, row in enumerate(table.rows[:4]):
         if is_qualification_subheader_row(row):
             return row_index
     return None
+
+
+# Build per-column header labels; row 1 for report-approval blocks, row 0 otherwise.
+def _looks_like_column_header_row(row) -> bool:
+    """True for Checks / Methodology / Acceptance / Observation header rows."""
+    texts: list[str] = []
+    seen: set[int] = set()
+    for cell in row.cells:
+        tc_id = id(cell._tc)
+        if tc_id in seen:
+            continue
+        seen.add(tc_id)
+        texts.append(_normalize_header_compare(cell.text))
+    if len(texts) < 3:
+        return False
+    hits = 0
+    for text in texts:
+        if text in (
+            "checks",
+            "methodology",
+            "observation",
+            "observation/ result",
+            "observation / result",
+            "instrument name",
+        ) or text.startswith("acceptance") or text.startswith("done by") or (
+            text.startswith("identification") and "number" not in text
+        ):
+            hits += 1
+    return hits >= 3
 
 
 def get_table_column_headers(table, report_approval_block: bool) -> list:
@@ -805,11 +951,16 @@ def get_table_column_headers(table, report_approval_block: bool) -> list:
                 headers.append(base[col_index] if col_index < len(base) else sub_label)
         return headers
 
+    for row in table.rows[:8]:
+        if _looks_like_column_header_row(row):
+            return [cell.text.strip() for cell in row.cells]
+
     if table.rows:
         return [cell.text.strip() for cell in table.rows[0].cells]
     return []
 
 
+# Pick the best label for widget inference (inline Report No. beats broad merged header).
 def resolve_column_widget_label(
     header_label: str,
     cell_text: str,
@@ -832,18 +983,21 @@ def resolve_column_widget_label(
     return row_label
 
 
+# True for Name & Designation / Name/ Designation signature columns.
 def is_name_designation_column(header_label: str) -> bool:
     """True for Name & Designation / Name/ Designation columns."""
     ll = (header_label or "").lower()
     return "name" in ll and ("designation" in ll or "design" in ll)
 
 
+# True for Signature & Date or standalone Date columns in signature tables.
 def is_signature_date_column(header_label: str) -> bool:
     """True for Signature & Date or Date columns in signature tables."""
     ll = (header_label or "").lower()
     return ll == "date" or "signature" in ll and "date" in ll
 
 
+# Known Sl. No. / Sr. No. header spellings for column 0 detection.
 SL_NO_COLUMN_HEADERS = (
     "sl. no.",
     "sl no",
@@ -880,6 +1034,7 @@ def is_sl_no_column_header(header_label: str) -> bool:
     )
 
 
+# Return column index when first column header is Sl. No.; otherwise None.
 def resolve_sl_no_column_index(col_headers: list, header_row: list) -> int | None:
     """Return 0 when the table's first column is Sl. No.; otherwise None."""
     if col_headers and is_sl_no_column_header(col_headers[0]):
@@ -889,6 +1044,7 @@ def resolve_sl_no_column_index(col_headers: list, header_row: list) -> int | Non
     return None
 
 
+# Regex for serial-number cell values like 1, 1., 1.0, 2) — not arbitrary text.
 _SL_NO_VALUE_RE = re.compile(r"^\d+[\.\)]?$|^\d+\.\d+$")
 
 
@@ -897,12 +1053,14 @@ def looks_like_sl_no_value(value: str) -> bool:
     return bool(_SL_NO_VALUE_RE.match((value or "").strip()))
 
 
+# True for footer rows containing "Verified by sign and date".
 def is_verified_by_sign_row(row) -> bool:
     """Footer row: Verified by sign and date."""
     text = " ".join(c.text.strip().lower() for c in row.cells)
     return "verified by" in text
 
 
+# True for merged section-title rows inside composite component tables.
 def is_component_section_header_row(row) -> bool:
     """
     Section title row inside composite Main Body / Components tables.
@@ -919,13 +1077,83 @@ def is_component_section_header_row(row) -> bool:
         kw in label
         for kw in (
             "main body",
-            "mechanical components",
-            "electrical components",
-            "pneumatic components",
+            "mechanical component",
+            "electrical component",
+            "pneumatic component",
         )
     )
 
 
+def _normalize_header_compare(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def is_repeated_column_header_row(row, col_headers: list[str] | None = None) -> bool:
+    """True when a body row repeats the table column headers (manual / page-break copy)."""
+    if not row.cells:
+        return False
+    headers = col_headers or []
+    if not headers and hasattr(row, "_parent"):
+        try:
+            headers = [c.text.strip() for c in row._parent.rows[0].cells]
+        except Exception:
+            headers = []
+    if len(headers) < 3:
+        return False
+    matches = 0
+    compared = 0
+    seen: set[int] = set()
+    for idx, cell in enumerate(row.cells):
+        tc_id = id(cell._tc)
+        if tc_id in seen:
+            continue
+        seen.add(tc_id)
+        header = headers[idx] if idx < len(headers) else ""
+        if not header:
+            continue
+        compared += 1
+        if _normalize_header_compare(cell.text) == _normalize_header_compare(header):
+            matches += 1
+    return compared >= 3 and matches >= max(3, int(compared * 0.6))
+
+
+def is_equipment_section_banner_row(row) -> bool:
+    """True for AHU / Dust Extractor / Equipment full-width section banners."""
+    texts: list[str] = []
+    seen: set[int] = set()
+    for cell in row.cells:
+        tc_id = id(cell._tc)
+        if tc_id in seen:
+            continue
+        seen.add(tc_id)
+        text = cell.text.strip()
+        if text:
+            texts.append(text)
+    if not texts:
+        return False
+    # A label with an empty value cell is a fill row, not a full-width title.
+    # Example: "AHU Location | " and "Area Catering to | ".
+    if len(texts) < len(seen):
+        return False
+    unique = {_normalize_header_compare(t) for t in texts}
+    if len(unique) != 1:
+        return False
+    text = texts[0]
+    if len(text) > 220:
+        return False
+    # One merged cell across the row is a section title, with or without a colon.
+    if len(seen) == 1 and len(text) <= 120:
+        return True
+    lower = text.lower()
+    if re.match(
+        r"^(ahu|dust\s*extractor|equipment|area|room|system)\b",
+        lower,
+    ):
+        return True
+    return ":" in text and (len(seen) <= 2 or len(texts) == 1)
+
+
+# True for Main Body / Mechanical / Electrical component tables with Verified-by footers.
 def is_composite_component_table(table) -> bool:
     """Main Body / Mechanical / Electrical blocks with Verified-by footer rows."""
     if not table.rows:
@@ -989,6 +1217,7 @@ def resolve_component_section_sl_no_rows(table) -> dict[int, int]:
     return serial_rows
 
 
+# Sl.No column index for Signature & Date stamp cells on signature rows.
 def resolve_signature_date_col_index(col_headers: list, report_approval_block: bool) -> int:
     """
     Column index for the Signature & Date (or Date-only) stamp cell on a signature row.
@@ -1021,6 +1250,7 @@ def resolve_signature_section_title(header_row: list) -> str:
     return (header_row[0] or "").lower()
 
 
+# Map department signature row labels to POST approval form field names.
 def resolve_signature_approver_role(table_header: str, row_label: str) -> str | None:
     """
     Map a department-style signature row to a POST approval form field name.
@@ -1036,11 +1266,10 @@ def resolve_signature_approver_role(table_header: str, row_label: str) -> str | 
             return "post_checked_by_engineering_name"
         if "production" in rl:
             return "post_checked_by_production_name"
+        if "quality" in rl or rl in ("qa", "q.a.", "q. a."):
+            return "post_checked_by_quality_name"
         if "validation" in rl or "user" in rl:
             return "post_checked_by_validation_name"
-        # QA row sometimes lives in the Checked By table (not a separate Approved By block).
-        if "quality" in rl or rl in ("qa", "q.a.", "q. a."):
-            return "post_approved_by_quality_name"
         return None
     if "approved by" in th:
         if "validation" in rl or "user" in rl:
@@ -1062,20 +1291,106 @@ def resolve_report_approval_approver_role(table, row_index: int) -> str | None:
     if "approved by" in title:
         return "post_approved_by_quality_name"
     if "checked by" in title:
+        if row_index < len(table.rows) and table.rows[row_index].cells:
+            label = table.rows[row_index].cells[0].text.strip().lower()
+            if "engineering" in label:
+                return "post_checked_by_engineering_name"
+            if "production" in label:
+                return "post_checked_by_production_name"
+            if "quality" in label or label in ("qa", "q.a.", "q. a."):
+                return "post_checked_by_quality_name"
+            if "validation" in label or "user" in label:
+                return "post_checked_by_validation_name"
         checked_by_row = {
             2: "post_checked_by_engineering_name",
             3: "post_checked_by_production_name",
-            4: "post_checked_by_validation_name",
-            5: "post_approved_by_quality_name",
+            4: "post_checked_by_quality_name",
+            5: "post_checked_by_validation_name",
         }
         return checked_by_row.get(row_index)
     return None
 
 
+# Numbered section titles in the requalification protocol. They end with a colon,
+# but they are headings, not fill-in lines.
+_LOCKED_SECTION_TITLES_EXACT = {
+    "objective",
+    "scope",
+    "responsibility",
+    "pre-requisites",
+    "prerequisites",
+    "references",
+    "abbreviations",
+    "deviations",
+    "deviations (if any)",
+    "qualification history",
+}
+# Longer lead-in sentences that are still headings, not fill lines.
+_LOCKED_SECTION_TITLE_LONG_PREFIXES = (
+    "responsibilities of different department",
+)
+_LOCKED_SECTION_TITLE_PREFIXES = (
+    "type of qualification",
+    "equipment / system details",
+    "equipment/system details",
+    "details of air handling unit",
+    "applicable standard operating procedure",
+    "pre-qualification checks",
+    "calibrations of instruments",
+    "preventive maintenance details",
+    "any other specific tests",
+    "history of equipment",
+    "review of change controls",
+    "requalification checks",
+    "installation re-qualification checks",
+    "general checks",
+    "operational qualification checks",
+    "list of attachment",
+    "revision history",
+)
+
+
+def _section_title_key(text: str) -> str:
+    """Heading text without the section number and without a trailing colon."""
+    title = re.sub(r"\s+", " ", (text or "").strip())
+    title = title.replace("\u2019", "'").replace("`", "'")
+    title = re.sub(r"^\d+(?:\.\d+)+\s*", "", title)
+    title = re.sub(r"\s*:\s*", " ", title)
+    return re.sub(r"\s+", " ", title).strip().lower()
+
+
+def is_locked_section_title(text: str) -> bool:
+    """
+    True for protocol section headings such as 1.0 OBJECTIVE: and 8.1 Calibrations of Instruments:.
+    A line with an underscore or dot blank stays fillable.
+    """
+    if find_paragraph_blanks(text or ""):
+        return False
+    key = _section_title_key(text)
+    if not key:
+        return False
+    if any(
+        key == prefix or key.startswith(prefix + " ") or key.startswith(prefix + "/") or key.startswith(prefix + "(")
+        for prefix in _LOCKED_SECTION_TITLE_LONG_PREFIXES
+    ):
+        return True
+    if len(key) > 110:
+        return False
+    if key in _LOCKED_SECTION_TITLES_EXACT:
+        return True
+    return any(
+        key == prefix or key.startswith(prefix + " ") or key.startswith(prefix + "(")
+        for prefix in _LOCKED_SECTION_TITLE_PREFIXES
+    )
+
+
+# True for ALL-CAPS section headings and TOC lines — these paragraphs stay locked.
 def is_section_heading_paragraph(text: str) -> bool:
     """Bold/heading paragraphs stay locked; colon-blank labels are not headings."""
     t = text.strip()
     if not t:
+        return True
+    if is_locked_section_title(t):
         return True
     if is_toc_entry_text(t):
         return True
@@ -1094,6 +1409,7 @@ def is_section_heading_paragraph(text: str) -> bool:
     return False
 
 
+# Map field label and type to HTML widget: date, radio, checkbox, textarea, approver, file, text.
 def infer_field_widget(label: str, field_type: str) -> str:
     """Suggest HTML widget: date, radio, checkbox, textarea, approver, file, or text."""
     if field_type == "approver":
@@ -1109,11 +1425,12 @@ def infer_field_widget(label: str, field_type: str) -> str:
     if is_date_field_label(label):
         return "date"
     ll = (label or "").lower()
-    if any(k in ll for k in ("comment", "remarks", "observation", "description")):
+    if any(k in ll for k in ("comment", "remarks", "observation", "description", "summary and conclusion", "summary & conclusion")):
         return "textarea"
     return "text"
 
 
+# Uppercase and collapse whitespace for header label cell matching.
 def _normalize_header_label(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().upper())
 
@@ -1168,7 +1485,56 @@ def _scan_header_tables(doc, fillable_fields: list) -> None:
         )
 
 
+# Lock signature rows that already have Signature & Date text in the source DOCX.
+def _mark_prefilled_signature_rows(fillable_fields: list) -> list:
+    """
+    Signature rows that already contain Signature & Date text in the source DOCX
+    (e.g. vijay_19-06-2026 11:09 AM) must never be re-stamped by the app.
+    """
+    by_row: dict[str, dict[int, int]] = {}
+    for idx, field in enumerate(fillable_fields):
+        loc = field.get("location") or ""
+        m = re.match(r"^(table_\d+_row_\d+)_col_(\d+)$", loc)
+        if not m:
+            continue
+        by_row.setdefault(m.group(1), {})[int(m.group(2))] = idx
+
+    for _row_key, col_map in by_row.items():
+        prefilled_sig_date = False
+        for _col, fidx in col_map.items():
+            field = fillable_fields[fidx]
+            label = field.get("label") or ""
+            val = (field.get("value") or "").strip()
+            if not val:
+                continue
+            if is_signature_date_column(label) or (
+                "signature" in label.lower() and "date" in label.lower()
+            ):
+                prefilled_sig_date = True
+                break
+
+        if not prefilled_sig_date:
+            continue
+
+        # Stamp-eligible approver fields on this row become locked when DOCX already has a signature.
+        for fidx in col_map.values():
+            field = fillable_fields[fidx]
+            ftype = str(field.get("type") or "")
+            if (
+                field.get("approver_role")
+                or ftype == "approver"
+                or ftype.startswith("approval_stamp")
+            ):
+                field["stamp_eligible"] = False
+                field["prefilled"] = True
+                if (field.get("value") or "").strip():
+                    field["locked"] = True
+
+    return fillable_fields
+
+
 # ── parse_docx() ────────────────────────────────────
+# Main parser: walk all body tables and paragraphs and return fillable field metadata.
 def parse_docx(file_path: str) -> dict:
     doc = Document(file_path)
 
@@ -1178,6 +1544,7 @@ def parse_docx(file_path: str) -> dict:
         "fillable_fields": []
     }
 
+    # Section labels that must always stay locked even when the value cell looks empty.
     skip_toc_labels = ["1.0", "2.0", "3.0", "4.0", "5.0", "6.0", "7.0", "sl. no.",
                        "objective", "methodology", "observation / results and evaluation",
                        "list of attachment", "deviation and corrective action taken (if any)",
@@ -1190,6 +1557,7 @@ def parse_docx(file_path: str) -> dict:
             result["tables"].append(table_data)
             continue
 
+        # Classify table type once per table to drive signature, approval, and grid rules.
         header_row = [cell.text.strip() for cell in table.rows[0].cells] if table.rows else []
         approval_page = is_approval_page_table(table)
         report_approval_block = is_report_approval_block_table(table)
@@ -1221,6 +1589,7 @@ def parse_docx(file_path: str) -> dict:
                 is_empty = len(cell_text) == 0
                 is_checkbox = is_checkbox_cell(cell_text)
 
+                # Non-empty non-checkbox cells are locked; empty and Yes/No cells are editable.
                 row_data.append({
                     "col_index": col_index,
                     "value": cell_text,
@@ -1261,6 +1630,7 @@ def parse_docx(file_path: str) -> dict:
                     )
 
                     if label:
+                        # Lock when value has content unless it is a duplicate label or empty date field.
                         locked = len(value) > 1 and not value_is_duplicate_label
                         if is_date_field_label(label) and (not value or value_is_duplicate_label):
                             locked = False
@@ -1325,7 +1695,7 @@ def parse_docx(file_path: str) -> dict:
                 row_label = cells[0].text.strip() if cells else ""
                 approver_role = resolve_approval_page_role(row_label)
                 if approver_role:
-                    if is_approval_page_performer_row(row_label):
+                    if is_approval_page_selectable_name_row(row_label):
                         if len(cells) > 1:
                             date_col = 3 if len(cells) > 3 else 2
                             result["fillable_fields"].append({
@@ -1387,6 +1757,12 @@ def parse_docx(file_path: str) -> dict:
                     continue
 
                 if qualification_subheader_row is not None and row_index == qualification_subheader_row:
+                    continue
+
+                # AHU / Dust Extractor banners and mid-table header repeats are not fillable.
+                if is_equipment_section_banner_row(row) or is_component_section_header_row(row):
+                    continue
+                if is_repeated_column_header_row(row, col_headers or header_row):
                     continue
 
                 row_label = cells[0].text.strip() if cells else ""
@@ -1506,6 +1882,15 @@ def parse_docx(file_path: str) -> dict:
                             widget = "file"
 
                         locked = len(cell_text) > 1 and not signature_table
+                        # Revision-history dates already in the template stay editable.
+                        header_blob = " ".join(header_row).lower()
+                        if (
+                            "revision" in header_blob
+                            and "effective date" in (header_label or "").lower()
+                        ):
+                            locked = False
+                            widget = "date"
+                        # Signature name/date columns lock when DOCX already contains text.
                         if signature_table and (is_name_col or is_date_col or col_index == 1):
                             locked = len(cell_text) > 1
 
@@ -1532,13 +1917,24 @@ def parse_docx(file_path: str) -> dict:
 
     _scan_header_tables(doc, result["fillable_fields"])
 
+    # Parse bordered text boxes (History of Equipment, recommendation lines, etc.).
     textbox_parent_paras = _scan_textbox_fields(doc, result["fillable_fields"])
     para_texts = collect_paragraph_texts(doc)
 
     for para_index, para in enumerate(doc.paragraphs):
         if para_index in textbox_parent_paras:
             outside_text = para.text.strip() or para_texts.get(para_index, "")
-            if outside_text and not has_paragraph_blank(outside_text):
+            if outside_text and is_section_heading_paragraph(outside_text):
+                result["paragraphs"].append({
+                    "para_index": para_index,
+                    "original_text": outside_text,
+                    "template_text": outside_text,
+                    "blank_count": 0,
+                    "locked": True,
+                })
+            elif outside_text and has_paragraph_blank(outside_text):
+                _append_paragraph_blank_field(result, para_index, outside_text)
+            elif outside_text and not has_paragraph_blank(outside_text):
                 result["paragraphs"].append({
                     "para_index": para_index,
                     "original_text": outside_text,
@@ -1575,6 +1971,7 @@ def parse_docx(file_path: str) -> dict:
                 "original_text": text,
                 "template_text": text,
                 "blank_count": 0,
+                # Already-checked scope items stay locked; unchecked items are editable.
                 "locked": prechecked,
             })
             result["fillable_fields"].append({
@@ -1652,6 +2049,8 @@ def parse_docx(file_path: str) -> dict:
                 "locked": True,
             })
 
+    # Final pass: lock entire signature rows that were pre-stamped in the template DOCX.
+    result["fillable_fields"] = _mark_prefilled_signature_rows(result["fillable_fields"])
     return result
 
 

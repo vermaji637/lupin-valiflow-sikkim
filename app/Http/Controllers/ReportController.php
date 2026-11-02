@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\NewEquipmentQualification;
 use App\Models\Report;
 use App\Models\Template;
 use App\Models\ReportApprovalStep;
 use App\Models\User;
 use App\Models\Document;
+use App\Services\DocxDownloadProtection;
 use App\Services\DocxTemplateService;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -14,9 +16,11 @@ use ZipArchive;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Barryvdh\DomPDF\Facade\Pdf;
-use App\Notifications\ReportApprovalAssigned;
+use App\Services\ProtocolAuditLogger;
+use App\Services\ReportApprovalNotifier;
 use Illuminate\Validation\ValidationException;
 
+// Report lifecycle: create, show, PRE/POST approval, rejection, DOCX import integration, and dashboards.
 class ReportController extends Controller
 {
     /**
@@ -144,6 +148,7 @@ class ReportController extends Controller
 public function store(Request $request, Template $template)
 {
     if ($template->template_type === 'docx') {
+        // DOCX templates use dedicated store path with generated Word output
         return $this->storeDocxReport($request, $template);
     }
 
@@ -230,8 +235,8 @@ public function store(Request $request, Template $template)
                 $approver,
                 $report,
                 $skipPreApproval
-                    ? "New POST approval request: Report #{$report->id} (Step {$first->step_order})"
-                    : "New PRE approval request: Report #{$report->id} (Step {$first->step_order})"
+                    ? "New POST approval request: {$report->displayCode()} (Step {$first->step_order})"
+                    : "New PRE approval request: {$report->displayCode()} (Step {$first->step_order})"
             );
         }
     }
@@ -243,11 +248,23 @@ public function store(Request $request, Template $template)
 }
 
     // =========================
-    // 3) SHOW
+    // 3) SHOW — read-only report view with approval UI and DOCX preview
     // =========================
    public function show(Report $report)
 {
     $report->load(['template','approvalSteps']);
+    NotificationController::markSeenForReport(auth()->user(), (int) $report->id);
+
+    if (
+        (int) $report->created_by === (int) auth()->id()
+        && ! empty($report->docx_import_path)
+        && in_array($report->status, ['pre_returned', 'post_returned'], true)
+        && ! request()->boolean('view')
+    ) {
+        return redirect()
+            ->route('reports.docx-import.fill-form', $report)
+            ->with('status', 'Update the returned document and resubmit for approval.');
+    }
 
     $data = $report->data ?? [];
     if (is_string($data)) $data = json_decode($data, true) ?? [];
@@ -261,6 +278,7 @@ public function store(Request $request, Template $template)
     $bodyHtml = html_entity_decode((string) $bodyHtml, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
     if (($report->template->template_type ?? '') === 'docx' && $this->isLegacyDocxPreviewHtml($bodyHtml)) {
+        // Re-render DOCX template preview when stored HTML is an outdated placeholder
         $bodyHtml = $this->resolveDocxRenderedHtml($report->template, $data);
     }
 
@@ -279,8 +297,8 @@ public function store(Request $request, Template $template)
         return $tag;
     }, $bodyHtml);
 
-    // ✅ If final approved → fully readonly + lock all
-    if ($report->status === 'approved') {
+    // ✅ If final approved or permanently rejected → fully readonly + lock all
+    if (in_array($report->status, ['approved', 'rejected'], true)) {
 
     $bodyHtml = $this->injectApprovalMarks($bodyHtml, $report);
     $bodyHtml = $this->renderReadOnlyHtml($bodyHtml, $data, $report);
@@ -296,6 +314,7 @@ public function store(Request $request, Template $template)
     // Ensure links remain clickable even if template content has editable wrappers.
     $bodyHtml = $this->disableContentEditable($bodyHtml);
 
+    // Current pending step for the active stage (used by approve/reject buttons)
     $currentStep = $report->approvalSteps()
         ->where('stage', $report->stage)
         ->whereNull('approved_at')
@@ -310,6 +329,7 @@ public function store(Request $request, Template $template)
     // DOCX import reports: show read-only table preview instead of HTML template body
     $docxPreviewHtml = '';
     if ($report->docx_import_path) {
+        // Build table HTML preview from filled DOCX via DocxImportController
         $docxPreviewHtml = app(DocxImportController::class)->buildShowPreviewHtml($report);
     }
 
@@ -387,6 +407,7 @@ private function lockAllFields(string $html): string
 
         if (($report->template->template_type ?? '') === 'docx') {
             if ($report->docx_import_path) {
+                // DOCX import reports edit via fill form, not HTML editor
                 return redirect()->route('reports.docx-import.fill-form', $report);
             }
 
@@ -415,7 +436,7 @@ private function lockAllFields(string $html): string
     }
 
     // =========================
-    // 5) SUBMIT TO POST (User fills after pre approved)
+    // 5) SUBMIT TO POST — creator fills POST section after PRE approval
     // =========================
     public function submitToPost(Request $request, Report $report)
     {
@@ -431,6 +452,7 @@ private function lockAllFields(string $html): string
         if (is_string($oldData)) $oldData = json_decode($oldData, true) ?? [];
         if (!is_array($oldData)) $oldData = [];
 
+        // Merge new POST form values while preserving PRE-stage data
         $data = array_merge($oldData, $newData);
 
         // Ensure *_name_text labels exist for read-only approval display
@@ -456,6 +478,7 @@ private function lockAllFields(string $html): string
         $saveUserText('post_prepared_by_name');
         $saveUserText('post_checked_by_engineering_name');
         $saveUserText('post_checked_by_production_name');
+        $saveUserText('post_checked_by_quality_name');
         $saveUserText('post_checked_by_validation_name');
         $saveUserText('post_approved_by_quality_name');
 
@@ -467,6 +490,7 @@ private function lockAllFields(string $html): string
                   $originalName = $file->getClientOriginalName();
                   $cleanName = str_replace(' ', '_', $file->getClientOriginalName());
                   $newFileName = 'protocol_'.$report->id.'/'.$cleanName;
+                  Storage::disk('public')->makeDirectory('reports/attachments/protocol_'.$report->id);
                    $path = $file->storeAs('reports/attachments', $newFileName, 'public');
                // $path = $file->store('reports/attachments', 'public');
 
@@ -506,6 +530,7 @@ private function lockAllFields(string $html): string
         // remove old post steps and recreate from selected users
         $report->approvalSteps()->where('stage', 'post')->delete();
 
+        // Recreate POST approval chain from selected approver user IDs
         $steps = $this->buildPostApprovalSteps($data);
 
         foreach ($steps as $s) {
@@ -539,7 +564,7 @@ private function lockAllFields(string $html): string
         $this->notifyApprover(
             $approver,
             $report,
-            "New POST approval request: Report #{$report->id} (Step {$first->step_order})"
+            "New POST approval request: {$report->displayCode()} (Step {$first->step_order})"
         );
     }
 }
@@ -548,10 +573,14 @@ private function lockAllFields(string $html): string
     }
 
     // =========================
-    // 6) APPROVE (PRE or POST)
+    // 6) APPROVE — stamp signature, advance step, refresh DOCX when imported
     // =========================
     public function approve(Request $request, Report $report)
     {
+        if (! auth()->user()->can('protocol-approve')) {
+            abort(403, 'Approve permission is required.');
+        }
+
         if (! Hash::check($request->password, auth()->user()->password)) {
             return back()->with('error', 'Wrong E-Sign password.');
         }
@@ -576,6 +605,7 @@ private function lockAllFields(string $html): string
 
         $prefix = $this->stepPrefix($report->stage, $step->label);
         if ($prefix) {
+            // Write approver name, signature label, and date into reports.data
             $this->stampDecisionFieldsArray($data, $prefix, 'Approved');
         }
 
@@ -588,8 +618,10 @@ private function lockAllFields(string $html): string
 
         // DOCX import: stamp signature cells via Python preview + /fill (not HTML injectValuesIntoHtml).
         if ($report->docx_import_path && $report->docx_import_status === 'completed' && $prefix) {
+            // Regenerate filled DOCX with approval stamp in signature cells via Python
             app(DocxImportController::class)->refreshDocxAfterApproval($report->fresh(), $prefix, 'Approved');
         } else {
+            // HTML template reports: re-inject stamped values into rendered_html
             $baseHtml = $report->rendered_html ?: ($report->template->body_html ?? '');
             $rendered = $this->injectValuesIntoHtml($baseHtml, $data);
             $report->update(['rendered_html' => $rendered]);
@@ -612,7 +644,7 @@ private function lockAllFields(string $html): string
         $this->notifyApprover(
             $approver,
             $report,
-            "Approval required: Report #{$report->id} (Stage: {$report->stage}, Step {$next->step_order})"
+            "Approval required: {$report->displayCode()} (Stage: {$report->stage}, Step {$next->step_order})"
         );
     }
         } else {
@@ -621,22 +653,43 @@ private function lockAllFields(string $html): string
                     'status'             => 'pre_approved',
                     'current_step_order' => 0,
                 ]);
+                $fresh = $report->fresh();
+                if ($fresh && $fresh->import_source === 'requalification' && $fresh->docx_import_path) {
+                    $creator = \App\Models\User::find($fresh->created_by);
+                    if ($creator) {
+                        app(ReportApprovalNotifier::class)->notifyApprover(
+                            $creator,
+                            $fresh,
+                            "Pre-approval is complete for {$fresh->displayCode()}. You can now fill the document."
+                        );
+                    }
+                }
             } else {
                 $report->update([
                     'status'             => 'approved',
                     'current_step_order' => 0,
                 ]);
+
+                app(ReportApprovalNotifier::class)->notifyFullyApproved($report->fresh());
             }
         }
+
+        $report->refresh();
+        $isFinal = in_array($report->status, ['approved', 'pre_approved'], true);
+        ProtocolAuditLogger::recordApproved($report, $step->label ?? null, $isFinal);
 
         return back()->with('success', 'Approved successfully.');
     }
 
     // =========================
-    // 7) REJECT (reset current stage)
+    // 7) SEND BACK — reset signatures, return report to creator for correction
     // =========================
-    public function reject(Request $request, Report $report)
+    public function sendBack(Request $request, Report $report)
 {
+    if (! auth()->user()->can('protocol-send-back')) {
+        abort(403, 'Send Back permission is required.');
+    }
+
     $request->validate([
         'remark' => 'required|string'
     ]);
@@ -658,6 +711,11 @@ private function lockAllFields(string $html): string
     if (!$currentStep || (int)$currentStep->user_id !== (int)auth()->id()) {
         abort(403, 'You are not the current approver.');
     }
+
+    $remark = trim((string) $request->remark);
+    $rejecter = auth()->user();
+    $notifier = app(ReportApprovalNotifier::class);
+    $priorApprovers = $notifier->priorApproversForStage($report, $report->stage);
 
     // 🔹 Mark this step rejected (audit)
     $currentStep->update([
@@ -702,9 +760,23 @@ private function lockAllFields(string $html): string
             'current_step_order' => 0,
         ]);
 
+        $report->refresh();
+        ProtocolAuditLogger::recordRejected($report, $remark);
+        $notifier->notifyRejected($report, $remark, $rejecter, $priorApprovers, 'sent_back');
+
+        if ($report->docx_import_path) {
+            $sentBackMessage = $report->import_source === 'requalification'
+                ? 'Sent back. Select the pre-approval users again. The document stays locked until pre-approval is complete.'
+                : 'Sent back to creator. Update the document and resubmit for PRE approval.';
+
+            return redirect()
+                ->route('reports.docx-import.fill-form', $report)
+                ->with('error', $sentBackMessage);
+        }
+
         return redirect()
             ->route('reports.editReturnedPre', $report)
-            ->with('error', 'Rejected! Sent back to creator for correction.');
+            ->with('error', 'Sent back to creator for correction.');
     }
 
     // =============================
@@ -743,28 +815,101 @@ private function lockAllFields(string $html): string
         'status'             => 'post_returned',   // 👈 NEW STATUS
         'current_step_order' => 0,
     ]);
-    $creator = \App\Models\User::find($report->created_by);
-if ($creator) {
-    $this->notifyApprover(
-        $creator,
-        $report,
-        "Report #{$report->id} was rejected in {$report->stage} stage. Please update and resubmit."
-    );
-}
+    $report->refresh();
+    ProtocolAuditLogger::recordRejected($report, $remark);
+    $notifier->notifyRejected($report, $remark, $rejecter, $priorApprovers, 'sent_back');
 
     if ($report->docx_import_path) {
         return redirect()
             ->route('reports.docx-import.fill-form', $report)
-            ->with('error', 'Rejected! Returned to creator. Update the document and resubmit for POST approval.');
+            ->with('error', 'Sent back to creator. Update the document and resubmit for POST approval.');
     }
 
     return redirect()
         ->route('reports.editReturnedPost', $report)
-        ->with('error', 'Rejected! Returned to creator. Post approval will restart from first approver.');
+        ->with('error', 'Sent back to creator. Post approval will restart from first approver.');
 }
 
     return back();
 }
+
+    // =========================
+    // 7b) REJECT — permanently close the protocol (no resubmit / refill)
+    // =========================
+    public function reject(Request $request, Report $report)
+    {
+        if (! auth()->user()->can('protocol-reject')) {
+            abort(403, 'Reject permission is required.');
+        }
+
+        $request->validate([
+            'remark' => 'required|string',
+        ]);
+
+        if (! Hash::check($request->password, auth()->user()->password)) {
+            return back()->with('error', 'Wrong E-Sign password.');
+        }
+
+        $report->load(['template', 'approvalSteps']);
+
+        $currentStep = $report->approvalSteps()
+            ->where('stage', $report->stage)
+            ->whereNull('approved_at')
+            ->whereNull('rejected_at')
+            ->orderBy('step_order')
+            ->first();
+
+        if (! $currentStep || (int) $currentStep->user_id !== (int) auth()->id()) {
+            abort(403, 'You are not the current approver.');
+        }
+
+        $remark = trim((string) $request->remark);
+        $rejecter = auth()->user();
+        $notifier = app(ReportApprovalNotifier::class);
+        $priorApprovers = $notifier->priorApproversForStage($report, $report->stage);
+
+        $data = $report->data ?? [];
+        if (is_string($data)) {
+            $data = json_decode($data, true) ?? [];
+        }
+        if (! is_array($data)) {
+            $data = [];
+        }
+        $data = $this->normalizeReportData($data);
+
+        $prefix = $this->stepPrefix($report->stage, $currentStep->label);
+        if ($prefix) {
+            $this->stampDecisionFieldsArray($data, $prefix, 'Rejected');
+        }
+
+        $currentStep->update([
+            'rejected_at' => now(),
+            'rejected_by' => auth()->id(),
+            'remark'      => $remark,
+        ]);
+
+        $report->update([
+            'data'   => $data,
+            'status' => 'rejected',
+        ]);
+
+        if ($report->docx_import_path && $report->docx_import_status === 'completed' && $prefix) {
+            app(DocxImportController::class)->refreshDocxAfterApproval($report->fresh(), $prefix, 'Rejected');
+        } else {
+            $baseHtml = $report->rendered_html ?: ($report->template->body_html ?? '');
+            $rendered = $this->injectValuesIntoHtml($baseHtml, $data);
+            $report->update(['rendered_html' => $rendered]);
+        }
+
+        $report->refresh();
+        ProtocolAuditLogger::recordRejected($report, $remark);
+        $notifier->notifyRejected($report, $remark, $rejecter, $priorApprovers, 'rejected');
+
+        return redirect()
+            ->route('reports.show', $report)
+            ->with('error', 'Protocol rejected. The filler cannot edit or resubmit this document.');
+    }
+
 private function clearAllSignatureDateFromData(array &$data): void
 {
     foreach (array_keys($data) as $k) {
@@ -778,9 +923,11 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
     // only signature/date keys clear, NOT the user selection fields
     $prefixes = ($stage === 'pre')
         ? [
+            'prepared_by_engineering',
             'checked_by_engineering',
             'checked_by_production',
             'checked_by_validation',
+            'checked_by_quality',
             'approved_by_user',
             'approved_by_quality',
         ]
@@ -788,6 +935,7 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
             'post_prepared_by',
             'post_checked_by_engineering',
             'post_checked_by_production',
+            'post_checked_by_quality',
             'post_checked_by_validation',
             'post_approved_by_quality',
         ];
@@ -812,6 +960,7 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
     // =========================
      public function myPendingApprovals()
     {
+        // Reports where the logged-in user is the current pending approver
         $reports = Report::query()
             ->whereIn('status', ['pre_pending', 'post_pending'])
             ->whereHas('approvalSteps', function ($q) {
@@ -832,6 +981,7 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
     // =====================================================
     private function createStepsForStage(Report $report, array $data, string $stage): void
     {
+        // Build ordered step definitions from template form field keys
         $steps = $stage === 'pre'
             ? $this->buildPreApprovalSteps()
             : $this->buildPostApprovalSteps($data);
@@ -850,6 +1000,7 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
         }
     }
 
+    // PRE-stage approver roles mapped to form select field keys
     private function buildPreApprovalSteps(): array
     {
         return [
@@ -861,14 +1012,16 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
         ];
     }
 
+    // POST-stage approver roles mapped to form select field keys
     private function buildPostApprovalSteps(array $data): array
     {
         return [
             ['key' => 'post_prepared_by_name',            'label' => 'POST_PREPARED',    'order' => 1],
             ['key' => 'post_checked_by_engineering_name', 'label' => 'POST_ENGINEERING', 'order' => 2],
             ['key' => 'post_checked_by_production_name',  'label' => 'POST_PRODUCTION',  'order' => 3],
-            ['key' => 'post_checked_by_validation_name',  'label' => 'POST_VALIDATION',  'order' => 4],
-            ['key' => 'post_approved_by_quality_name',    'label' => 'POST_APPROVED_QA', 'order' => 5],
+            ['key' => 'post_checked_by_quality_name',     'label' => 'POST_CHECKED_QA',  'order' => 4],
+            ['key' => 'post_checked_by_validation_name',  'label' => 'POST_VALIDATION',  'order' => 5],
+            ['key' => 'post_approved_by_quality_name',    'label' => 'POST_APPROVED_QA', 'order' => 6],
         ];
     }
 
@@ -890,9 +1043,11 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
             // ✅ if report exist → use protocol folder
             if ($report && $report->id) {
                 $newFileName = 'protocol_'.$report->id.'/'.$cleanName;
+                Storage::disk('public')->makeDirectory('reports/attachments/protocol_'.$report->id);
                 $path = $file->storeAs('reports/attachments', $newFileName, 'public');
             } else {
                 // ✅ fallback (before report create)
+                Storage::disk('public')->makeDirectory('reports/attachments');
                 $path = $file->store('reports/attachments', 'public');
             }
 
@@ -1085,7 +1240,7 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
     private function getTemplateUsers()
     {
         return User::with('roles:id,name')
-            ->select('id', 'first_name', 'last_name')
+            ->select('id', 'first_name', 'last_name', 'designation')
             ->orderBy('first_name')
             ->orderBy('last_name')
             ->get()
@@ -1109,13 +1264,13 @@ private function getTemplateDocuments()
     private function formatUserOptionLabel($user): string
     {
         $fullName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
-        $roleName = method_exists($user, 'roles') ? ($user->roles->pluck('name')->first() ?? '') : '';
+        $designation = trim((string) ($user->designation ?? ''));
 
         if ($fullName === '') {
             $fullName = 'User #' . $user->id;
         }
 
-        return $roleName !== '' ? $fullName . ' - ' . $roleName : $fullName;
+        return $designation !== '' ? $fullName . ' - ' . $designation : $fullName;
     }
 
     // private function formatDocumentOptionLabel($document): string
@@ -1389,6 +1544,7 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
             'post_prepared_by_name' => ['report_prepared_by_name'],
             'post_checked_by_engineering_name' => ['checked_engineering_name'],
             'post_checked_by_production_name' => ['checked_production_name'],
+            'post_checked_by_quality_name' => ['checked_qa_name'],
             'post_checked_by_validation_name' => ['checked_validation_name'],
             'post_approved_by_quality_name' => ['approved_head_qa_name', 'checked_qa_name'],
         ];
@@ -1481,6 +1637,7 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
         }
     }
 
+    // Create report from DOCX template type, generate output, and start approval workflow
     private function storeDocxReport(Request $request, Template $template)
     {
         $fields = is_array($template->docx_placeholders) ? $template->docx_placeholders : [];
@@ -1600,8 +1757,8 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
                     $approver,
                     $report,
                     $skipPreApproval
-                        ? "New POST approval request: Report #{$report->id} (Step {$first->step_order})"
-                        : "New PRE approval request: Report #{$report->id} (Step {$first->step_order})"
+                        ? "New POST approval request: {$report->displayCode()} (Step {$first->step_order})"
+                        : "New PRE approval request: {$report->displayCode()} (Step {$first->step_order})"
                 );
             }
         }
@@ -1623,6 +1780,7 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
         $file = $request->file('completed_doc_file');
         $cleanName = str_replace(' ', '_', $file->getClientOriginalName());
         $storedName = 'protocol_' . $report->id . '/completed_' . $cleanName;
+        Storage::disk('public')->makeDirectory('reports/attachments/protocol_' . $report->id);
         $path = $file->storeAs('reports/attachments', $storedName, 'public');
 
         return [
@@ -1645,6 +1803,7 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
         $file = $request->file('preapproved_doc_file');
         $cleanName = str_replace(' ', '_', $file->getClientOriginalName());
         $storedName = 'protocol_' . $report->id . '/preapproved_' . $cleanName;
+        Storage::disk('public')->makeDirectory('reports/attachments/protocol_' . $report->id);
         $path = $file->storeAs('reports/attachments', $storedName, 'public');
 
         return [
@@ -1877,13 +2036,16 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
         $value = $data[$name] ?? '';
         if ($name !== '' && str_ends_with($name, '_name')) {
             $textKey = $name . '_text';
-            if (!empty($data[$textKey])) {
+            $resolvedUser = is_numeric((string) $value)
+                ? $userMap->get((int) $value)
+                : null;
+
+            // Always prefer live user label when we have a user id,
+            // so legacy cached *_name_text ("Name only") also gains designation.
+            if ($resolvedUser) {
+                $value = $this->formatUserOptionLabel($resolvedUser);
+            } elseif (!empty($data[$textKey])) {
                 $value = (string) $data[$textKey];
-            } elseif (is_numeric((string) $value)) {
-                $resolvedUser = $userMap->get((int) $value);
-                if ($resolvedUser) {
-                    $value = $this->formatUserOptionLabel($resolvedUser);
-                }
             }
         }
 
@@ -2023,14 +2185,18 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
 
         $label = '';
 
-        if ($textVal !== '') {
+        $u = ($val !== '' && is_numeric($val)) ? $userMap->get((int) $val) : null;
+        $d = ($val !== '' && is_numeric($val)) ? $docMap->get((int) $val) : null;
+
+        // Same rule as input handling: if user id is present, rebuild label from current user
+        // so designation is shown even for old reports.
+        if ($u) {
+            $label = $this->formatUserOptionLabel($u);
+        } elseif ($textVal !== '') {
             $label = $textVal;
         } elseif ($val !== '') {
-            $u = $userMap->get((int)$val);
             $d = $docMap->get((int)$val);
-
-            if ($u) $label = $this->formatUserOptionLabel($u);
-            elseif ($d) $label = $this->formatDocumentOptionLabel($d);
+            if ($d) $label = $this->formatDocumentOptionLabel($d);
             else $label = $val;
         }
 
@@ -2054,7 +2220,7 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
     return $out;
 }
 
- // Put Approved/Rejected text into signature/date inputs
+ // Replace signature/date inputs in HTML with Approved or Send Back spans from step timestamps
      private function injectApprovalMarks(string $html, Report $report): string
     {
         libxml_use_internal_errors(true);
@@ -2070,16 +2236,19 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
         // prefix => label (must match DB labels exactly)
         $map = [
             // PRE
-            'checked_by_engineering' => 'ENGINEERING',
-            'checked_by_production'  => 'PRODUCTION',
-            'checked_by_validation'  => 'VALIDATION',
-            'approved_by_user'       => 'USER/VALIDATION',
-            'approved_by_quality'    => 'QUALITY ASSURANCE',
+            'prepared_by_engineering' => 'PREPARED_ENGINEERING',
+            'checked_by_engineering'  => 'ENGINEERING',
+            'checked_by_production'   => 'PRODUCTION',
+            'checked_by_validation'   => 'VALIDATION',
+            'checked_by_quality'      => 'CHECKED_QA',
+            'approved_by_user'        => 'USER/VALIDATION',
+            'approved_by_quality'     => 'QUALITY ASSURANCE',
 
             // POST
             'post_prepared_by'             => 'POST_PREPARED',
             'post_checked_by_engineering'  => 'POST_ENGINEERING',
             'post_checked_by_production'   => 'POST_PRODUCTION',
+            'post_checked_by_quality'      => 'POST_CHECKED_QA',
             'post_checked_by_validation'   => 'POST_VALIDATION',
             'post_approved_by_quality'     => 'POST_APPROVED_QA',
         ];
@@ -2143,16 +2312,19 @@ if ($preparedDateInputs->length > 0) {
         return $out;
     }
 
+    // Map approval step label to reports.data field prefix for signature stamping
     private function stepPrefix(string $stage, string $label): ?string
     {
         if ($stage === 'pre') {
             return match ($label) {
-                'ENGINEERING'        => 'checked_by_engineering',
-                'PRODUCTION'         => 'checked_by_production',
-                'VALIDATION'         => 'checked_by_validation',
-                'USER/VALIDATION'    => 'approved_by_user',
-                'QUALITY ASSURANCE'  => 'approved_by_quality',
-                default              => null,
+                'PREPARED_ENGINEERING' => 'prepared_by_engineering',
+                'ENGINEERING'          => 'checked_by_engineering',
+                'PRODUCTION'           => 'checked_by_production',
+                'VALIDATION'           => 'checked_by_validation',
+                'CHECKED_QA'           => 'checked_by_quality',
+                'USER/VALIDATION'      => 'approved_by_user',
+                'QUALITY ASSURANCE'    => 'approved_by_quality',
+                default                => null,
             };
         }
 
@@ -2160,6 +2332,7 @@ if ($preparedDateInputs->length > 0) {
             'POST_PREPARED'    => 'post_prepared_by',
             'POST_ENGINEERING' => 'post_checked_by_engineering',
             'POST_PRODUCTION'  => 'post_checked_by_production',
+            'POST_CHECKED_QA'  => 'post_checked_by_quality',
             'POST_VALIDATION'  => 'post_checked_by_validation',
             'POST_APPROVED_QA' => 'post_approved_by_quality',
             default            => null,
@@ -2167,22 +2340,10 @@ if ($preparedDateInputs->length > 0) {
     }
 
     // ✅ stamps into $data (used by readonly rendering)
-     /**
-      * stampDecisionFieldsArray() — write approver name, signature, and date into reports.data.
-      *
-      * @param  array   $data      Mutable report data array
-      * @param  string  $prefix    Field prefix (e.g. post_checked_by_engineering)
-      * @param  string  $decision  Signature label (Approved / Send Back)
-      *
-      * Encoding note: names are normalized to UTF-8 before JSON storage in MSSQL.
-      */
+     // Write approver display name, decision text, and IST timestamp into reports.data
      private function stampDecisionFieldsArray(array &$data, string $prefix, string $decision): void
     {
-        $name = trim((auth()->user()->first_name ?? '') . ' ' . (auth()->user()->last_name ?? ''));
-        if ($name === '') {
-            $name = auth()->user()->name ?? '—';
-        }
-
+        $name = $this->formatUserOptionLabel(auth()->user());
         $data[$prefix . '_name_text'] = $this->safeUtf8($name);
         $data[$prefix . '_signature'] = $this->safeUtf8($decision);
         $data[$prefix . '_date']      = now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
@@ -2246,6 +2407,7 @@ public function downloadAttachmentsFolderZip($id)
     $zipFullPath = $zipTempDir . DIRECTORY_SEPARATOR . $zipBaseName . '_' . uniqid() . '.zip';
 
     $zip = new ZipArchive();
+    $lockedCopies = [];
 
     if ($zip->open($zipFullPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
         abort(500, 'Cannot create ZIP file.');
@@ -2316,7 +2478,15 @@ public function downloadAttachmentsFolderZip($id)
         }
         $usedNames[strtolower($candidateName)] = true;
 
-        if ($zip->addFile($absolutePath, $candidateName)) {
+        $zipSource = $absolutePath;
+        if (strtolower(pathinfo($absolutePath, PATHINFO_EXTENSION)) === 'docx') {
+            $locked = app(DocxDownloadProtection::class)->protectedCopy($absolutePath);
+            if ($locked !== $absolutePath) {
+                $zipSource = $locked;
+                $lockedCopies[] = $locked;
+            }
+        }
+        if ($zip->addFile($zipSource, $candidateName)) {
             $added++;
         }
     }
@@ -2347,7 +2517,15 @@ public function downloadAttachmentsFolderZip($id)
                     continue;
                 }
 
-                if ($zip->addFile($filePath, $relativePathInZip)) {
+                $zipSource = $filePath;
+                if (strtolower(pathinfo($filePath, PATHINFO_EXTENSION)) === 'docx') {
+                    $locked = app(DocxDownloadProtection::class)->protectedCopy($filePath);
+                    if ($locked !== $filePath) {
+                        $zipSource = $locked;
+                        $lockedCopies[] = $locked;
+                    }
+                }
+                if ($zip->addFile($zipSource, $relativePathInZip)) {
                     $usedNames[strtolower($relativePathInZip)] = true;
                     $added++;
                 }
@@ -2356,6 +2534,11 @@ public function downloadAttachmentsFolderZip($id)
     }
 
     $zip->close();
+    foreach ($lockedCopies as $lockedCopy) {
+        if (is_file($lockedCopy)) {
+            @unlink($lockedCopy);
+        }
+    }
 
     if ($added === 0 || !file_exists($zipFullPath)) {
         @unlink($zipFullPath);
@@ -2392,6 +2575,14 @@ private function authorizeReportAttachmentAccess(Report $report): void
     }
 
     // Other authenticated users (same access model as report show page).
+}
+
+private function downloadWordFile(string $absolutePath, string $downloadName)
+{
+    $lockedPath = app(DocxDownloadProtection::class)->protectedCopy($absolutePath);
+
+    return response()->download($lockedPath, $downloadName)
+        ->deleteFileAfterSend($lockedPath !== $absolutePath);
 }
 
 public function downloadAttachment(Report $report, int $index)
@@ -2444,7 +2635,7 @@ public function downloadAttachment(Report $report, int $index)
     $downloadName = (string) ($attachment['original_name'] ?? basename($normalizedPath));
 
     if (Storage::disk('public')->exists($normalizedPath)) {
-        return Storage::disk('public')->download($normalizedPath, $downloadName);
+        return $this->downloadWordFile(Storage::disk('public')->path($normalizedPath), $downloadName);
     }
 
     $candidatePaths = [
@@ -2455,7 +2646,7 @@ public function downloadAttachment(Report $report, int $index)
 
     foreach ($candidatePaths as $candidatePath) {
         if (is_file($candidatePath)) {
-            return response()->download($candidatePath, $downloadName);
+            return $this->downloadWordFile($candidatePath, $downloadName);
         }
     }
 
@@ -2464,6 +2655,21 @@ public function downloadAttachment(Report $report, int $index)
 
 public function downloadApprovedWord(Report $report)
 {
+    if (! empty($report->docx_import_path) && $report->docx_import_status === 'completed') {
+        app(DocxImportController::class)->ensureLatestFilledDocxForDownload($report->fresh());
+        $report->refresh();
+    }
+
+    ProtocolAuditLogger::recordExported($report, 'DOCX');
+
+    // Prefer the latest regenerated DOCX path (kept in sync during approvals).
+    if (!empty($report->docx_filled_path) && Storage::disk('public')->exists($report->docx_filled_path)) {
+        $directPath = Storage::disk('public')->path($report->docx_filled_path);
+        $downloadName = basename((string) $report->docx_filled_path);
+
+        return $this->downloadWordFile($directPath, $downloadName);
+    }
+
     $attachmentsRaw = $report->attachments ?? [];
     if (is_string($attachmentsRaw)) {
         $attachmentsRaw = json_decode($attachmentsRaw, true) ?? [];
@@ -2493,12 +2699,13 @@ public function downloadApprovedWord(Report $report)
             || str_ends_with($originalName, '.docx');
     };
 
+    // Index 99 is the generated/stamped DOCX; prioritize it over uploaded "completed" files.
     $preferredAttachment = collect($attachmentsList)->first(function ($attachment) use ($isWordAttachment) {
         if (!is_array($attachment)) {
             return false;
         }
         $index = isset($attachment['index']) ? (int) $attachment['index'] : null;
-        return $index === 100 && $isWordAttachment($attachment);
+        return $index === 99 && $isWordAttachment($attachment);
     });
 
     if (!$preferredAttachment) {
@@ -2507,7 +2714,7 @@ public function downloadApprovedWord(Report $report)
                 return false;
             }
             $index = isset($attachment['index']) ? (int) $attachment['index'] : null;
-            return $index === 99 && $isWordAttachment($attachment);
+            return $index === 100 && $isWordAttachment($attachment);
         });
     }
 
@@ -2641,18 +2848,44 @@ $canvas->page_text(
     [0, 0, 0]
 );
 
+    ProtocolAuditLogger::recordExported($report, 'PDF');
+
     return $pdf->download("report-{$report->id}.pdf");
 }
 
 
 public function allProtocol(Request $request)
 {
-    $approvedReports = $this->buildProtocolFilteredQuery($request)
+    return $this->renderProtocolList($request, 'All Protocol');
+}
+
+public function revalidationProtocols(Request $request)
+{
+    return $this->renderProtocolList($request, 'Revalidation', 'revalidation');
+}
+
+public function requalificationProtocols(Request $request)
+{
+    return $this->renderProtocolList($request, 'Requalification', 'requalification');
+}
+
+private function renderProtocolList(Request $request, string $protocolListTitle, ?string $importSource = null)
+{
+    $defaults = [];
+    if ($importSource !== null && $importSource !== '') {
+        $defaults['import_source'] = $importSource;
+    }
+
+    $approvedReports = $this->buildProtocolFilteredQuery($request, $defaults)
         ->orderByDesc('id')
-        ->paginate(20)
+        ->paginate(10)
         ->withQueryString();
 
-    return view('reports.pre_approved', compact('approvedReports'));
+    $this->attachProtocolDisplayCodes($approvedReports);
+
+    $protocolImportSource = $importSource;
+
+    return view('reports.pre_approved', compact('approvedReports', 'protocolListTitle', 'protocolImportSource'));
 }
 
 public function preApproved(Request $request)
@@ -2664,6 +2897,8 @@ public function preApproved(Request $request)
         ->orderByDesc('id')
         ->paginate(20)
         ->withQueryString();
+
+    $this->attachProtocolDisplayCodes($approvedReports);
 
     return view('reports.pre_approved', compact('approvedReports'));
 }
@@ -2708,6 +2943,7 @@ public function proccesingPotocol(Request $request)
 
 public function myApprovalDashboard()
 {
+    // Home dashboard: pending, approved-by-me, and rejected-by-me protocol lists
     $userId = auth()->id();
     $user = auth()->user();
     $isAdminDashboard = $user && method_exists($user, 'isAdmin') && $user->isAdmin();
@@ -2785,26 +3021,69 @@ public function myApprovalDashboard()
             'returned' => (clone $protocolQuery)->whereIn('status', ['pre_returned', 'post_returned', 'returned_to_preparer'])->count(),
         ];
 
-        $adminProtocolActivity = Report::query()
-            ->with([
-                'template:id,name',
-                'creator:id,first_name,last_name',
-                'document:id,title,doc_title',
-                'approvalSteps' => function ($query) {
-                    $query->with('user:id,first_name,last_name')
-                        ->orderBy('stage')
-                        ->orderBy('step_order');
-                },
-            ])
-            ->orderByDesc('updated_at')
-            ->paginate(5, ['*'], 'activity_page');
+        $this->attachProtocolDisplayCodes($pending);
+        $this->attachProtocolDisplayCodes($approvedByMe);
+        $this->attachProtocolDisplayCodes($rejectedByMe);
+    } else {
+        $this->attachProtocolDisplayCodes($pending);
+        $this->attachProtocolDisplayCodes($approvedByMe);
+        $this->attachProtocolDisplayCodes($rejectedByMe);
     }
 
-    return view('home', compact('pending', 'approvedByMe', 'rejectedByMe', 'adminProtocolStats', 'adminProtocolActivity', 'isAdminDashboard'));
+    $neqPending = $this->dashboardNewEquipmentDocuments('pending', $isAdminDashboard, (int) $userId);
+    $neqApproved = $this->dashboardNewEquipmentDocuments('approved', $isAdminDashboard, (int) $userId);
+    $neqReturned = $this->dashboardNewEquipmentDocuments('returned', $isAdminDashboard, (int) $userId);
+
+    return view('home', compact(
+        'pending',
+        'approvedByMe',
+        'rejectedByMe',
+        'neqPending',
+        'neqApproved',
+        'neqReturned',
+        'adminProtocolStats',
+        'adminProtocolActivity',
+        'isAdminDashboard'
+    ));
+}
+
+private function dashboardNewEquipmentDocuments(string $status, bool $isAdminDashboard, int $userId)
+{
+    $query = NewEquipmentQualification::query()
+        ->where(function ($inner) {
+            $inner->whereNull('source_id')->orWhere('source_id', 0);
+        })
+        ->where('approval_status', $status)
+        ->with([
+            'uploader:id,first_name,last_name',
+            'approvals.user:id,first_name,last_name',
+        ])
+        ->orderByDesc('updated_at');
+
+    if (! $isAdminDashboard && $status === 'pending') {
+        $query->whereHas('approvals', function ($steps) use ($userId) {
+            $steps->where('user_id', $userId)
+                ->whereNull('approved_at')
+                ->whereNull('rejected_at');
+        });
+    }
+
+    if (! $isAdminDashboard && $status === 'approved') {
+        $query->whereHas('approvals', function ($steps) use ($userId) {
+            $steps->where('approved_by', $userId)->whereNotNull('approved_at');
+        });
+    }
+
+    if (! $isAdminDashboard && $status === 'returned') {
+        $query->where('uploaded_by', $userId);
+    }
+
+    return $query->get();
 }
 
 public function reportfillAfterPreaAprove(Report $report)
 {
+    // POST fill entry point after PRE approval; DOCX imports use fill form
     abort_unless($report->stage === 'pre' && $report->status === 'pre_approved', 403);
 
     $report->load('template');
@@ -2836,6 +3115,7 @@ public function reportfillAfterPreaAprove(Report $report)
 
 public function editReturnedPre(Report $report)
 {
+    // Creator edit form after PRE rejection
    if (
     $report->status !== 'pre_returned' ||
     (int)$report->created_by !== (int)auth()->id()
@@ -2844,6 +3124,12 @@ public function editReturnedPre(Report $report)
 }
 
     $report->load('template');
+
+    if ($report->docx_import_path) {
+        return redirect()
+            ->route('reports.docx-import.fill-form', $report)
+            ->with('status', 'Update the returned document and resubmit for PRE approval.');
+    }
 
     $data = $report->data ?? [];
     if (is_string($data)) $data = json_decode($data, true) ?? [];
@@ -3021,10 +3307,17 @@ private function convertUserSelectsToText(string $html, array $data, $users): st
 
 public function resubmitReturnedPre(Request $request, Report $report)
 {
+    // Creator resubmits after PRE rejection — clears stamps and restarts PRE chain
     abort_unless(
         $report->status === 'pre_returned' && (int)$report->created_by === (int)auth()->id(),
         403
     );
+
+    if ($report->docx_import_path) {
+        return redirect()
+            ->route('reports.docx-import.fill-form', $report)
+            ->with('status', 'Use the DOCX fill form to update and resubmit this returned protocol.');
+    }
 
     $report->load(['template', 'approvalSteps']);
 
@@ -3067,11 +3360,14 @@ public function resubmitReturnedPre(Request $request, Report $report)
 
 private function resetApprovalMarksInData(array &$data, string $stage): void
 {
+    // Clear signature and date keys for the given stage without removing approver selections
     $prefixes = $stage === 'pre'
         ? [
+            'prepared_by_engineering',
             'checked_by_engineering',
             'checked_by_production',
             'checked_by_validation',
+            'checked_by_quality',
             'approved_by_user',
             'approved_by_quality',
         ]
@@ -3079,6 +3375,7 @@ private function resetApprovalMarksInData(array &$data, string $stage): void
             'post_prepared_by',
             'post_checked_by_engineering',
             'post_checked_by_production',
+            'post_checked_by_quality',
             'post_checked_by_validation',
             'post_approved_by_quality',
         ];
@@ -3093,6 +3390,7 @@ private function resetApprovalMarksInData(array &$data, string $stage): void
 
 public function resubmitPre(Request $request, Report $report)
 {
+    // Creator resubmits after preparer return — restarts PRE approval from step 1
     abort_unless($report->status === 'returned_to_preparer', 403);
     abort_unless((int)$report->created_by === (int)auth()->id(), 403);
 
@@ -3165,6 +3463,7 @@ private function canEditReturnedReport(Report $report, string $stage = 'post'): 
 
 public function editReturnedPost(Report $report)
 {
+    // Creator edit form after POST rejection (HTML template reports)
     if (! $this->canEditReturnedReport($report, 'post')) {
         return redirect()
             ->route('reports.show', $report)
@@ -3228,6 +3527,7 @@ public function resubmitReturnedPost(Request $request, Report $report)
             $file = $request->file("attachment_file_$i");
             $originalName = $file->getClientOriginalName();
             $newFileName =  'protocol_'.$report->id.'/'.$file->getClientOriginalName() ;
+            Storage::disk('public')->makeDirectory('reports/attachments/protocol_'.$report->id);
             $path = $file->storeAs('reports/attachments', $newFileName, 'public');
           //  $path = $file->store('reports/attachments', 'public');
 
@@ -3284,6 +3584,7 @@ public function resubmitReturnedPost(Request $request, Report $report)
 
 public function resubmitPost(Request $request, Report $report)
 {
+    // Creator resubmits corrected POST data and rebuilds POST approval steps
     abort_unless((int)$report->created_by === (int)auth()->id(), 403);
 
     // simplest: reuse your submitToPost()
@@ -3295,9 +3596,11 @@ private function resetAllApprovalFields(array &$data): void
     // These prefixes match your template field names
     $prefixes = [
         // PRE
+        'prepared_by_engineering',
         'checked_by_engineering',
         'checked_by_production',
         'checked_by_validation',
+        'checked_by_quality',
         'approved_by_user',
         'approved_by_quality',
 
@@ -3305,6 +3608,7 @@ private function resetAllApprovalFields(array &$data): void
         'post_prepared_by',
         'post_checked_by_engineering',
         'post_checked_by_production',
+        'post_checked_by_quality',
         'post_checked_by_validation',
         'post_approved_by_quality',
     ];
@@ -3325,9 +3629,11 @@ private function clearDecisionFields(array $data, string $stage): array
 {
     $prefixes = $stage === 'pre'
         ? [
+            'prepared_by_engineering',
             'checked_by_engineering',
             'checked_by_production',
             'checked_by_validation',
+            'checked_by_quality',
             'approved_by_user',
             'approved_by_quality',
           ]
@@ -3335,6 +3641,7 @@ private function clearDecisionFields(array $data, string $stage): array
             'post_prepared_by',
             'post_checked_by_engineering',
             'post_checked_by_production',
+            'post_checked_by_quality',
             'post_checked_by_validation',
             'post_approved_by_quality',
           ];
@@ -3387,13 +3694,7 @@ private function disableContentEditable(string $html): string
 
 private function notifyApprover(\App\Models\User $user, Report $report, string $text): void
 {
-    $url = route('reports.show', $report);
-
-    $user->notify(new ReportApprovalAssigned(
-        report: $report,
-        message: $text,
-        url: $url
-    ));
+    app(ReportApprovalNotifier::class)->notifyApprover($user, $report, $text);
 }
 
 
@@ -3402,7 +3703,7 @@ public function myPendingUserApprovals()
     $userId = auth()->id();
 
     $reports = Report::query()
-        ->with(['template'])
+        ->with(['template', 'document.equipment'])
         ->whereIn('status', ['pre_pending', 'post_pending'])
         ->whereHas('approvalSteps', function ($q) use ($userId) {
             $q->where('user_id', $userId)
@@ -3428,12 +3729,66 @@ public function preApprovedList(Request $request)
         ->paginate(20)
         ->withQueryString();
 
+    $this->attachProtocolDisplayCodes($approvedReports);
+
     return view('reports.pre_approved', compact('approvedReports'));
+}
+
+/**
+ * Ensure NEQ/REV/REQ display codes exist for the current page (persisted; fallback rank for legacy).
+ */
+private function attachProtocolDisplayCodes($paginator): void
+{
+    $items = $paginator->getCollection();
+    if ($items->isEmpty()) {
+        return;
+    }
+
+    foreach ($items as $report) {
+        $report->assignDisplayCodeIfNeeded();
+        if ((int) ($report->display_seq ?? 0) > 0) {
+            $report->setAttribute('protocol_display_seq', (int) $report->display_seq);
+        }
+    }
+
+    $missing = $items->filter(function ($report) {
+        return Report::importSourceDisplayPrefix($report->import_source) !== ''
+            && trim((string) ($report->display_code ?? '')) === '';
+    });
+    if ($missing->isEmpty()) {
+        return;
+    }
+
+    $driver = Report::query()->getConnection()->getDriverName();
+    $sources = $missing->map(function ($report) {
+        return $report->import_source;
+    })->filter()->unique()->values();
+
+    foreach ($sources as $source) {
+        $idQuery = Report::query()->orderBy('id');
+        if ($driver === 'sqlsrv') {
+            $idQuery->whereRaw(
+                "LOWER(JSON_VALUE(CAST([data] AS nvarchar(max)), '$.import_source')) = ?",
+                [strtolower($source)]
+            );
+        } else {
+            $idQuery->where('data->import_source', $source);
+        }
+        $rankById = [];
+        foreach ($idQuery->pluck('id') as $index => $id) {
+            $rankById[(int) $id] = $index + 1;
+        }
+        foreach ($items as $report) {
+            if ($report->import_source === $source && (int) ($report->protocol_display_seq ?? 0) <= 0) {
+                $report->setAttribute('protocol_display_seq', $rankById[(int) $report->id] ?? 0);
+            }
+        }
+    }
 }
 
 private function buildProtocolFilteredQuery(Request $request, array $defaults = [])
 {
-    $query = Report::query()->with(['approvalSteps', 'document', 'template']);
+    $query = Report::query()->with(['approvalSteps', 'document.equipment', 'document.facility', 'template']);
 
     $hasStatusFilter = $request->filled('status');
 
@@ -3445,26 +3800,130 @@ private function buildProtocolFilteredQuery(Request $request, array $defaults = 
         $query->where('stage', $defaults['stage']);
     }
 
+    if (!empty($defaults['import_source'])) {
+        $source = strtolower((string) $defaults['import_source']);
+        $driver = $query->getConnection()->getDriverName();
+        if ($driver === 'sqlsrv') {
+            $query->whereRaw(
+                "LOWER(JSON_VALUE(CAST([data] AS nvarchar(max)), '$.import_source')) = ?",
+                [$source]
+            );
+        } else {
+            $query->where('data->import_source', $source);
+        }
+    }
+
     if ($request->filled('search')) {
         $search = trim((string) $request->search);
+        $like = "%{$search}%";
+        $driver = $query->getConnection()->getDriverName();
 
-        $query->where(function ($q) use ($search) {
+        // Match document_title and import_source labels for protocol list search.
+        $matchedSources = [];
+        foreach (Report::importSourceLabels() as $key => $label) {
+            if (stripos($label, $search) !== false || stripos((string) $key, $search) !== false) {
+                $matchedSources[] = $key;
+            }
+        }
+
+        $query->where(function ($q) use ($search, $like, $driver, $matchedSources) {
             if (is_numeric($search)) {
                 $q->orWhere('id', (int) $search);
             }
 
-            $q->orWhere('equipment_name', 'like', "%{$search}%")
-                ->orWhere('facility_section', 'like', "%{$search}%")
-                ->orWhere('equipment_id', 'like', "%{$search}%")
-                ->orWhere('document_no', 'like', "%{$search}%")
-                ->orWhereHas('template', function ($templateQuery) use ($search) {
-                    $templateQuery->where('name', 'like', "%{$search}%");
-                });
+            // Prefer persisted display_code (REQ5, REV2, NEQ1, …)
+            $normalizedCode = strtoupper(preg_replace('/\s+/', '', $search) ?? '');
+            if ($driver === 'sqlsrv') {
+                $q->orWhereRaw('UPPER(ISNULL(display_code, \'\')) LIKE ?', [strtoupper($like)]);
+                if ($normalizedCode !== '') {
+                    $q->orWhereRaw(
+                        "UPPER(REPLACE(ISNULL(display_code, ''), ' ', '')) = ?",
+                        [$normalizedCode]
+                    );
+                }
+            } else {
+                $q->orWhere('display_code', 'like', $like);
+                if ($normalizedCode !== '') {
+                    $q->orWhereRaw(
+                        "UPPER(REPLACE(COALESCE(display_code, ''), ' ', '')) = ?",
+                        [$normalizedCode]
+                    );
+                }
+            }
+
+            // Legacy fallback: rank within import_source when display_code missing
+            if (preg_match('/^(NEQ|REV|REQ)\s*0*(\d+)$/i', $search, $codeMatch)) {
+                $prefix = strtoupper($codeMatch[1]);
+                $seq = (int) $codeMatch[2];
+                $sourceByPrefix = [
+                    'NEQ' => 'new_equipment_qualification',
+                    'REV' => 'revalidation',
+                    'REQ' => 'requalification',
+                ];
+                $codeSource = $sourceByPrefix[$prefix] ?? null;
+                if ($codeSource && $seq > 0) {
+                    $exactCode = $prefix . $seq;
+                    $q->orWhere('display_code', $exactCode);
+                    $q->orWhereRaw('UPPER(display_code) = ?', [$exactCode]);
+
+                    $idsForSource = Report::query()
+                        ->where(function ($missing) {
+                            $missing->whereNull('display_code')->orWhere('display_code', '');
+                        })
+                        ->orderBy('id');
+                    if ($driver === 'sqlsrv') {
+                        $idsForSource->whereRaw(
+                            "LOWER(JSON_VALUE(CAST([data] AS nvarchar(max)), '$.import_source')) = ?",
+                            [strtolower($codeSource)]
+                        );
+                    } else {
+                        $idsForSource->where('data->import_source', $codeSource);
+                    }
+                    $rankedIds = $idsForSource->pluck('id')->values();
+                    $matchedId = $rankedIds->get($seq - 1);
+                    if ($matchedId) {
+                        $q->orWhere('id', (int) $matchedId);
+                    }
+                }
+            }
+
+            // Protocol title: data.document_title
+            if ($driver === 'sqlsrv') {
+                $q->orWhereRaw(
+                    "JSON_VALUE(CAST([data] AS nvarchar(max)), '$.document_title') LIKE ?",
+                    [$like]
+                );
+            } else {
+                $q->orWhere('data->document_title', 'like', $like);
+            }
+
+            // Protocol title from sidebar source (Revalidation / NEQ / …)
+            foreach ($matchedSources as $source) {
+                if ($driver === 'sqlsrv') {
+                    $q->orWhereRaw(
+                        "LOWER(JSON_VALUE(CAST([data] AS nvarchar(max)), '$.import_source')) = ?",
+                        [strtolower($source)]
+                    );
+                } else {
+                    $q->orWhere('data->import_source', $source);
+                }
+            }
+
+            // Fallback used by protocol_title accessor when no source/title in data
+            $q->orWhereHas('template', function ($templateQuery) use ($like) {
+                $templateQuery->where('name', 'like', $like);
+            });
         });
     }
 
     if ($request->filled('status')) {
-        $query->where('status', $request->status);
+        $status = (string) $request->status;
+        // All Protocol filter: "send_back" covers both PRE and POST return statuses.
+        if ($status === 'send_back') {
+            $query->whereIn('status', ['pre_returned', 'post_returned']);
+        } else {
+            $query->where('status', $status);
+        }
     }
 
     if ($request->filled('from_date')) {

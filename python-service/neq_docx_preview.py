@@ -17,10 +17,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from lxml import etree
 from PIL import Image
 
+# WordprocessingML namespace for document/header/footer XML parts.
 WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+# Relationship namespace — links embed IDs to media files inside the DOCX zip.
 RNS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+# DrawingML namespace — holds blip fills and srcRect crop attributes.
 ANS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
+# Map file extensions to MIME types for data-URL construction.
 MIME_BY_EXT = {
     "png": "image/png",
     "jpg": "image/jpeg",
@@ -32,11 +36,13 @@ MIME_BY_EXT = {
 }
 
 
+# Guess image MIME type from the media path extension; default to PNG.
 def _mime_for_path(path: str) -> str:
     ext = path.rsplit(".", 1)[-1].lower()
     return MIME_BY_EXT.get(ext, "image/png")
 
 
+# Parse word/_rels/{part}.rels and return embed-ID → word/media/... path map.
 def _load_relationships(zipf: zipfile.ZipFile, part_name: str) -> Dict[str, str]:
     rels_path = f"word/_rels/{part_name}.rels"
     relationships: Dict[str, str] = {}
@@ -48,6 +54,7 @@ def _load_relationships(zipf: zipfile.ZipFile, part_name: str) -> Dict[str, str]
 
     for rel in root:
         rel_type = rel.get("Type") or ""
+        # Only keep image relationships; skip hyperlinks and other part types.
         if "image" not in rel_type:
             continue
 
@@ -56,6 +63,7 @@ def _load_relationships(zipf: zipfile.ZipFile, part_name: str) -> Dict[str, str]
         if not rel_id or not target:
             continue
 
+        # Normalize target path to an absolute path inside the DOCX archive.
         if target.startswith("media/"):
             relationships[rel_id] = f"word/{target}"
         else:
@@ -64,6 +72,7 @@ def _load_relationships(zipf: zipfile.ZipFile, part_name: str) -> Dict[str, str]
     return relationships
 
 
+# Convert Word a:srcRect crop percentages (l/t/r/b) to integer edge offsets.
 def _parse_src_rect(element) -> Optional[Dict[str, int]]:
     if element is None:
         return None
@@ -73,12 +82,14 @@ def _parse_src_rect(element) -> Optional[Dict[str, int]]:
         raw = element.get(edge)
         values[edge] = int(raw) if raw is not None else 0
 
+    # Zero crop on all sides means no cropping — return None to skip PIL step.
     if all(value == 0 for value in values.values()):
         return None
 
     return values
 
 
+# Walk all embedded blips in a part XML and map each r:embed ID to its crop rect.
 def _find_embed_crops(part_xml: bytes) -> Dict[str, Optional[Dict[str, int]]]:
     root = etree.fromstring(part_xml)
     crops: Dict[str, Optional[Dict[str, int]]] = {}
@@ -98,6 +109,7 @@ def _find_embed_crops(part_xml: bytes) -> Dict[str, Optional[Dict[str, int]]]:
     return crops
 
 
+# Apply Word crop rectangle to raw image bytes; return original bytes if crop is invalid.
 def _crop_image_bytes(raw_bytes: bytes, src_rect: Optional[Dict[str, int]]) -> bytes:
     if not src_rect:
         return raw_bytes
@@ -105,6 +117,7 @@ def _crop_image_bytes(raw_bytes: bytes, src_rect: Optional[Dict[str, int]]) -> b
     image = Image.open(io.BytesIO(raw_bytes))
     width, height = image.size
 
+    # Word stores crop margins as parts per 100000 of image width/height.
     left = int(width * src_rect["l"] / 100000)
     top = int(height * src_rect["t"] / 100000)
     right = int(width * (1 - src_rect["r"] / 100000))
@@ -120,17 +133,20 @@ def _crop_image_bytes(raw_bytes: bytes, src_rect: Optional[Dict[str, int]]) -> b
     return output.getvalue()
 
 
+# Build a base64 data URL from cropped image bytes and the source media path.
 def _build_data_url(raw_bytes: bytes, media_path: str, src_rect: Optional[Dict[str, int]] = None) -> str:
     processed = _crop_image_bytes(raw_bytes, src_rect)
     encoded = base64.b64encode(processed).decode("ascii")
     return f"data:{_mime_for_path(media_path)};base64,{encoded}"
 
 
+# Main entry: scan document/header/footer parts and return image placement records for NEQ preview.
 def extract_image_placements(docx_bytes: bytes) -> Tuple[List[Dict[str, Any]], List[str]]:
     placements: List[Dict[str, Any]] = []
     messages: List[str] = []
 
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zipf:
+        # Only scan body and header/footer XML parts that can contain embedded images.
         xml_parts = sorted(
             name
             for name in zipf.namelist()
@@ -144,6 +160,7 @@ def extract_image_placements(docx_bytes: bytes) -> Tuple[List[Dict[str, Any]], L
             embed_crops = _find_embed_crops(part_xml)
 
             for embed_id, media_path in rels.items():
+                # Skip embed IDs that appear in rels but have no blip in this part XML.
                 if embed_id not in embed_crops:
                     continue
 
@@ -162,6 +179,7 @@ def extract_image_placements(docx_bytes: bytes) -> Tuple[List[Dict[str, Any]], L
                         "media_filename": media_path.split("/")[-1],
                         "data_url": data_url,
                         "has_crop": embed_crops.get(embed_id) is not None,
+                        # Header images are tagged for logo-cell placement; body images are generic.
                         "target": "header_logo_cell" if part_name.startswith("header") else "body",
                     }
                 )

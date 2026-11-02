@@ -340,6 +340,29 @@ body.premium-app .topbar .dropdown-menu {
     padding: 0.7rem;
 }
 
+/* Bell notifications: keep panel on screen with an internal scrollbar */
+body.premium-app .topbar {
+    overflow: visible !important;
+}
+body.premium-app .topbar .dropdown-menu.neq-notif-dropdown {
+    padding: 0 !important;
+    max-height: 480px !important;
+    overflow: hidden !important;
+}
+body.premium-app .topbar .dropdown-menu.neq-notif-dropdown.show {
+    display: flex !important;
+    flex-direction: column !important;
+}
+body.premium-app .topbar .neq-notif-scroll {
+    display: block !important;
+    height: 360px !important;
+    max-height: 360px !important;
+    overflow-x: hidden !important;
+    overflow-y: scroll !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
 body.premium-app .topbar .dropdown-header {
     background: transparent;
     color: var(--text);

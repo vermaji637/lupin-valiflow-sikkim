@@ -59,7 +59,7 @@
     <div class="card mb-4">
         <div class="card-header d-flex flex-column flex-lg-row align-items-lg-center justify-content-between">
             <div class="section-title">Permission Tools</div>
-            <div class="toolbar-row mt-3 mt-lg-0">
+            <!-- <div class="toolbar-row mt-3 mt-lg-0">
                 <button type="button" class="btn btn-light btn-compact" onclick="selectAllPermissions(true)">
                     <i class="fas fa-check-square"></i>
                     Select All
@@ -69,7 +69,7 @@
                     Deselect All
                 </button>
                 <input type="text" id="permissionSearch" class="form-control permission-search-input" placeholder="Search permissions or groups">
-            </div>
+            </div> -->
         </div>
         <div class="card-body">
             <div class="small text-muted">

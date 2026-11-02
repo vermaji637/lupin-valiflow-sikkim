@@ -24,8 +24,6 @@ class PermissionGroupingService
                     'user-import',
                     'user-export',
                     'user-change-password',
-                    'security-policy-view',
-                    'security-policy-edit',
                     'role-list',
                     'role-create',
                     'role-edit',
@@ -35,6 +33,14 @@ class PermissionGroupingService
                     'permission-edit',
                     'permission-delete',
                     'permission-assign',
+                ]
+            ],
+            'settings' => [
+                'title' => 'Settings',
+                'icon' => 'fas fa-cog',
+                'permissions' => [
+                    'security-policy-view',
+                    'security-policy-edit',
                 ]
             ],
             'masters' => [
@@ -92,6 +98,7 @@ class PermissionGroupingService
                     'protocol-edit',
                     'protocol-delete',
                     'protocol-approve',
+                    'protocol-send-back',
                     'protocol-reject',
                     'protocol-submit',
                     'protocol-download',
@@ -101,6 +108,15 @@ class PermissionGroupingService
                     'workflow-complete',
                     'task-complete',
                     'protocol-all',
+                    'protocol-new-equipment',
+                    'protocol-fill-new-equipment',
+                    'protocol-neq-view',
+                    'protocol-neq-download',
+                    'protocol-revalidation',
+                    'protocol-requalification',
+                    'protocol-view-approved',
+                    'protocol-view-returned',
+                    'protocol-view-rejected',
                     'protocol-preapproved',
                     'protocol-postprocessing',
                     'protocol-approved',

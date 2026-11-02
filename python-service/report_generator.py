@@ -11,18 +11,23 @@ from doc_parser import (
     iter_unique_textboxes,
     _para_text_from_element,
     looks_like_sl_no_value,
+    is_sl_no_column_header,
 )
 import regex as re
 import os
 import shutil
 import zipfile
+from copy import deepcopy
 
+# Namespace for inline/anchored drawing elements inside runs.
 DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
+# Standard annex footer line appended to every generated report.
 FOOTER_ANNEX_TEXT = "ANNEX_xxx_xxx_XXXXX | (1.0) | SOP_XXXX_XXX_00000 | CLASS I"
 
 
+# Normalize user-submitted text: strip nulls, fix mojibake, coerce to UTF-8 string.
 def _normalize_text_value(value) -> str:
     if value is None:
         return ""
@@ -56,6 +61,7 @@ def _run_has_image(run) -> bool:
     return False
 
 
+# Remove text runs from a paragraph but keep runs that contain logos or images.
 def _clear_text_runs(para) -> None:
     """Remove only text runs from a paragraph; preserve image/drawing runs."""
     for run in list(para.runs):
@@ -63,6 +69,7 @@ def _clear_text_runs(para) -> None:
             run._element.getparent().remove(run._element)
 
 
+# Strip indent/tabs/justification that can clip the first character after fill.
 def _reset_paragraph_formatting(para) -> None:
     """Remove left indent / tabs that can clip the first character in Word and HTML preview."""
     from docx.oxml.ns import qn
@@ -78,6 +85,7 @@ def _reset_paragraph_formatting(para) -> None:
         p_pr.remove(jc)
 
 
+# Force left alignment on a paragraph via both python-docx API and raw OOXML.
 def _set_paragraph_left_align(para) -> None:
     from docx.oxml.ns import qn
 
@@ -90,6 +98,7 @@ def _set_paragraph_left_align(para) -> None:
     jc.set(qn("w:val"), "left")
 
 
+# Insert a Word field code (PAGE, NUMPAGES, etc.) as begin/instr/separate/end runs.
 def _insert_word_field(paragraph, field_code: str) -> None:
     """Insert a Word field (PAGE, NUMPAGES, etc.) into a paragraph."""
     run_begin = paragraph.add_run()
@@ -116,6 +125,7 @@ def _insert_word_field(paragraph, field_code: str) -> None:
     run_end._r.append(fld_end)
 
 
+# Tell Word to refresh PAGE/NUMPAGES fields when the document is opened.
 def _enable_update_fields_on_open(doc) -> None:
     settings = doc.settings.element
     update = settings.find(qn("w:updateFields"))
@@ -125,6 +135,7 @@ def _enable_update_fields_on_open(doc) -> None:
     update.set(qn("w:val"), "true")
 
 
+# Replace static "16 of 24" header text with live PAGE and NUMPAGES field codes.
 def _inject_page_number_fields(doc) -> None:
     """Replace static '16 of 24' header text with PAGE / NUMPAGES field codes."""
     page_pattern = re.compile(r"^\s*\d+\s+of\s+\d+\s*$", re.I)
@@ -145,6 +156,7 @@ def _inject_page_number_fields(doc) -> None:
     _enable_update_fields_on_open(doc)
 
 
+# Locate the inner <w:p> element inside a text box by txbx index and paragraph index.
 def _resolve_textbox_paragraph_element(doc, txbx_index: int, inner_index: int):
     for idx, _, txbx in iter_unique_textboxes(doc):
         if idx != txbx_index:
@@ -155,6 +167,7 @@ def _resolve_textbox_paragraph_element(doc, txbx_index: int, inner_index: int):
     return None
 
 
+# Remove leftover underscore/dot placeholder runs after a tab blank is filled.
 def _clear_underscore_placeholder_runs(p_element) -> None:
     """Remove trailing underscore/dot placeholder runs after a tab blank is filled."""
     for run in list(p_element.findall(f".//{{{W_NS}}}r")):
@@ -167,6 +180,7 @@ def _clear_underscore_placeholder_runs(p_element) -> None:
                 parent.remove(run)
 
 
+# Replace the Nth underlined-tab blank in a text-box paragraph with the user value.
 def _fill_underlined_tab_blank(p_element, blank_index: int, value: str) -> bool:
     """Replace the Nth underlined tab blank with a text value."""
     value = _normalize_text_value(value)
@@ -190,6 +204,7 @@ def _fill_underlined_tab_blank(p_element, blank_index: int, value: str) -> bool:
     return False
 
 
+# Write user text into a bordered blank recommendation line inside a text box.
 def _fill_textbox_line(p_element, value: str) -> None:
     """Write user text into a bordered blank recommendation line."""
     value = _normalize_text_value(value)
@@ -211,7 +226,16 @@ def _fill_textbox_line(p_element, value: str) -> None:
         p_element.append(run)
 
 
-def _add_hyperlink_to_paragraph(paragraph, text: str, url: str) -> None:
+# Insert a clickable external hyperlink run at the end of a paragraph.
+def _add_hyperlink_to_paragraph(
+    paragraph,
+    text: str,
+    url: str,
+    font_name=None,
+    font_size=None,
+    bold=None,
+    italic=None,
+) -> None:
     """Insert a clickable external hyperlink run in a paragraph."""
     part = paragraph.part
     r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True)
@@ -221,6 +245,25 @@ def _add_hyperlink_to_paragraph(paragraph, text: str, url: str) -> None:
 
     run = OxmlElement("w:r")
     r_pr = OxmlElement("w:rPr")
+    if font_name:
+        r_fonts = OxmlElement("w:rFonts")
+        r_fonts.set(qn("w:ascii"), font_name)
+        r_fonts.set(qn("w:hAnsi"), font_name)
+        r_pr.append(r_fonts)
+    if font_size is not None:
+        try:
+            half_points = str(int(round(font_size.pt * 2)))
+        except (AttributeError, TypeError, ValueError):
+            half_points = ""
+        if half_points:
+            for tag in ("w:sz", "w:szCs"):
+                node = OxmlElement(tag)
+                node.set(qn("w:val"), half_points)
+                r_pr.append(node)
+    if bold:
+        r_pr.append(OxmlElement("w:b"))
+    if italic:
+        r_pr.append(OxmlElement("w:i"))
     color = OxmlElement("w:color")
     color.set(qn("w:val"), "0563C1")
     r_pr.append(color)
@@ -236,12 +279,34 @@ def _add_hyperlink_to_paragraph(paragraph, text: str, url: str) -> None:
     paragraph._p.append(hyperlink)
 
 
+def _cell_text_font(cell):
+    """Font of the first text run, so a filled value matches that cell."""
+    font_bold = None
+    font_italic = None
+    font_size = None
+    font_name = None
+    for para in cell.paragraphs:
+        if any(_run_has_image(r) for r in para.runs):
+            continue
+        for run in para.runs:
+            if (run.text or "").strip() or run.bold is not None or run.font.size is not None or run.font.name:
+                font_bold = run.bold
+                font_italic = run.italic
+                font_size = run.font.size
+                font_name = run.font.name
+                return font_name, font_size, font_bold, font_italic
+    return font_name, font_size, font_bold, font_italic
+
+
+# Clear text paragraphs in a cell and write a blue underlined hyperlink (or plain text).
 def _set_cell_hyperlink(cell, text: str, url: str) -> None:
-    """Write a blue underlined hyperlink into a table cell."""
+    """Write a blue underlined hyperlink into a table cell, keeping that cell's font."""
     text = _normalize_text_value(text).strip()
     url = (url or "").strip()
     if not text:
         return
+
+    font_name, font_size, font_bold, font_italic = _cell_text_font(cell)
 
     for para in cell.paragraphs:
         if any(_run_has_image(r) for r in para.runs):
@@ -249,13 +314,21 @@ def _set_cell_hyperlink(cell, text: str, url: str) -> None:
         _clear_text_runs(para)
 
     para = cell.paragraphs[0]
-    _reset_paragraph_formatting(para)
     if url:
-        _add_hyperlink_to_paragraph(para, text, url)
+        _add_hyperlink_to_paragraph(
+            para,
+            text,
+            url,
+            font_name=font_name,
+            font_size=font_size,
+            bold=font_bold,
+            italic=font_italic,
+        )
     else:
-        para.add_run(text)
+        _set_cell_text(cell, text)
 
 
+# Write approver name in italic Segoe Script for signature-table Name columns.
 def _set_cell_signature_text(cell, value: str) -> None:
     """Write approver name into Signature column using italic script-style formatting."""
     value = _normalize_text_value(value).strip()
@@ -275,6 +348,7 @@ def _set_cell_signature_text(cell, value: str) -> None:
     run.font.name = "Segoe Script"
 
 
+# Remove Word list numbering so auto-list serials do not duplicate user Sl. No. values.
 def _remove_paragraph_numbering(para) -> None:
     """Remove Word auto-list numbering so literal serial text is not duplicated."""
     p_pr = para._element.get_or_add_pPr()
@@ -283,6 +357,7 @@ def _remove_paragraph_numbering(para) -> None:
         p_pr.remove(num_pr)
 
 
+# Extract leading integer from a serial-number string like "1." or "2)".
 def _sl_no_numeric_part(value: str) -> int | None:
     match = re.match(r"^(\d+)", (value or "").strip())
     return int(match.group(1)) if match else None
@@ -304,6 +379,7 @@ def _set_sl_no_cell_text(cell, value: str) -> None:
             existing = text
             break
 
+    # Skip write when template already has the same serial number.
     if existing and looks_like_sl_no_value(existing) and looks_like_sl_no_value(value):
         if _sl_no_numeric_part(existing) == _sl_no_numeric_part(value):
             return
@@ -319,15 +395,27 @@ def _set_sl_no_cell_text(cell, value: str) -> None:
 def _set_cell_text(cell, value: str) -> None:
     """
     Write value into a table cell without destroying logo/image runs.
-    Clears all text paragraphs first so no placeholder characters remain beside new text.
+    Preserves the first text run's font so filled cells match the original DOCX look.
     """
     value = _normalize_text_value(value).strip()
     text_paras = []
+    font_bold = None
+    font_italic = None
+    font_size = None
+    font_name = None
 
     for para in cell.paragraphs:
         if any(_run_has_image(r) for r in para.runs):
             continue
         text_paras.append(para)
+        if font_size is None and font_name is None and font_bold is None:
+            for run in para.runs:
+                if (run.text or "").strip() or run.bold is not None or run.font.size is not None:
+                    font_bold = run.bold
+                    font_italic = run.italic
+                    font_size = run.font.size
+                    font_name = run.font.name
+                    break
 
     if not text_paras:
         text_paras = [cell.add_paragraph()]
@@ -336,15 +424,23 @@ def _set_cell_text(cell, value: str) -> None:
         _clear_text_runs(para)
 
     target_para = text_paras[0]
-    _reset_paragraph_formatting(target_para)
-    _set_paragraph_left_align(target_para)
+    # Keep existing paragraph alignment/indent from the template — do not force left/reset.
     if value:
-        target_para.add_run(value)
+        new_run = target_para.add_run(value)
+        try:
+            if font_bold is not None:
+                new_run.bold = font_bold
+            if font_italic is not None:
+                new_run.italic = font_italic
+            if font_size is not None:
+                new_run.font.size = font_size
+            if font_name:
+                new_run.font.name = font_name
+        except Exception:
+            pass
 
     for para in text_paras[1:]:
         _clear_text_runs(para)
-        _reset_paragraph_formatting(para)
-        _set_paragraph_left_align(para)
 
 
 def _fill_colon_label_cell(cell, value: str) -> None:
@@ -373,6 +469,7 @@ def _fill_colon_label_cell(cell, value: str) -> None:
     _set_cell_text(cell, value)
 
 
+# Render Yes/No choice as checked/unchecked box symbols in a table cell.
 def _fill_yes_no_cell(cell, choice: str) -> None:
     """Write Yes/No selection as 'Yes ☑  No ☐' style marks in the cell."""
     choice = _normalize_text_value(choice).strip().lower()
@@ -385,8 +482,45 @@ def _fill_yes_no_cell(cell, choice: str) -> None:
     _set_cell_text(cell, text)
 
 
+def _is_fixed_header_label(text: str) -> bool:
+    """True for letterhead labels that must stay, such as Equipment ID. No."""
+    label = re.sub(r"\s+", " ", (text or "").strip().lower())
+    label = label.rstrip(":").strip()
+    if not label:
+        return False
+    if label in {
+        "title",
+        "equipment name",
+        "equipment id. no",
+        "equipment id no",
+        "document number",
+        "document no",
+        "reference protocol no",
+    }:
+        return True
+    return label.startswith("equipment id") or label.startswith("reference protocol")
+
+
+def _next_distinct_header_cell(cells, start_index):
+    """The next cell that is not the same merged cell."""
+    if start_index >= len(cells):
+        return None
+    current_id = id(cells[start_index]._tc)
+    for nxt in cells[start_index + 1 :]:
+        if id(nxt._tc) != current_id:
+            return nxt
+    return None
+
+
+# Map location string header_0_row_2_col_2 to the matching header table cell.
 def _resolve_header_cell(doc, location: str):
-    """Resolve header_0_row_2_col_2 to a header table cell."""
+    """
+    Resolve header_0_row_2_col_2 to a header table cell.
+
+    A merged label such as Equipment ID. No. occupies two grid columns.
+    A value stored at the second of those columns must be written in the
+    empty cell to the right, not over the label.
+    """
     match = re.match(r"header_(\d+)_row_(\d+)_col_(\d+)", location)
     if not match:
         return None
@@ -399,9 +533,24 @@ def _resolve_header_cell(doc, location: str):
     if not header.tables:
         return None
     table = header.tables[0]
-    return table.rows[row_index].cells[col_index]
+    try:
+        cells = table.rows[row_index].cells
+    except IndexError:
+        return None
+    if col_index >= len(cells):
+        return None
+    cell = cells[col_index]
+    inside_merged_label = col_index > 0 and cell._tc is cells[col_index - 1]._tc
+    if inside_merged_label or _is_fixed_header_label(cell.text):
+        nxt = _next_distinct_header_cell(cells, col_index)
+        if nxt is not None and not _is_fixed_header_label(nxt.text):
+            return nxt
+        if _is_fixed_header_label(cell.text):
+            return None
+    return cell
 
 
+# Safe lookup of a body paragraph by enumerate(doc.paragraphs) index.
 def _body_paragraph(doc, para_index: int):
     paragraphs = doc.paragraphs
     if para_index < 0 or para_index >= len(paragraphs):
@@ -409,6 +558,7 @@ def _body_paragraph(doc, para_index: int):
     return paragraphs[para_index]
 
 
+# Toggle Yes/No checkbox symbols on inline paragraph radio lines.
 def _fill_paragraph_yes_no(para, choice: str) -> None:
     """Mark Yes or No on inline paragraph radio lines like 'Training imparted: Yes □ No □'."""
     choice = _normalize_text_value(choice).strip().lower()
@@ -449,6 +599,7 @@ def _fill_paragraph_yes_no(para, choice: str) -> None:
     para.add_run(new_text)
 
 
+# Mark the first text run in a checklist paragraph as checked without duplicating label text.
 def _fill_paragraph_checkbox(para) -> None:
     """Mark checklist paragraph checked via symbol run — do not duplicate label text."""
     for run in para.runs:
@@ -463,6 +614,7 @@ def _fill_paragraph_checkbox(para) -> None:
     para.add_run("☑ ")
 
 
+# Replace the Nth underscore/dot blank in a paragraph with the user value.
 def _fill_paragraph_blank_by_index(para, blank_index: int, value: str) -> None:
     """Replace the Nth blank placeholder in a paragraph with the user value."""
     value = _normalize_text_value(value)
@@ -473,8 +625,77 @@ def _fill_paragraph_blank_by_index(para, blank_index: int, value: str) -> None:
     new_text = para.text[: match.start()] + value + para.text[match.end() :]
     _clear_text_runs(para)
     para.add_run(new_text)
+    _fix_overhanging_list_indent(para)
 
 
+def _fix_overhanging_list_indent(para) -> None:
+    """
+    List Paragraphs in some Lupin templates use hanging > left (first line starts
+    left of the margin). That clips 'Preventive…' into 'tive…' and stacks glyphs
+    beside section number 8.2. Expand left indent so hanging fits.
+    """
+    p_pr = para._element.pPr
+    if p_pr is None:
+        return
+    ind = p_pr.find(qn("w:ind"))
+    if ind is None:
+        return
+    try:
+        left = int(ind.get(qn("w:left")) or ind.get(qn("w:start")) or 0)
+        hanging = int(ind.get(qn("w:hanging")) or 0)
+    except (TypeError, ValueError):
+        return
+    if hanging <= left:
+        return
+    # Keep hanging (room for auto number 8.2); push body text right so it stays on-page.
+    ind.set(qn("w:left"), str(hanging))
+
+
+def _append_colon_blank_value(para, value: str) -> bool:
+    """
+    Append ' {value}' after a trailing colon without wiping existing runs.
+    Preserves bold / character spacing so List Paragraph labels stay intact.
+    """
+    value = _normalize_text_value(value).strip()
+    if not value:
+        return False
+
+    runs = list(para.runs)
+    for run in reversed(runs):
+        text = run.text or ""
+        if not text.strip():
+            continue
+        if text.rstrip().endswith(":"):
+            # Keep trailing spaces before colon intact; add value after colon.
+            run.text = re.sub(r":\s*$", f": {value}", text)
+            _fix_overhanging_list_indent(para)
+            return True
+        break
+
+    full = (para.text or "").strip()
+    if not full.endswith(":"):
+        return False
+
+    # Colon may be its own run — append a new value run with prior formatting.
+    style_run = runs[-1] if runs else None
+    new_run = para.add_run(f" {value}")
+    if style_run is not None:
+        try:
+            if style_run.bold is not None:
+                new_run.bold = style_run.bold
+            if style_run.italic is not None:
+                new_run.italic = style_run.italic
+            if style_run.font.size is not None:
+                new_run.font.size = style_run.font.size
+            if style_run.font.name:
+                new_run.font.name = style_run.font.name
+        except Exception:
+            pass
+    _fix_overhanging_list_indent(para)
+    return True
+
+
+# Replace the first blank placeholder or trailing colon blank in a paragraph.
 def _fill_paragraph_blank(para, value: str) -> None:
     """Replace the first blank placeholder in a paragraph."""
     value = _normalize_text_value(value)
@@ -483,6 +704,7 @@ def _fill_paragraph_blank(para, value: str) -> None:
             continue
         if PARA_BLANK_RE.search(run.text):
             run.text = PARA_BLANK_RE.sub(value, run.text, count=1)
+            _fix_overhanging_list_indent(para)
             return
 
     full_text = para.text
@@ -491,12 +713,168 @@ def _fill_paragraph_blank(para, value: str) -> None:
         if para.runs:
             _clear_text_runs(para)
             para.add_run(new_text)
+        _fix_overhanging_list_indent(para)
         return
 
     if PARA_COLON_BLANK_RE.search(full_text.strip()):
+        if _append_colon_blank_value(para, value):
+            return
         new_text = re.sub(r":\s*$", f": {value}", full_text.strip())
         _clear_text_runs(para)
         para.add_run(new_text)
+        _fix_overhanging_list_indent(para)
+
+
+def _resolve_body_table_cell(doc, location: str):
+    """Return (table_index, row_index, col_index, cell) for table_T_row_R_col_C, else None."""
+    if not location.startswith("table") or "_col_" not in location:
+        return None
+    parts = location.split("_")
+    try:
+        t = int(parts[1])
+        r = int(parts[3])
+        c = int(parts[5])
+        cell = doc.tables[t].rows[r].cells[c]
+        return t, r, c, cell
+    except (IndexError, ValueError, KeyError):
+        return None
+
+
+def _normalize_header_compare(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def _row_unique_cell_texts(row) -> list[str]:
+    texts: list[str] = []
+    seen: set[int] = set()
+    for cell in row.cells:
+        tc_id = id(cell._tc)
+        if tc_id in seen:
+            continue
+        seen.add(tc_id)
+        text = (cell.text or "").strip()
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _is_repeated_column_header_row(row, header_texts: list[str]) -> bool:
+    """True when a body row repeats the table's column header labels (page-break / copy)."""
+    if not header_texts or len(header_texts) < 3:
+        return False
+    matches = 0
+    compared = 0
+    seen: set[int] = set()
+    for idx, cell in enumerate(row.cells):
+        tc_id = id(cell._tc)
+        if tc_id in seen:
+            continue
+        seen.add(tc_id)
+        header = header_texts[idx] if idx < len(header_texts) else ""
+        if not header:
+            continue
+        compared += 1
+        if _normalize_header_compare(cell.text) == _normalize_header_compare(header):
+            matches += 1
+    return compared >= 3 and matches >= max(3, int(compared * 0.6))
+
+
+def _is_equipment_section_banner_row(row) -> bool:
+    """True for full-width banners like 'AHU: SK/ENG/AHU-005:' / 'Dust Extractor:…'."""
+    texts = []
+    seen = set()
+    for cell in row.cells:
+        tc_id = id(cell._tc)
+        if tc_id in seen:
+            continue
+        seen.add(tc_id)
+        text = (cell.text or "").strip()
+        if text:
+            texts.append(text)
+    if not texts:
+        return False
+    # A list-of-attachment data row can have only the title filled.
+    # "Dust Extractor CFM Measurement" and "Area Recovery Test report"
+    # are those rows, not section banners.
+    if len(seen) >= 3 and len(texts) < len(seen):
+        return False
+    unique = {_normalize_header_compare(t) for t in texts}
+    if len(unique) != 1:
+        return False
+    text = texts[0]
+    if len(text) > 220:
+        return False
+    lower = text.lower()
+    if re.match(
+        r"^(ahu|dust\s*extractor|equipment|area|room|system)\b",
+        lower,
+    ):
+        return True
+    # Merged / single-label section title with a colon.
+    return ":" in text and (len(seen) <= 2 or len(texts) == 1)
+
+
+def _is_structural_table_row(doc, table_index: int, row_index: int) -> bool:
+    """Section banners and repeated header rows must never receive fill values."""
+    try:
+        table = doc.tables[table_index]
+        row = table.rows[row_index]
+    except (IndexError, ValueError, KeyError):
+        return False
+    if row_index == 0:
+        return True
+    header_texts = [c.text.strip() for c in table.rows[0].cells] if table.rows else []
+    if _is_repeated_column_header_row(row, header_texts):
+        return True
+    if _is_equipment_section_banner_row(row):
+        return True
+    return False
+
+
+def _value_echoes_column_header(doc, location: str, value: str) -> bool:
+    """
+    True when a data-row value is just that column's header text (or 'N. Header').
+    Covers Sl. No. / List of Attachment corruption from TOC label→value upgrades.
+    """
+    resolved = _resolve_body_table_cell(doc, location)
+    if resolved is None:
+        return False
+    _t, r, c, _cell = resolved
+    if r < 1:
+        return False
+    val = (value or "").strip()
+    if not val:
+        return False
+    try:
+        header = doc.tables[_t].rows[0].cells[c].text.strip()
+    except (IndexError, ValueError, KeyError):
+        return False
+    if not header:
+        return False
+    if _normalize_header_compare(val) == _normalize_header_compare(header):
+        return True
+    # e.g. "1. Sl. No." after serial was concatenated with the header label
+    return re.fullmatch(
+        rf"\d+\.?\s*{re.escape(header)}",
+        val,
+        flags=re.IGNORECASE,
+    ) is not None
+
+
+def _repair_header_echo_value(doc, location: str, value: str) -> str:
+    """Replace header-echo corruption with the original template cell text when available."""
+    if not _value_echoes_column_header(doc, location, value):
+        return value
+    resolved = _resolve_body_table_cell(doc, location)
+    if resolved is None:
+        return value
+    _t, _r, _c, cell = resolved
+    original = (cell.text or "").strip()
+    # Template already has real content (e.g. serial "1") — restore it.
+    if original and _normalize_header_compare(original) != _normalize_header_compare(value):
+        return original
+    # Template cell is empty or also the header — skip the write entirely.
+    return ""
 
 
 def _apply_single_field(
@@ -508,36 +886,59 @@ def _apply_single_field(
     field_type: str | None = None,
 ) -> None:
     """Apply one parsed field location to the open Document (body or header)."""
-    if locked and field_type != "table_sl_no" and not str(field_type or "").startswith(
-        "approval_stamp"
-    ):
+    normalized_type = str(field_type or "")
+    # Locked cells keep the original DOCX text — never overwrite pre-filled content.
+    if locked and normalized_type != "table_sl_no":
         return
     if value is None or str(value).strip() == "":
         return
 
     value = _normalize_text_value(value)
+    # Never overwrite real cell text with a column-header echo (Sl. No. / List of Attachment / …).
+    if location.startswith("table") and "_col_" in location:
+        value = _repair_header_echo_value(doc, location, value)
+        if not str(value).strip():
+            return
+
     parts = location.split("_")
 
     try:
         if location.startswith("header_"):
             cell = _resolve_header_cell(doc, location)
             if cell is not None:
+                if _normalize_header_compare(cell.text) == _normalize_header_compare(value):
+                    return
                 _set_cell_text(cell, value)
 
         elif location.startswith("table") and "_col_" in location:
             t = int(parts[1])
             r = int(parts[3])
             c = int(parts[5])
+            # Never push user/data values into section banners or repeated header rows.
+            if _is_structural_table_row(doc, t, r):
+                return
             row = doc.tables[t].rows[r]
+            if c >= len(row.cells):
+                return
             cell = row.cells[c]
+            # Same text already present — keep original formatting/layout.
+            if _normalize_header_compare(cell.text) == _normalize_header_compare(value):
+                return
             if str(value).lower() in ("yes", "no"):
                 _fill_yes_no_cell(cell, value)
             elif len(row.cells) == 1:
                 _fill_colon_label_cell(cell, value)
             elif field_type == "table_sl_no":
                 _set_sl_no_cell_text(cell, value)
+            elif field_type == "attachment":
+                url = ""
+                if attachment_links:
+                    url = str(attachment_links.get(location) or "")
+                if url:
+                    _set_cell_hyperlink(cell, value, url)
+                else:
+                    _set_cell_text(cell, value)
             else:
-                # Plain filename text — hyperlinks break in PDF/LibreOffice exports.
                 _set_cell_text(cell, value)
 
         elif location.startswith("table") and "col" not in location:
@@ -631,21 +1032,374 @@ def _blank_sort_key(field: dict) -> tuple:
     return (para_index, -blank_index)
 
 
+def _cell_has_list_number(cell) -> bool:
+    """True when Word already draws 1. 2. 3. from list numbering."""
+    for para in cell.paragraphs:
+        p_pr = para._element.find(qn("w:pPr"))
+        if p_pr is not None and p_pr.find(qn("w:numPr")) is not None:
+            return True
+    return False
+
+
+def _fill_blank_sl_no_cells(doc) -> int:
+    """
+    Write 1, 2, 3… into an Sl. No. column whose cells are blank.
+
+    Cells that already contain 1.0 / 2.0, or a Word list number, are left as they are.
+    """
+    written = 0
+    for table in doc.tables:
+        if not table.rows:
+            continue
+        header_cells = []
+        seen_header = set()
+        for cell in table.rows[0].cells:
+            if id(cell._tc) in seen_header:
+                continue
+            seen_header.add(id(cell._tc))
+            header_cells.append(cell)
+        if not header_cells:
+            continue
+        header_text = re.sub(r"\s+", " ", (header_cells[0].text or "")).strip()
+        if not is_sl_no_column_header(header_text):
+            continue
+        header_texts = [
+            re.sub(r"\s+", " ", (cell.text or "")).strip() for cell in header_cells
+        ]
+        serial = 0
+        for row in table.rows[1:]:
+            if _is_equipment_section_banner_row(row) or _is_repeated_column_header_row(row, header_texts):
+                continue
+            cells = []
+            seen_row = set()
+            for cell in row.cells:
+                if id(cell._tc) in seen_row:
+                    continue
+                seen_row.add(id(cell._tc))
+                cells.append(cell)
+            if not cells or cells[0]._tc is header_cells[0]._tc:
+                continue
+            if (cells[0].text or "").strip() or _cell_has_list_number(cells[0]):
+                continue
+            serial += 1
+            _set_cell_text(cells[0], str(serial))
+            written += 1
+    return written
+
+
+def _apply_heading_font_from_paragraph_mark(doc) -> None:
+    """
+    Section headings such as 7.0 REPORT APPROVAL keep Arial bold on the
+    paragraph mark, while the words themselves have an empty run.
+    Word then draws those words in Times New Roman. Copy the paragraph
+    mark font onto that run so the heading stays Arial 12 bold.
+    """
+    from copy import deepcopy
+
+    for para in doc.paragraphs:
+        p_pr = para._element.find(qn("w:pPr"))
+        if p_pr is None:
+            continue
+        mark = p_pr.find(qn("w:rPr"))
+        if mark is None:
+            continue
+        mark_fonts = mark.find(qn("w:rFonts"))
+        mark_bold = mark.find(qn("w:b"))
+        if mark_fonts is None and mark_bold is None:
+            continue
+        for run in para.runs:
+            if not (run.text or "").strip():
+                continue
+            r_pr = run._element.find(qn("w:rPr"))
+            if r_pr is None:
+                r_pr = OxmlElement("w:rPr")
+                run._element.insert(0, r_pr)
+            if mark_fonts is not None and r_pr.find(qn("w:rFonts")) is None:
+                r_pr.insert(0, deepcopy(mark_fonts))
+            if mark_bold is not None and r_pr.find(qn("w:b")) is None:
+                r_pr.append(deepcopy(mark_bold))
+                mark_bold_cs = mark.find(qn("w:bCs"))
+                if mark_bold_cs is not None and r_pr.find(qn("w:bCs")) is None:
+                    r_pr.append(deepcopy(mark_bold_cs))
+            mark_sz = mark.find(qn("w:sz"))
+            if mark_sz is not None and r_pr.find(qn("w:sz")) is None:
+                r_pr.append(deepcopy(mark_sz))
+                mark_sz_cs = mark.find(qn("w:szCs"))
+                if mark_sz_cs is not None and r_pr.find(qn("w:szCs")) is None:
+                    r_pr.append(deepcopy(mark_sz_cs))
+            elif r_pr.find(qn("w:sz")) is None and para.style is not None:
+                style_rpr = para.style.element.find(qn("w:rPr"))
+                style_sz = style_rpr.find(qn("w:sz")) if style_rpr is not None else None
+                if style_sz is not None:
+                    r_pr.append(deepcopy(style_sz))
+                    style_sz_cs = style_rpr.find(qn("w:szCs"))
+                    if style_sz_cs is not None and r_pr.find(qn("w:szCs")) is None:
+                        r_pr.append(deepcopy(style_sz_cs))
+
+
+def _paragraph_plain_text(p_element) -> str:
+    return "".join(node.text or "" for node in p_element.iter(qn("w:t"))).strip()
+
+
+def _looks_like_kept_heading(text: str) -> bool:
+    """Section titles stay bold. Filled remarks and summary lines do not."""
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned:
+        return True
+    if len(cleaned) <= 90 and (cleaned.endswith(":") or re.match(r"^\d+(?:\.\d+)+\s", cleaned)):
+        return True
+    letters = [char for char in cleaned if char.isalpha()]
+    if letters and len(cleaned) < 120:
+        upper = sum(1 for char in letters if char.isupper()) / len(letters)
+        if upper >= 0.75:
+            return True
+    return False
+
+
+def _strip_paragraph_bold(p_element) -> None:
+    """Remove bold from a filled body line and from its paragraph mark."""
+    targets = [p_element]
+    p_pr = p_element.find(qn("w:pPr"))
+    if p_pr is not None:
+        mark = p_pr.find(qn("w:rPr"))
+        if mark is not None:
+            targets.append(mark)
+    for run in p_element.findall(qn("w:r")):
+        r_pr = run.find(qn("w:rPr"))
+        if r_pr is not None:
+            targets.append(r_pr)
+    for node in targets:
+        for tag in ("w:b", "w:bCs"):
+            for bold in list(node.findall(qn(tag))):
+                node.remove(bold)
+
+
+_BOLD_LABELS = (
+    "summary & conclusion",
+    "summary and conclusion",
+    "reviewed by",
+    "verification with the current p & id",
+)
+
+
+def _run_font_source(p_element):
+    for run in p_element.findall(qn("w:r")):
+        r_pr = run.find(qn("w:rPr"))
+        if r_pr is not None:
+            return r_pr
+    p_pr = p_element.find(qn("w:pPr"))
+    if p_pr is not None:
+        return p_pr.find(qn("w:rPr"))
+    return None
+
+
+def _make_text_run(text: str, font_source, bold: bool):
+    run = OxmlElement("w:r")
+    r_pr = OxmlElement("w:rPr")
+    if font_source is not None:
+        for tag in ("w:rFonts", "w:sz", "w:szCs", "w:spacing"):
+            node = font_source.find(qn(tag))
+            if node is not None:
+                r_pr.append(deepcopy(node))
+    if bold:
+        r_pr.append(OxmlElement("w:b"))
+        r_pr.append(OxmlElement("w:bCs"))
+    run.append(r_pr)
+    parts = text.split("\n")
+    for index, part in enumerate(parts):
+        if index:
+            run.append(OxmlElement("w:br"))
+        text_node = OxmlElement("w:t")
+        if part[:1].isspace() or part[-1:].isspace():
+            text_node.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        text_node.text = part
+        run.append(text_node)
+    return run
+
+
+def _split_bold_label(p_element) -> bool:
+    """
+    Keep "SUMMARY & CONCLUSION:" and "Reviewed By:" bold.
+    The words typed after the colon stay regular weight.
+    """
+    text = _paragraph_plain_text(p_element)
+    match = re.match(r"^(.{1,80}?:)\s*(.*)$", text, flags=re.S)
+    if not match:
+        return False
+    label = re.sub(r"\s+", " ", match.group(1)).strip()
+    value = match.group(2).strip()
+    key = label.rstrip(":").strip().lower()
+    if key not in _BOLD_LABELS or not value:
+        return False
+    font_source = _run_font_source(p_element)
+    for run in list(p_element.findall(qn("w:r"))):
+        p_element.remove(run)
+    p_pr = p_element.find(qn("w:pPr"))
+    if p_pr is not None:
+        mark = p_pr.find(qn("w:rPr"))
+        if mark is not None:
+            for tag in ("w:b", "w:bCs"):
+                for node in list(mark.findall(qn(tag))):
+                    mark.remove(node)
+    p_element.append(_make_text_run(label + " ", font_source, True))
+    p_element.append(_make_text_run(value, font_source, False))
+    return True
+
+
+def _unbold_filled_body_lines(doc) -> None:
+    """
+    Dotted remark lines and the blank lines under SUMMARY & CONCLUSION
+    carry bold in the template. Typed text must stay regular weight.
+    The label before the colon stays bold.
+    """
+    body = doc.element.body
+    for child in list(body):
+        if child.tag != qn("w:p"):
+            continue
+        if _split_bold_label(child):
+            continue
+        text = _paragraph_plain_text(child)
+        if _looks_like_kept_heading(text):
+            continue
+        _strip_paragraph_bold(child)
+
+
+def _floating_row_growth_twips(tr, grid_widths: list[int]) -> int:
+    """How many twips a filled row grows past the template's fixed height."""
+    tr_pr = tr.find(qn("w:trPr"))
+    tr_h = tr_pr.find(qn("w:trHeight")) if tr_pr is not None else None
+    fixed = int(tr_h.get(qn("w:val")) or 0) if tr_h is not None else 0
+    col = 0
+    max_lines = 1
+    for tc in tr.findall(qn("w:tc")):
+        tc_pr = tc.find(qn("w:tcPr"))
+        span = 1
+        width = grid_widths[col] if col < len(grid_widths) else 1600
+        if tc_pr is not None:
+            grid_span = tc_pr.find(qn("w:gridSpan"))
+            if grid_span is not None:
+                span = int(grid_span.get(qn("w:val")) or 1)
+            tc_w = tc_pr.find(qn("w:tcW"))
+            if tc_w is not None and (tc_w.get(qn("w:w")) or "").isdigit():
+                width = int(tc_w.get(qn("w:w")))
+            elif grid_widths:
+                width = sum(grid_widths[col:col + span]) or width
+        text = "".join(node.text or "" for node in tc.iter(qn("w:t"))).strip()
+        if text:
+            chars_per_line = max(8, width // 90)
+            lines = 0
+            for part in text.splitlines() or [""]:
+                lines += max(1, (len(part) + chars_per_line - 1) // chars_per_line)
+            max_lines = max(max_lines, lines)
+        col += span
+    content_height = max_lines * 260 + 60
+    if fixed and content_height > fixed:
+        return content_height - fixed
+    return 0
+
+
+def _blank_paragraph_like(source) -> object:
+    """An empty paragraph with the same spacing as the template's spacer lines."""
+    clone = deepcopy(source)
+    for attr in list(clone.attrib):
+        if attr.endswith("paraId") or attr.endswith("textId"):
+            del clone.attrib[attr]
+    for child in list(clone):
+        if child.tag == qn("w:r"):
+            clone.remove(child)
+    return clone
+
+
+def _drop_floating_tables_below_following_text(doc) -> None:
+    """
+    Filled rows grow, and a floating table then paints over the next heading.
+    Add the same blank lines the template already uses, for the extra height only,
+    so "8.2 Preventive Maintenance Details:" stays under the calibration table.
+    """
+    body = doc.element.body
+    children = list(body)
+    for index, child in enumerate(children):
+        if child.tag != qn("w:tbl"):
+            continue
+        tbl_pr = child.find(qn("w:tblPr"))
+        if tbl_pr is None or tbl_pr.find(qn("w:tblpPr")) is None:
+            continue
+        grid = child.find(qn("w:tblGrid"))
+        widths = []
+        if grid is not None:
+            for col in grid.findall(qn("w:gridCol")):
+                raw = col.get(qn("w:w")) or "0"
+                widths.append(int(raw) if raw.isdigit() else 0)
+        growth = sum(_floating_row_growth_twips(tr, widths) for tr in child.findall(qn("w:tr")))
+        if growth < 200:
+            continue
+        spacer = None
+        target = None
+        for follower in children[index + 1:]:
+            if follower.tag == qn("w:tbl"):
+                target = follower
+                break
+            if follower.tag != qn("w:p"):
+                continue
+            if _paragraph_plain_text(follower):
+                target = follower
+                break
+            spacer = follower
+        if target is None:
+            continue
+        if spacer is None:
+            spacer = OxmlElement("w:p")
+        # One template spacer is about a short line. Add a little air under the border.
+        extra = int((growth + 360) / 280) + 1
+        extra = max(1, min(extra, 24))
+        for _ in range(extra):
+            target.addprevious(_blank_paragraph_like(spacer))
+
+
 def fill_docx(
     template_path: str,
     field_values: dict,
     output_path: str,
     attachment_links: dict | None = None,
-) -> str:
+    equipment_id: str | None = None,
+) -> tuple[str, dict[str, str]]:
     """
     Fill template DOCX with user values.
     Body fields are written first; header XML is restored from the template (logos),
     then header text fields are applied so fills are not overwritten.
     attachment_links maps field location → download URL for clickable attachment cells.
+
+    Returns (output_path, repaired_values) where repaired_values maps location →
+    restored template cell text for fields that had column-header echo corruption.
     """
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     shutil.copy2(template_path, output_path)
     doc = Document(output_path)
 
+    repaired_values: dict[str, str] = {}
+
+    # Pre-repair header-echo corruption from template cells (List of Attachment only).
+    for field in field_values:
+        location = field.get("location", "")
+        raw_value = field.get("value", "")
+        if not location.startswith("table") or "_col_" not in location:
+            continue
+        if not _value_echoes_column_header(doc, location, str(raw_value or "")):
+            continue
+        fixed = _repair_header_echo_value(doc, location, str(raw_value or ""))
+        if fixed and fixed.strip():
+            field["value"] = fixed
+            repaired_values[location] = fixed
+        else:
+            # Skip write — keep whatever is already in the template cell.
+            field["value"] = ""
+            resolved = _resolve_body_table_cell(doc, location)
+            if resolved is not None:
+                original = (resolved[3].text or "").strip()
+                if original:
+                    repaired_values[location] = original
+
+    # Split fields so header fills run after header XML is restored from template.
     header_fields = []
     body_fields = []
     for field in field_values:
@@ -670,6 +1424,7 @@ def fill_docx(
 
     add_footer_to_doc(doc)
     doc.save(output_path)
+    # Restore original header XML so logos and images are not lost after body fill.
     _restore_header_parts(template_path, output_path)
 
     doc = Document(output_path)
@@ -683,10 +1438,182 @@ def fill_docx(
                 attachment_links,
                 field.get("type"),
             )
+    # Requalification: Equipment ID. No. value comes from the NEQ record.
+    _write_header_equipment_id(doc, equipment_id or "")
+    # Keep the template font sizes. Do not restyle runs to Arial 11, and do not
+    # insert hard breaks in the middle of words such as "Instrument" or "Calibration".
+    from neq_docx_save import _keep_filled_text_inside_cells
+    _keep_filled_text_inside_cells(doc, unify_font=False, break_long_tokens=False)
+    _drop_floating_tables_below_following_text(doc)
+    _fill_blank_sl_no_cells(doc)
+    _keep_approval_names_inside_cells(doc)
+    _apply_heading_font_from_paragraph_mark(doc)
+    _unbold_filled_body_lines(doc)
     _inject_page_number_fields(doc)
+    # Font unify runs after the footer is written and can leave footer distance at 0.
+    _pin_annex_footer_inside_page(doc)
     doc.save(output_path)
 
-    return output_path
+    return output_path, repaired_values
+
+
+def _keep_approval_names_inside_cells(doc) -> None:
+    """
+    Approval name and signature paragraphs use a negative indent, so the
+    e-sign name starts left of the cell and runs through the right border.
+    Keep that text inside the cell, left aligned, so Word wraps it there.
+    """
+    name_headers = ("name & designation", "name and designation", "name/designation")
+    sign_headers = ("signature & date", "signature and date", "sign and date", "sign/date")
+
+    for table in doc.tables:
+        if not table.rows:
+            continue
+        header = []
+        seen = set()
+        for cell in table.rows[0].cells:
+            if id(cell._tc) in seen:
+                continue
+            seen.add(id(cell._tc))
+            header.append(re.sub(r"\s+", " ", (cell.text or "")).strip().lower())
+        value_cols = {
+            index
+            for index, label in enumerate(header)
+            if label in name_headers or label in sign_headers
+        }
+        if not value_cols:
+            continue
+        for row in table.rows[1:]:
+            seen_row = set()
+            unique_cells = []
+            for cell in row.cells:
+                if id(cell._tc) in seen_row:
+                    continue
+                seen_row.add(id(cell._tc))
+                unique_cells.append(cell)
+            label_cell = unique_cells[0] if unique_cells else None
+            for this_col, cell in enumerate(unique_cells):
+                if this_col not in value_cols:
+                    continue
+                if not (cell.text or "").strip():
+                    continue
+                for para in cell.paragraphs:
+                    _clamp_paragraph_inside_cell(para)
+                if label_cell is not None:
+                    _copy_approval_font_from_label(label_cell, cell)
+
+
+def _copy_approval_font_from_label(label_cell, value_cell) -> None:
+    """
+    Approval names were written with no font, so Word showed Times New Roman.
+    Use the same font as the department label in that row (Arial in these tables).
+    """
+    font_name = None
+    font_size = None
+    for para in label_cell.paragraphs:
+        for run_el in para._element.findall(qn("w:r")):
+            r_pr = run_el.find(qn("w:rPr"))
+            if r_pr is None:
+                continue
+            fonts = r_pr.find(qn("w:rFonts"))
+            if fonts is not None and not font_name:
+                font_name = fonts.get(qn("w:ascii")) or fonts.get(qn("w:hAnsi"))
+            sz = r_pr.find(qn("w:sz"))
+            if sz is not None and not font_size:
+                font_size = sz.get(qn("w:val"))
+            if font_name and font_size:
+                break
+    if not font_name:
+        font_name = "Arial"
+    for para in value_cell.paragraphs:
+        for run_el in para._element.iter(qn("w:r")):
+            if run_el.find(qn("w:t")) is None:
+                continue
+            r_pr = run_el.find(qn("w:rPr"))
+            if r_pr is None:
+                r_pr = OxmlElement("w:rPr")
+                run_el.insert(0, r_pr)
+            if r_pr.find(qn("w:rFonts")) is None:
+                r_fonts = OxmlElement("w:rFonts")
+                r_fonts.set(qn("w:ascii"), font_name)
+                r_fonts.set(qn("w:hAnsi"), font_name)
+                r_pr.insert(0, r_fonts)
+            if font_size and r_pr.find(qn("w:sz")) is None:
+                node = OxmlElement("w:sz")
+                node.set(qn("w:val"), font_size)
+                r_pr.append(node)
+                node_cs = OxmlElement("w:szCs")
+                node_cs.set(qn("w:val"), font_size)
+                r_pr.append(node_cs)
+
+
+def _is_equipment_id_header_label(text: str) -> bool:
+    """Header label for the equipment ID value that must come from the NEQ record."""
+    label = re.sub(r"\s+", " ", (text or "").strip().lower()).rstrip(":").strip()
+    if not label or "name" in label:
+        return False
+    return bool(re.search(r"equipment(\s*/\s*system)?\s+id\b", label))
+
+
+def _write_header_equipment_id(doc, equipment_id: str) -> None:
+    """
+    Put the NEQ equipment ID in the cell beside Equipment ID. No.
+    Leave the label itself in place.
+    """
+    equipment_id = (equipment_id or "").strip()
+    if not equipment_id:
+        return
+    for section in doc.sections:
+        for table in section.header.tables:
+            for row in table.rows:
+                seen = set()
+                cells = []
+                for cell in row.cells:
+                    if id(cell._tc) in seen:
+                        continue
+                    seen.add(id(cell._tc))
+                    cells.append(cell)
+                for index, cell in enumerate(cells):
+                    if not _is_equipment_id_header_label(cell.text):
+                        continue
+                    if index + 1 >= len(cells):
+                        continue
+                    value_cell = cells[index + 1]
+                    if _is_equipment_id_header_label(value_cell.text):
+                        continue
+                    if _is_fixed_header_label(value_cell.text):
+                        continue
+                    if (value_cell.text or "").strip() == equipment_id:
+                        continue
+                    _set_cell_text(value_cell, equipment_id)
+
+
+def _clamp_paragraph_inside_cell(para) -> None:
+    """Drop a negative indent and justified stretch so the line stays in the cell."""
+    p_pr = para._element.get_or_add_pPr()
+    ind = p_pr.find(qn("w:ind"))
+    if ind is not None:
+        for attr in ("w:start", "w:left", "w:end", "w:right", "w:hanging", "w:firstLine"):
+            raw = ind.get(qn(attr))
+            if raw is None:
+                continue
+            try:
+                if int(raw) < 0:
+                    ind.set(qn(attr), "0")
+            except (TypeError, ValueError):
+                continue
+    jc = p_pr.find(qn("w:jc"))
+    if jc is not None and (jc.get(qn("w:val")) or "") == "both":
+        jc.set(qn("w:val"), "left")
+    tc = para._element.getparent()
+    if tc is None or not str(tc.tag).endswith("}tc"):
+        return
+    tc_pr = tc.find(qn("w:tcPr"))
+    if tc_pr is None:
+        return
+    no_wrap = tc_pr.find(qn("w:noWrap"))
+    if no_wrap is not None:
+        tc_pr.remove(no_wrap)
 
 
 def add_footer_to_doc(doc) -> None:
@@ -699,10 +1626,42 @@ def add_footer_to_doc(doc) -> None:
             element.getparent().remove(element)
         para = footer.add_paragraph()
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _tighten_footer_paragraph(para)
         run_annex = para.add_run(FOOTER_ANNEX_TEXT)
-        run_annex.font.size = Pt(7)
+        run_annex.font.size = Pt(9)
+    _pin_annex_footer_inside_page(doc)
 
 
+def _tighten_footer_paragraph(para) -> None:
+    """No extra space, so the annex line cannot drop below the page edge."""
+    fmt = para.paragraph_format
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
+    fmt.line_spacing = 1.0
+
+
+def _pin_annex_footer_inside_page(doc) -> None:
+    """
+    A footer distance of 0 draws the annex line on the page edge.
+    Word then shows it in the gap under the sheet, outside the footer.
+    """
+    for section in doc.sections:
+        footer = section.footer
+        if footer is None:
+            continue
+        annex_paras = [p for p in footer.paragraphs if "ANNEX" in (p.text or "")]
+        if not annex_paras:
+            continue
+        for para in annex_paras:
+            _tighten_footer_paragraph(para)
+        # Half an inch from the edge keeps one line inside the bottom margin.
+        if section.footer_distance is None or int(section.footer_distance) < int(Pt(28)):
+            section.footer_distance = Pt(36)
+        if section.bottom_margin is None or int(section.bottom_margin) < int(Pt(64)):
+            section.bottom_margin = Pt(72)
+
+
+# Copy header*.xml parts from the template zip back into the filled output zip.
 def _restore_header_parts(template_path: str, output_path: str) -> None:
     with zipfile.ZipFile(template_path, "r") as tpl_zip:
         template_parts = {
