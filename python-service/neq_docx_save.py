@@ -16,6 +16,7 @@ from report_generator import (
     _run_has_image,
     _normalize_text_value,
     _remove_paragraph_numbering,
+    _normalize_header_table_fonts,
 )
 
 EDITABLE_TAGS = {"td", "th", "p", "h1", "h2", "h3", "h4", "h5", "h6", "li"}
@@ -2095,6 +2096,7 @@ def _keep_filled_text_inside_cells(
     changed += _keep_body_below_letterhead(doc)
     changed += _repeat_letterhead_on_every_section(doc)
     changed += _unbold_filled_data_rows(doc)
+    _normalize_header_table_fonts(doc, font_name="Arial", font_size_pt=12.0)
     return changed
 
 
@@ -5979,6 +5981,7 @@ def apply_indexed_edits_to_docx(
     # Word download ignores preview CSS. Keep original columns; wrap inside them.
     cells_wrapped = _keep_filled_text_inside_cells(doc)
     _join_split_esign_dates(doc)
+    _normalize_header_table_fonts(doc, font_name="Arial", font_size_pt=12.0)
 
     total_applied = (
         applied
