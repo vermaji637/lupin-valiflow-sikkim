@@ -13,3 +13,6 @@ npm-debug.log
 yarn-error.log
 /.idea
 /.vscode
+valiflow_database_export.sql
+templates_docx.zip
+*.zip
