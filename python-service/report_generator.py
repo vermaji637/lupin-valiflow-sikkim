@@ -392,6 +392,17 @@ def _set_sl_no_cell_text(cell, value: str) -> None:
     _set_cell_text(cell, value)
 
 
+def _is_header_cell(cell) -> bool:
+    """True when cell is located inside a header table."""
+    try:
+        for ancestor in cell._tc.iterancestors():
+            if ancestor.tag.endswith("hdr"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _set_cell_text(cell, value: str) -> None:
     """
     Write value into a table cell without destroying logo/image runs.
@@ -403,6 +414,8 @@ def _set_cell_text(cell, value: str) -> None:
     font_italic = None
     font_size = None
     font_name = None
+
+    is_header = _is_header_cell(cell)
 
     for para in cell.paragraphs:
         if any(_run_has_image(r) for r in para.runs):
@@ -416,6 +429,12 @@ def _set_cell_text(cell, value: str) -> None:
                     font_size = run.font.size
                     font_name = run.font.name
                     break
+
+    if is_header:
+        if not font_name:
+            font_name = "Arial"
+        if font_size is None or int(getattr(font_size, "pt", 0) or 0) < 12:
+            font_size = Pt(12)
 
     if not text_paras:
         text_paras = [cell.add_paragraph()]
@@ -1450,11 +1469,37 @@ def fill_docx(
     _apply_heading_font_from_paragraph_mark(doc)
     _unbold_filled_body_lines(doc)
     _inject_page_number_fields(doc)
+    _normalize_header_table_fonts(doc, font_name="Arial", font_size_pt=12.0)
     # Font unify runs after the footer is written and can leave footer distance at 0.
     _pin_annex_footer_inside_page(doc)
     doc.save(output_path)
 
     return output_path, repaired_values
+
+
+def _normalize_header_table_fonts(doc, font_name: str = "Arial", font_size_pt: float = 12.0) -> None:
+    """
+    Ensure all text runs in header tables (letterhead) are uniformly styled
+    with Arial 12pt (matching SOP template standards for Document Number,
+    Equipment Name, Equipment ID, Title, etc.) while preserving bold styling and images.
+    """
+    for section in doc.sections:
+        headers = [section.header]
+        if hasattr(section, "first_page_header") and section.first_page_header:
+            headers.append(section.first_page_header)
+        if hasattr(section, "even_page_header") and section.even_page_header:
+            headers.append(section.even_page_header)
+        for hdr in headers:
+            for table in hdr.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if any(_run_has_image(r) for r in para.runs):
+                                continue
+                            for run in para.runs:
+                                if (run.text or "").strip():
+                                    run.font.name = font_name
+                                    run.font.size = Pt(font_size_pt)
 
 
 def _keep_approval_names_inside_cells(doc) -> None:
