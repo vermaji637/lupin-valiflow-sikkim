@@ -1032,6 +1032,18 @@ def _apply_single_field(
                     "on",
                 ):
                     _fill_paragraph_checkbox(para)
+                elif field_type == "paragraph_content":
+                    font_name = None
+                    font_size = None
+                    if para.runs:
+                        font_name = para.runs[0].font.name
+                        font_size = para.runs[0].font.size
+                    _clear_text_runs(para)
+                    new_run = para.add_run(str(value))
+                    if font_name:
+                        new_run.font.name = font_name
+                    if font_size:
+                        new_run.font.size = font_size
                 else:
                     _fill_paragraph_blank(para, value)
 
@@ -1381,6 +1393,7 @@ def fill_docx(
     output_path: str,
     attachment_links: dict | None = None,
     equipment_id: str | None = None,
+    table_ops: list | None = None,
 ) -> tuple[str, dict[str, str]]:
     """
     Fill template DOCX with user values.
@@ -1440,6 +1453,10 @@ def fill_docx(
             attachment_links,
             field.get("type"),
         )
+
+    if table_ops:
+        from neq_docx_save import _apply_table_ops
+        _apply_table_ops(doc, table_ops)
 
     add_footer_to_doc(doc)
     doc.save(output_path)

@@ -5,8 +5,10 @@ from doc_parser import (
     PARA_BLANK_RE,
     PARA_COLON_BLANK_RE,
     dedupe_colon_label,
+    dedupe_repeated_text,
     has_paragraph_blank,
     is_locked_section_title,
+    is_section_heading_paragraph,
     collect_paragraph_texts,
     iter_unique_textboxes,
     is_border_blank_paragraph,
@@ -29,6 +31,7 @@ from doc_parser import (
     is_equipment_section_banner_row,
     is_repeated_column_header_row,
 )
+from docx.oxml.ns import qn
 from report_generator import fill_docx, _normalize_text_value
 from pydantic import BaseModel, field_validator
 from typing import List, Optional, Any
@@ -65,6 +68,7 @@ class FillRequest(BaseModel):
     fields: List[FieldValue]
     attachment_links: Optional[dict[str, Any]] = None
     equipment_id: Optional[str] = None
+    table_ops: Optional[List[dict]] = None
 
     @field_validator("attachment_links", mode="before")
     @classmethod
@@ -347,6 +351,7 @@ async def fill_document(request: FillRequest):
             output_path,
             request.attachment_links or {},
             request.equipment_id or "",
+            request.table_ops or [],
         )
     except Exception as e:
         raise HTTPException(
@@ -406,6 +411,11 @@ async def preview_document(
             if sloc == f"para_{para_idx}" or sloc.startswith(f"para_{para_idx}_blank_"):
                 legacy_para_by_index.setdefault(para_idx, sf)
 
+        is_pre_approval_mode = (
+            mode != "readonly"
+            and mode == "pre_approval"
+        )
+
         fields = []
         for ff in fresh:
             loc = ff.get("location")
@@ -413,14 +423,28 @@ async def preview_document(
                 sv = stored_by_loc[loc]
                 if sv.get("value") not in (None, ""):
                     ff["value"] = sv["value"]
-                # Respect explicit locked flag from Laravel when present
-                if "locked" in sv:
-                    ff["locked"] = sv["locked"]
+                # In pre-approval mode, unlock all content fields
+                if is_pre_approval_mode:
+                    if ff.get("type") not in ("approval_stamp", "table_sl_no") and not (loc and loc.endswith("_row_0")):
+                        ff["locked"] = False
+                    else:
+                        ff["locked"] = sv.get("locked", ff.get("locked", True))
+                else:
+                    # In post-pre-approval execution / standard mode:
+                    # Paragraphs and 2-col keys (Col 0) are strictly locked!
+                    if ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
+                        ff["locked"] = True
+                    # 2-col values (Col 1) are fillable!
+                    elif ff.get("type") == "table_2col" or (loc and (loc.endswith("_col_1") or re.match(r"^table_\d+_row_\d+$", loc))):
+                        ff["locked"] = False
+                    elif "locked" in sv:
+                        ff["locked"] = sv["locked"]
                 # Laravel may upgrade approval-page Name cells to approver dropdowns after parse.
                 for meta_key in (
                     "type",
                     "widget",
                     "approver_role",
+                    "user_id",
                     "signature_date_location",
                     "stamp_eligible",
                 ):
@@ -435,8 +459,21 @@ async def preview_document(
                     sv = legacy_para_by_index[parent_para]
                     if sv.get("value") not in (None, ""):
                         ff["value"] = sv["value"]
-                    if "locked" in sv:
-                        ff["locked"] = sv["locked"]
+                    if is_pre_approval_mode:
+                        ff["locked"] = False
+                    else:
+                        if ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
+                            ff["locked"] = True
+                        elif "locked" in sv:
+                            ff["locked"] = sv["locked"]
+                elif is_pre_approval_mode:
+                    if ff.get("type") not in ("approval_stamp", "table_sl_no") and not (loc and loc.endswith("_row_0")):
+                        ff["locked"] = False
+                else:
+                    if ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
+                        ff["locked"] = True
+                    elif ff.get("type") == "table_2col" or (loc and (loc.endswith("_col_1") or re.match(r"^table_\d+_row_\d+$", loc))):
+                        ff["locked"] = False
             fields.append(ff)
 
         html = build_fill_html(template_path, fields, mode=mode)
@@ -526,6 +563,7 @@ def _readonly_td(
     *,
     cell_style: str = "",
     rowspan_attr: str = "",
+    colspan_attr: str = "",
     location: str = "",
     extra_class: str = "readonly",
 ) -> str:
@@ -533,7 +571,7 @@ def _readonly_td(
     data_attr = f' data-field="{_escape_html(location)}"' if location else ""
     return (
         f'<td class="docx-cell {extra_class}" style="{style}"'
-        f'{rowspan_attr}{data_attr}>{content}</td>'
+        f'{rowspan_attr}{colspan_attr}{data_attr}>{content}</td>'
     )
 
 
@@ -907,17 +945,17 @@ def _render_paragraph_yes_no_radio(
 # ── _render_radio_yes_no_cell() ─────────────────────
 # Renders Yes/No radio pair for table cells with Yes □ No □ pattern.
 def _render_radio_yes_no_cell(
-    location: str, field: dict, cell_text: str, mode: str = "edit"
+    location: str, field: dict, cell_text: str, mode: str = "edit", colspan_attr: str = ""
 ) -> str:
     loc = _escape_html(location)
     if _is_readonly_mode(mode):
         display = _format_readonly_display(field.get("value", ""), field)
-        return _readonly_td(display, location=location)
+        return _readonly_td(display, colspan_attr=colspan_attr, location=location)
     value = (field.get("value") or "").strip().lower()
     yes_checked = "checked" if value == "yes" else ""
     no_checked = "checked" if value == "no" else ""
     return (
-        f'<td class="docx-cell editable docx-checkbox-cell">'
+        f'<td class="docx-cell editable docx-checkbox-cell"{colspan_attr}>'
         f'<label class="docx-check-label">'
         f'<input type="radio" name="fields[{loc}]" value="Yes" {yes_checked}> Yes'
         f"</label> "
@@ -932,7 +970,7 @@ def _render_radio_yes_no_cell(
 # Renders a placeholder user dropdown for signature-table Name & Designation cells.
 # Laravel fill.blade.php JS hydrates options from $users and syncs POST approver IDs.
 # Render locked Name/Signature/Date cells on the APPROVAL PAGE table (stamp placeholders).
-def _render_approval_stamp_cell(field: dict, mode: str = "edit") -> str:
+def _render_approval_stamp_cell(field: dict, mode: str = "edit", colspan_attr: str = "") -> str:
     """Render locked Name / Signature / Date cells on the APPROVAL PAGE table."""
     location = field.get("location", "")
     field_type = field.get("type", "")
@@ -947,42 +985,57 @@ def _render_approval_stamp_cell(field: dict, mode: str = "edit") -> str:
 
     loc_attr = f' data-field="{_escape_html(location)}"' if location else ""
     return (
-        f'<td class="docx-cell locked approval-stamp-cell" style="{style}"{loc_attr}>'
+        f'<td class="docx-cell locked approval-stamp-cell" style="{style}"{colspan_attr}{loc_attr}>'
         f"{content}</td>"
     )
 
 
 # Render approver dropdown placeholder; Laravel JS hydrates options from users table.
-def _render_approver_cell(field: dict, mode: str = "edit") -> str:
+def _render_approver_cell(field: dict, mode: str = "edit", colspan_attr: str = "") -> str:
     location = _escape_html(field.get("location", ""))
     role = _escape_html(field.get("approver_role", ""))
     date_loc = _escape_html(field.get("signature_date_location", ""))
-    if _is_readonly_mode(mode):
-        display = _render_readonly_span(field.get("value", ""), field, field.get("location", ""))
+    value = field.get("value", "")
+    user_id = field.get("user_id", "")
+    if _is_readonly_mode(mode) or _is_field_locked(field):
+        display = _render_readonly_span(value, field, location)
         return _readonly_td(
             display,
-            location=field.get("location", ""),
+            colspan_attr=colspan_attr,
+            location=location,
             extra_class="readonly docx-approver-readonly",
         )
-    required = " required" if role else ""
+    is_pre = field.get("is_pre_approver") or role in (
+        "prepared_by_engineering_name",
+        "checked_by_engineering_name",
+        "checked_by_production_name",
+        "checked_by_validation_name",
+        "checked_by_quality_name",
+        "approved_by_user_name",
+        "approved_by_quality_name",
+    )
+    is_pre_attr = ' data-is-pre-approver="1"' if is_pre else ""
+    required = "" if (is_pre or mode == "pre_approval") else (" required" if role else "")
+    user_id_attr = f' data-user-id="{user_id}"' if user_id else ""
+    val_attr = f' value="{_escape_html(value)}"' if value else ' value=""'
     return (
-        f'<td class="docx-cell editable docx-approver-cell">'
+        f'<td class="docx-cell editable docx-approver-cell"{colspan_attr}>'
         f'<select class="docx-input approver-field" '
         f'data-approver-role="{role}" '
         f'data-field-location="{location}" '
-        f'data-signature-date-location="{date_loc}"{required}>'
+        f'data-signature-date-location="{date_loc}"{user_id_attr}{is_pre_attr}{required}>'
         f'<option value="">-- Select User --</option>'
         f"</select>"
         f'<input type="hidden" name="fields[{location}]" '
         f'class="approver-name-field" data-approver-role="{role}" '
-        f'data-field-location="{location}" value="">'
+        f'data-field-location="{location}"{is_pre_attr}{val_attr}>'
         f"</td>"
     )
 
 
 # ── _render_attachment_cell() ───────────────────────
 # Renders a file upload input for certificate / proof attachment columns.
-def _render_attachment_cell(field: dict, mode: str = "edit") -> str:
+def _render_attachment_cell(field: dict, mode: str = "edit", colspan_attr: str = "") -> str:
     """Render one file-upload cell; data-attachment-location is used when converting to a single download link."""
     location = _escape_html(field.get("location", ""))
     value = _escape_html((field.get("value") or "").strip())
@@ -993,13 +1046,13 @@ def _render_attachment_cell(field: dict, mode: str = "edit") -> str:
         return (
             f'<td class="docx-cell readonly docx-attachment-cell" '
             f'data-attachment-location="{location}" '
-            f'style="{style}" data-field="{location}">'
+            f'style="{style}"{colspan_attr} data-field="{location}">'
             f"{display}</td>"
         )
     value_attr = f' value="{value}"' if value else ""
 
     return (
-        f'<td class="docx-cell editable docx-attachment-cell" data-attachment-location="{location}">'
+        f'<td class="docx-cell editable docx-attachment-cell" data-attachment-location="{location}"{colspan_attr}>'
         f'<input type="file" class="docx-attachment-field" '
         f'name="attachments[{location}]" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">'
         f'<small class="text-muted d-block mt-1">Upload PDF/DOCX</small>'
@@ -1071,9 +1124,28 @@ def _render_paragraph(
     field_map: dict,
     mode: str = "edit",
 ) -> str:
+    para_text = dedupe_repeated_text(para_text)
     # 1.0 OBJECTIVE: and the other protocol headings are titles, not fill boxes.
     if is_locked_section_title(para_text):
-        return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
+        return f'<p class="docx-para">{_escape_html(dedupe_colon_label(dedupe_repeated_text(para_text)))}</p>'
+
+    if field and field.get("type") == "paragraph_content":
+        val = field.get("value")
+        if val is None or val == "":
+            val = para_text
+        val = dedupe_repeated_text(val)
+        if _is_readonly_mode(mode) or mode != "pre_approval" or _is_field_locked(field):
+            return f'<p class="docx-para">{_escape_html(val)}</p>'
+        else:
+            loc = _escape_html(field.get("location", f"para_{para_index}"))
+            val_esc = _escape_html(val)
+            calc_rows = max(2, min(8, len(val) // 70 + 1))
+            return (
+                f'<div class="docx-para-edit-wrapper" style="margin: 6px 0;">'
+                f'<textarea name="fields[{loc}]" class="docx-input docx-para-content" '
+                f'rows="{calc_rows}" style="width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #facc15; border-bottom:2px solid #4e73df; border-radius:4px; background-color:#fffde7 !important;">{val_esc}</textarea>'
+                f'</div>'
+            )
 
     loc = f"para_{para_index}"
 
@@ -1259,6 +1331,16 @@ def _render_paragraph(
                     f'<p class="docx-para docx-para-editable">'
                     f"{_escape_html(label_part)}{inp}</p>"
                 )
+        if mode == "pre_approval" and not _is_readonly_mode(mode) and not is_locked_section_title(para_text) and not is_section_heading_paragraph(para_text) and len(para_text.strip()) > 5:
+            loc = f"para_{para_index}"
+            val_esc = _escape_html(para_text)
+            calc_rows = max(2, min(8, len(para_text) // 70 + 1))
+            return (
+                f'<div class="docx-para-edit-wrapper" style="margin: 6px 0;">'
+                f'<textarea name="fields[{loc}]" class="docx-input docx-para-content" '
+                f'rows="{calc_rows}" style="width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #facc15; border-bottom:2px solid #4e73df; border-radius:4px; background-color:#fffde7 !important;">{val_esc}</textarea>'
+                f'</div>'
+            )
         return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
 
     return ""
@@ -1321,6 +1403,7 @@ def _render_sl_no_cell(
     *,
     cell_style: str = "",
     rowspan_attr: str = "",
+    colspan_attr: str = "",
     location: str = "",
     readonly: bool = False,
 ) -> str:
@@ -1332,9 +1415,26 @@ def _render_sl_no_cell(
     content = _escape_html(display)
     extra = " locked readonly" if r_idx > 0 else ""
     return (
-        f'<td class="docx-cell{extra}" style="{style}"{rowspan_attr}{loc_attr}>'
+        f'<td class="docx-cell{extra}" style="{style}"{rowspan_attr}{colspan_attr}{loc_attr}>'
         f"{content}</td>"
     )
+
+
+def _cell_colspan(cell, cells) -> int:
+    """Extract gridSpan from cell tcPr or count occurrences of identical _tc in cells."""
+    try:
+        tcPr = cell._tc.get_or_add_tcPr()
+        grid_span_el = tcPr.find(qn("w:gridSpan"))
+        if grid_span_el is not None:
+            val = grid_span_el.get(qn("w:val"))
+            if val and val.isdigit():
+                return int(val)
+    except Exception:
+        pass
+    same_count = sum(1 for c in cells if c._tc == cell._tc)
+    if same_count > 1:
+        return same_count
+    return 1
 
 
 # ── _resolve_cell_field() ───────────────────────────
@@ -1382,26 +1482,33 @@ def _resolve_cell_field(
 #   2. Uses len(row.cells) for 2-col detection — must match doc_parser.py
 #   3. Uses original col_index from enumerate(row.cells) for location keys
 def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str:
-    html = ['<table class="docx-table">']
+    html = [f'<table class="docx-table" data-table-index="{t_idx}">']
     readonly = _is_readonly_mode(mode)
     sl_no_col = _table_sl_no_col_index(table)
     toc_table = is_toc_table(table) or is_toc_list_table(table)
     col_headers = get_table_column_headers(table, is_report_approval_block_table(table))
 
     for r_idx, row in enumerate(table.rows):
-        html.append("<tr>")
+        html.append(f'<tr data-row-index="{r_idx}">')
 
         cells = row.cells
-        # "Mechanical Adjustment:" / "Machine Performance:" are merged title rows.
+        # "Mechanical Adjustment:" / "Machine Performance:" / "Major components :" are merged title rows.
         # Col 0 is the Sr. No. column, so without this they render as the row number.
-        if r_idx > 0 and is_equipment_section_banner_row(row):
+        if is_equipment_section_banner_row(row):
             banner = dedupe_colon_label(cells[0].text.strip()) if cells else ""
             colspan = len(cells) or 1
-            style = _inline_cell_style("font-weight:bold;", readonly=readonly)
-            html.append(
-                f'<td class="docx-cell" colspan="{colspan}" style="{style}">'
-                f"{_escape_html(banner)}</td>"
-            )
+            if r_idx == 0:
+                style = _inline_cell_style("font-weight:bold;background:#f1f5f9; color:#1e293b;", readonly=readonly)
+                html.append(
+                    f'<th class="docx-cell docx-table-header" colspan="{colspan}" style="{style}">'
+                    f"{_escape_html(banner)}</th>"
+                )
+            else:
+                style = _inline_cell_style("font-weight:bold;background:#f8fafc; color:#1e293b;", readonly=readonly)
+                html.append(
+                    f'<td class="docx-cell" colspan="{colspan}" style="{style}">'
+                    f"{_escape_html(banner)}</td>"
+                )
             html.append("</tr>")
             continue
         if r_idx > 0 and is_repeated_column_header_row(row, col_headers):
@@ -1411,9 +1518,11 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                 if tc_id in seen_header:
                     continue
                 seen_header.add(tc_id)
+                c_span = _cell_colspan(cell, cells)
+                c_span_attr = f' colspan="{c_span}"' if c_span > 1 else ""
                 style = _inline_cell_style("font-weight:bold;", readonly=readonly)
                 html.append(
-                    f'<td class="docx-cell" style="{style}">'
+                    f'<td class="docx-cell"{c_span_attr} style="{style}">'
                     f"{_escape_html(cell.text.strip())}</td>"
                 )
             html.append("</tr>")
@@ -1433,15 +1542,26 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
             if rowspan == 0:
                 continue
 
+            colspan = _cell_colspan(cell, cells)
+            colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
+
             text = dedupe_colon_label(cell.text.strip())
             is_header = r_idx == 0
             cell_style = "font-weight:bold;" if is_header else ""
             rowspan_attr = ""
 
+            if is_header:
+                style = _inline_cell_style(cell_style + "background:#f1f5f9; color:#1e293b;", readonly=readonly)
+                html.append(
+                    f'<th class="docx-cell docx-table-header" style="{style}"{rowspan_attr}{colspan_attr}>'
+                    f"{_escape_html(text)}</th>"
+                )
+                continue
+
             if toc_table or is_toc_entry_text(text):
                 style = _inline_cell_style(cell_style, readonly=readonly)
                 html.append(
-                    f'<td class="docx-cell" style="{style}"{rowspan_attr}>'
+                    f'<td class="docx-cell" style="{style}"{rowspan_attr}{colspan_attr}>'
                     f"{_escape_html(text)}</td>"
                 )
                 continue
@@ -1466,6 +1586,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                         text,
                         cell_style=cell_style,
                         rowspan_attr=rowspan_attr,
+                        colspan_attr=colspan_attr,
                         location=loc,
                         readonly=readonly or r_idx > 0,
                     )
@@ -1473,15 +1594,15 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                 continue
 
             if field and str(field.get("type", "")).startswith("approval_stamp"):
-                html.append(_render_approval_stamp_cell(field, mode))
+                html.append(_render_approval_stamp_cell(field, mode, colspan_attr=colspan_attr))
                 continue
 
             if field and field.get("type") == "approver" and not _is_field_locked(field):
-                html.append(_render_approver_cell(field, mode))
+                html.append(_render_approver_cell(field, mode, colspan_attr=colspan_attr))
                 continue
 
             if field and field.get("type") == "attachment" and not _is_field_locked(field):
-                html.append(_render_attachment_cell(field, mode))
+                html.append(_render_attachment_cell(field, mode, colspan_attr=colspan_attr))
                 continue
 
             # List-of-attachment rows skipped at parse time (Dust Extractor, Area Recovery)
@@ -1499,28 +1620,60 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                     "value": "",
                     "label": "Attachment No.",
                 }
-                html.append(_render_attachment_cell(upload_field, mode))
+                html.append(_render_attachment_cell(upload_field, mode, colspan_attr=colspan_attr))
                 continue
 
             if field and field.get("type") == "table_radio" and not _is_field_locked(field):
-                html.append(_render_radio_yes_no_cell(field["location"], field, text, mode))
+                html.append(_render_radio_yes_no_cell(field["location"], field, text, mode, colspan_attr=colspan_attr))
                 continue
 
             if (is_yes_no_radio_cell(text) or is_checkbox_cell(text)) and field is None:
                 loc = f"table_{t_idx}_row_{r_idx}_col_{col_idx}"
                 pseudo = {"type": "table_radio", "label": row_label, "value": text}
-                html.append(_render_radio_yes_no_cell(loc, pseudo, text, mode))
+                html.append(_render_radio_yes_no_cell(loc, pseudo, text, mode, colspan_attr=colspan_attr))
                 continue
 
-            # Classic label|value 2-col rows: col_0 has no field metadata → static label.
-            # Grid cells (Deviation, etc.) always have a field — even when locked after fill —
-            # and must fall through so field["value"] is rendered with data-field.
-            if is_two_col and col_idx == 0 and field is None:
-                style = _inline_cell_style(cell_style, readonly=readonly)
-                html.append(
-                    f'<td class="docx-cell" style="{style}"{rowspan_attr}>'
-                    f"{_escape_html(text)}</td>"
-                )
+            if is_two_col and col_idx == 0:
+                col0_loc = field["location"] if (field and "location" in field) else f"table_{t_idx}_row_{r_idx}_col_0"
+                col0_val = (field.get("value") if field else "") or text
+                if readonly or mode != "pre_approval" or (field and _is_field_locked(field)):
+                    display = _render_readonly_span(col0_val, field, col0_loc)
+                    html.append(_readonly_td(display, cell_style=cell_style, rowspan_attr=rowspan_attr, colspan_attr=colspan_attr, location=col0_loc))
+                else:
+                    inp = _render_field_input(
+                        col0_loc,
+                        field or {"location": col0_loc, "label": text, "type": "table_2col_label"},
+                        css_class="docx-input",
+                        placeholder="Parameter / Item...",
+                        value=col0_val,
+                    )
+                    html.append(
+                        f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
+                        f"{inp}</td>"
+                    )
+                continue
+
+            if is_two_col and col_idx == 1 and field is None:
+                col1_loc = f"table_{t_idx}_row_{r_idx}_col_1"
+                col1_val = text
+                if text.strip().lower() == row.cells[0].text.strip().lower():
+                    col1_val = ""
+                if readonly:
+                    display = _render_readonly_span(col1_val, None, col1_loc)
+                    html.append(_readonly_td(display, cell_style=cell_style, rowspan_attr=rowspan_attr, colspan_attr=colspan_attr, location=col1_loc))
+                else:
+                    inp = _render_field_input(
+                        col1_loc,
+                        {"location": col1_loc, "label": row.cells[0].text.strip(), "type": "table_2col"},
+                        css_class="docx-input",
+                        placeholder="Enter details...",
+                        value=col1_val,
+                    )
+                    html.append(
+                        f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
+                        f"{inp}</td>"
+                    )
+                continue
             elif is_one_col and field and not _is_field_locked(field):
                 if readonly:
                     display = _render_readonly_span(
@@ -1537,6 +1690,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                             content,
                             cell_style=cell_style,
                             rowspan_attr=rowspan_attr,
+                            colspan_attr=colspan_attr,
                             location=field["location"],
                         )
                     )
@@ -1550,7 +1704,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                             value=field.get("value", ""),
                         )
                         html.append(
-                            f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}>'
+                            f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
                             f"{inp}</td>"
                         )
                     else:
@@ -1566,7 +1720,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                             value=field.get("value", ""),
                         )
                         html.append(
-                            f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}>'
+                            f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
                             f"{_escape_html(label_part)}{inp}</td>"
                         )
             elif field and not _is_field_locked(field):
@@ -1578,11 +1732,17 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                             display,
                             cell_style=cell_style,
                             rowspan_attr=rowspan_attr,
+                            colspan_attr=colspan_attr,
                             location=field["location"],
                         )
                     )
                 else:
                     use_textarea = _is_textarea_cell(field, row_label, rowspan)
+                    ph = ""
+                    if is_two_col and col_idx == 1:
+                        ph = "Enter details..."
+                    elif is_two_col and col_idx == 0:
+                        ph = "Parameter / Item..."
                     if use_textarea:
                         widget_field = dict(field)
                         widget_field["widget"] = "textarea"
@@ -1590,6 +1750,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                             field["location"],
                             widget_field,
                             css_class="docx-input",
+                            placeholder=ph,
                             value=value or text,
                         )
                     else:
@@ -1597,10 +1758,11 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                             field["location"],
                             field,
                             css_class="docx-input",
+                            placeholder=ph,
                             value=value or text,
                         )
                     html.append(
-                        f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}>'
+                        f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
                         f"{inp}</td>"
                     )
             elif field and _is_field_locked(field):
@@ -1614,19 +1776,40 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                             display,
                             cell_style=cell_style,
                             rowspan_attr=rowspan_attr,
+                            colspan_attr=colspan_attr,
                             location=field.get("location", ""),
                             extra_class="locked",
                         )
                     )
                 else:
                     html.append(
-                        f'<td class="docx-cell locked" style="{style}{locked_bg}"{rowspan_attr}>'
+                        f'<td class="docx-cell locked" style="{style}{locked_bg}"{rowspan_attr}{colspan_attr}>'
                         f"{_escape_html(locked_val)}</td>"
+                    )
+            elif not readonly and r_idx > 0 and not is_header:
+                if mode != "pre_approval" and text.strip() != "":
+                    style = _inline_cell_style(cell_style, readonly=readonly)
+                    html.append(
+                        f'<td class="docx-cell" style="{style}"{rowspan_attr}{colspan_attr}>'
+                        f"{_escape_html(text)}</td>"
+                    )
+                else:
+                    cell_loc = f"table_{t_idx}_row_{r_idx}_col_{col_idx}"
+                    inp = _render_field_input(
+                        cell_loc,
+                        {"location": cell_loc, "label": header_label, "type": "table_multicol"},
+                        css_class="docx-input",
+                        placeholder="Enter details...",
+                        value=text,
+                    )
+                    html.append(
+                        f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
+                        f"{inp}</td>"
                     )
             else:
                 style = _inline_cell_style(cell_style, readonly=readonly)
                 html.append(
-                    f'<td class="docx-cell" style="{style}"{rowspan_attr}>'
+                    f'<td class="docx-cell" style="{style}"{rowspan_attr}{colspan_attr}>'
                     f"{_escape_html(text)}</td>"
                 )
 
@@ -1746,6 +1929,35 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
             rendered = _render_paragraph(para_index, para_text, field, field_map, mode)
             if rendered:
                 html_parts.append(rendered)
+
+        elif tag == "sdt":
+            # Word Structured Document Tag (Table of Contents)
+            W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            sdt_paras = child.findall(f".//{{{W_NS}}}p")
+            if sdt_paras:
+                toc_lines = []
+                for sp in sdt_paras:
+                    p_text = _para_text_from_element(sp)
+                    if p_text and p_text.strip():
+                        toc_lines.append(p_text.strip())
+                if toc_lines:
+                    html_parts.append(
+                        '<div class="docx-toc-card" style="margin: 16px 0; padding: 14px 18px; '
+                        'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-family: inherit;">'
+                    )
+                    html_parts.append(
+                        '<div style="font-weight: 700; font-size: 13px; color: #475569; '
+                        'margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px;">'
+                        '📋 Table of Contents</div>'
+                    )
+                    for line in toc_lines:
+                        html_parts.append(
+                            f'<div class="docx-toc-line" style="display: flex; justify-content: space-between; '
+                            f'padding: 3px 0; font-size: 13px; color: #334155; border-bottom: 1px dotted #e2e8f0;">'
+                            f'<span>{_escape_html(line)}</span>'
+                            f'</div>'
+                        )
+                    html_parts.append('</div>')
 
     html_parts.append("</div>")
     return "\n".join(html_parts)

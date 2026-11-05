@@ -439,9 +439,35 @@ def dedupe_colon_label(text: str) -> str:
     return t
 
 
+def dedupe_repeated_text(text: str) -> str:
+    """
+    If a sentence or clause is repeated multiple times back-to-back,
+    deduplicate it down to a single instance.
+    E.g.: 'Responsibilities of different department/ personnel... Responsibilities of different department/ personnel...'
+    """
+    if not text or not isinstance(text, str):
+        return text
+    s = text.strip()
+    if len(s) < 20:
+        return text
+    pattern = re.compile(r"^(.{15,}?[.:\n])(?:\s*\1)+$", re.DOTALL | re.IGNORECASE)
+    m = pattern.match(s)
+    if m:
+        return m.group(1).strip()
+    for chunk_len in range(20, len(s) // 2 + 1):
+        chunk = s[:chunk_len].strip()
+        if len(chunk) > 20 and s.startswith(chunk):
+            remainder = s[chunk_len:].strip()
+            if remainder.startswith(chunk):
+                parts = [p.strip() for p in s.split(chunk) if p.strip()]
+                if not parts or all(p in (':', '') for p in parts):
+                    return chunk
+    return text
+
+
 def _append_paragraph_blank_field(result: dict, para_index: int, text: str) -> None:
     """Register a body paragraph colon/underscore blank (e.g. EFFECTIVE DATE:)."""
-    normalized = dedupe_colon_label(text)
+    normalized = dedupe_colon_label(dedupe_repeated_text(text))
     display_label = re.sub(r":\s*$", "", normalized).strip() or normalized
     entry = {
         "label": display_label[:60],
@@ -514,7 +540,13 @@ def has_paragraph_blank(text: str) -> bool:
     normalized = dedupe_colon_label(text)
     if find_paragraph_blanks(normalized):
         return True
-    return bool(PARA_COLON_BLANK_RE.search(normalized.strip()))
+    # Colon blank only applies to short field labels (e.g. "Model No.:", "Effective Date:"),
+    # not full descriptive sentences like "Responsibilities of ... are defined below:".
+    if PARA_COLON_BLANK_RE.search(normalized.strip()):
+        cleaned = re.sub(r":\s*$", "", normalized).strip()
+        if len(cleaned) < 50 and len(cleaned.split()) <= 6:
+            return True
+    return False
 
 
 # True when table cell text matches Yes/No checkbox patterns.
@@ -1273,7 +1305,7 @@ def resolve_signature_approver_role(table_header: str, row_label: str) -> str | 
         return None
     if "approved by" in th:
         if "validation" in rl or "user" in rl:
-            return "post_checked_by_validation_name"
+            return "approved_by_user_name"
         if "quality" in rl or "assurance" in rl:
             return "post_approved_by_quality_name"
     if "quality" in rl and "assurance" in rl:
@@ -1326,9 +1358,7 @@ _LOCKED_SECTION_TITLES_EXACT = {
     "qualification history",
 }
 # Longer lead-in sentences that are still headings, not fill lines.
-_LOCKED_SECTION_TITLE_LONG_PREFIXES = (
-    "responsibilities of different department",
-)
+_LOCKED_SECTION_TITLE_LONG_PREFIXES = ()
 _LOCKED_SECTION_TITLE_PREFIXES = (
     "type of qualification",
     "equipment / system details",
@@ -1621,6 +1651,8 @@ def parse_docx(file_path: str) -> dict:
                                 "widget": "textarea",
                             })
                 else:
+                    if row_index == 0:
+                        continue
                     label = dedupe_colon_label(cells[0].text.strip())
                     value = cells[1].text.strip()
                     value_is_duplicate_label = (
@@ -1630,12 +1662,31 @@ def parse_docx(file_path: str) -> dict:
                     )
 
                     if label:
-                        # Lock when value has content unless it is a duplicate label or empty date field.
+                        # Col 0 (parameter / label, e.g. Tag. No., Plant / Module, MOC)
+                        # Editable in Pre-Approval mode; locked in Post-Approval mode.
+                        result["fillable_fields"].append({
+                            "label": label,
+                            "value": label,
+                            "locked": True,
+                            "type": "table_2col_label",
+                            "location": f"table_{table_index}_row_{row_index}_col_0",
+                            "widget": "text",
+                        })
+
+                        # Col 1 (value / description)
                         locked = len(value) > 1 and not value_is_duplicate_label
                         if is_date_field_label(label) and (not value or value_is_duplicate_label):
                             locked = False
                         if label.lower() in skip_toc_labels:
                             locked = True
+                        result["fillable_fields"].append({
+                            "label": label,
+                            "value": "" if value_is_duplicate_label else value,
+                            "locked": locked,
+                            "type": "table_2col",
+                            "location": f"table_{table_index}_row_{row_index}_col_1",
+                            "widget": infer_field_widget(label, "table_2col"),
+                        })
                         result["fillable_fields"].append({
                             "label": label,
                             "value": "" if value_is_duplicate_label else value,
@@ -1923,7 +1974,7 @@ def parse_docx(file_path: str) -> dict:
 
     for para_index, para in enumerate(doc.paragraphs):
         if para_index in textbox_parent_paras:
-            outside_text = para.text.strip() or para_texts.get(para_index, "")
+            outside_text = dedupe_repeated_text(para.text.strip() or para_texts.get(para_index, ""))
             if outside_text and is_section_heading_paragraph(outside_text):
                 result["paragraphs"].append({
                     "para_index": para_index,
@@ -1944,7 +1995,7 @@ def parse_docx(file_path: str) -> dict:
                 })
             continue
 
-        text = para_texts.get(para_index, para.text.strip())
+        text = dedupe_repeated_text(para_texts.get(para_index, para.text.strip()))
 
         if not text:
             continue
@@ -2047,6 +2098,15 @@ def parse_docx(file_path: str) -> dict:
                 "template_text": text,
                 "blank_count": 0,
                 "locked": True,
+            })
+            # Also register as a fillable paragraph content field so pre-approval creators can edit it
+            result["fillable_fields"].append({
+                "label": text[:60],
+                "value": text,
+                "locked": True,
+                "type": "paragraph_content",
+                "location": f"para_{para_index}",
+                "widget": "textarea",
             })
 
     # Final pass: lock entire signature rows that were pre-stamped in the template DOCX.

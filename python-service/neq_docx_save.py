@@ -1276,7 +1276,9 @@ def _resolve_table_for_op(doc: Document, tables: list, op: dict) -> Table | None
     table: Table | None = None
     try:
         ti = int(table_index)
-        if 0 <= ti < len(tables):
+        if hasattr(doc, "tables") and 0 <= ti < len(doc.tables):
+            table = doc.tables[ti]
+        elif 0 <= ti < len(tables):
             table = tables[ti]
     except (TypeError, ValueError):
         table = None
@@ -1289,6 +1291,18 @@ def _resolve_table_for_op(doc: Document, tables: list, op: dict) -> Table | None
         if found is not None:
             return found
         return table
+    # Prefer table at table_index if its top rows match headers
+    if table is not None and headers:
+        want = [_normalize_preview_text(str(h or "")).lower() for h in headers if str(h or "").strip()]
+        want = [h for h in want if h]
+        if want:
+            for row in table.rows[:3]:
+                have = [_normalize_preview_text(c.text).lower() for c in _unique_row_cells(row)]
+                have = [h for h in have if h]
+                matches = sum(1 for w in want if any(w in h or h in w for h in have))
+                if matches >= min(len(want), 2):
+                    return table
+
     if headers:
         found, _hdr = _find_table_and_header_row(doc, headers)
         if found is not None:

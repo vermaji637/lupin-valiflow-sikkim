@@ -287,4 +287,12 @@ class Report extends Model
 
         return trim((string) ($this->template->name ?? $this->template->title ?? ''));
     }
+
+    /**
+     * Check if report belongs to Requalification or Revalidation flow.
+     */
+    public function isRequalification(): bool
+    {
+        return in_array($this->import_source, ['requalification', 'revalidation'], true);
+    }
 }

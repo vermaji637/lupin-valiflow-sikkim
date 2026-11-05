@@ -268,6 +268,9 @@ Route::middleware(['auth'])->group(function () {
         ->name('reports.docx-import.draft')
         ->where(['report' => '[0-9]+']);
     Route::post('/reports/{report}/docx-import/fill', [DocxImportController::class, 'fill'])->name('reports.docx-import.fill');
+    Route::post('/reports/{report}/docx-import/recall-pre', [DocxImportController::class, 'recallRequalificationPreApproval'])
+        ->name('reports.docx-import.recall-pre')
+        ->where(['report' => '[0-9]+']);
     Route::get('/reports/{report}/preview-html', [DocxImportController::class, 'fetchPreviewHtml'])
         ->name('reports.preview-html');
     Route::get('/reports/{report}/docx-import/download-pdf', [DocxImportController::class, 'downloadFilledPdf'])

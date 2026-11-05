@@ -16,4 +16,4 @@ Start-Sleep -Seconds 1
 
 Set-Location $PSScriptRoot
 Write-Host "Starting uvicorn on http://127.0.0.1:$port ..."
-& .\venv\Scripts\uvicorn.exe app:app --host 127.0.0.1 --port $port --reload
+& .\venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port $port --reload

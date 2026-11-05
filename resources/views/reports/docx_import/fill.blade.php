@@ -9,8 +9,8 @@
  * Selectors below use #docxFillForm + input[type="text"] for higher specificity.
  */
 
-/* E-Sign stays in the top-right corner while the form scrolls. */
-#docxEsignDock {
+/* Floating Action Dock (E-Sign & Table Row Controls) stays in top-right corner while scrolling */
+#docxFloatingActionsContainer {
     position: fixed !important;
     top: 112px;
     right: 22px;
@@ -18,8 +18,79 @@
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 8px;
+    gap: 10px;
     margin: 0;
+    pointer-events: none;
+}
+#docxFloatingActionsContainer .btn,
+#docxFloatingActionsContainer #docxEsignStatus,
+#docxFloatingActionsContainer #docxRowSelectionBadge {
+    pointer-events: auto;
+}
+
+#docxTableToolbarDock {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    pointer-events: none;
+}
+#docxTableToolbarDock .btn-group {
+    pointer-events: auto;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22) !important;
+    border-radius: 8px;
+    overflow: hidden;
+}
+#docxTableToolbarDock #btnDocxAddRow {
+    background: #4e73df;
+    border: 1px solid #3b60cc;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+#docxTableToolbarDock #btnDocxAddRow:hover {
+    background: #2e59d9;
+    border-color: #2653d4;
+    transform: translateY(-1px);
+}
+#docxTableToolbarDock #btnDocxDeleteRow {
+    background: #ffffff;
+    border: 1px solid #ea868f;
+    color: #e74a3b;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+#docxTableToolbarDock #btnDocxDeleteRow:hover {
+    background: #e74a3b;
+    border-color: #e74a3b;
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+#docxTableToolbarDock #docxRowSelectionBadge {
+    pointer-events: auto;
+    background: #ffffff;
+    color: #334155;
+    border: 1px solid #c5d0e6;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+    border-radius: 6px;
+    max-width: 260px;
+    white-space: normal;
+    text-align: right;
+    line-height: 1.35;
+    font-size: 11px;
+}
+
+#docxEsignDock {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
     pointer-events: none;
 }
 #docxEsignDock #btnEsignStamp,
@@ -156,7 +227,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper table.header-table input[ty
 body.premium-app #docxFillForm .docx-preview-wrapper input[type="text"].docx-input:focus,
 body.premium-app #docxFillForm .docx-preview-wrapper input[type="text"].docx-input-inline:focus,
 body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-input:focus {
-    background-color: #e8f0fe !important;
+    background-color: #fff9c4 !important;
     border: none !important;
     border-bottom: 2px solid #224abe !important;
     box-shadow: none !important;
@@ -205,6 +276,49 @@ body.premium-app #docxFillForm .docx-preview-wrapper .docx-para {
 body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-input {
     min-height: 72px !important;
     resize: vertical;
+}
+
+body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-para-content {
+    min-height: 48px !important;
+    width: 100% !important;
+    background-color: #fffde7 !important;
+    background-image: none !important;
+    border: 1px solid #facc15 !important;
+    border-bottom: 2px solid #4e73df !important;
+    border-radius: 4px !important;
+    padding: 8px 10px !important;
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+    color: #1e293b !important;
+    font-family: inherit !important;
+    box-sizing: border-box !important;
+    transition: border-color 0.15s, box-shadow 0.15s !important;
+}
+
+body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-para-content:focus {
+    background-color: #fff9c4 !important;
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
+    outline: none !important;
+}
+
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
+
+body.premium-app #docxFillForm .docx-preview-wrapper th.docx-table-header {
+    background-color: #f1f5f9 !important;
+    color: #1e293b !important;
+    font-weight: 700 !important;
+    text-transform: none;
+    letter-spacing: 0.3px;
+    border: 1px solid #cbd5e1 !important;
+    padding: 8px 10px !important;
 }
 
 /* Date inputs: keep native calendar picker (do NOT use appearance:none) */
@@ -302,19 +416,41 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
 #docxFillForm.requal-fill-locked .requal-locked-block {
     pointer-events: none;
 }
+.docx-preview-wrapper table.docx-table tr.docx-selected-row td {
+    background-color: #e8f0fe !important;
+    outline: 2px solid #4e73df;
+}
 </style>
 @endpush
 
 @section('content')
-@if(($importSource ?? '') === 'requalification' && empty($requalFillLocked))
-<div id="docxEsignDock" aria-label="E-Sign">
-    <button type="button" class="btn btn-light" id="btnEsignStamp"
-            title="Click a cell, then stamp your name and today's date">
-        <i class="fas fa-signature mr-1"></i> E-Sign
-    </button>
-    <span id="docxEsignStatus" class="badge badge-light text-secondary px-3 py-2" style="display:none;"></span>
+<div id="docxFloatingActionsContainer" aria-label="Floating Actions">
+    @if(!empty($isPreApprovalMode) && (int)($report->created_by ?? 0) === (int)auth()->id())
+        <div id="docxTableToolbarDock" aria-label="Table Row Controls">
+            <div class="btn-group shadow" role="group">
+                <button type="button" class="btn btn-primary" id="btnDocxAddRow" title="Add a new row below the selected row">
+                    <i class="fas fa-plus mr-1"></i> Add Row
+                </button>
+                <button type="button" class="btn btn-outline-danger" id="btnDocxDeleteRow" title="Delete the selected row">
+                    <i class="fas fa-trash-alt mr-1"></i> Delete Row
+                </button>
+            </div>
+            <div id="docxRowSelectionBadge" class="badge badge-light px-2 py-1">
+                <span id="selectedRowInfo"><i class="fas fa-mouse-pointer text-primary mr-1"></i> Click row to Add/Delete</span>
+            </div>
+        </div>
+    @endif
+
+    @if(($importSource ?? '') === 'requalification' && empty($requalFillLocked))
+        <div id="docxEsignDock" aria-label="E-Sign">
+            <button type="button" class="btn btn-light" id="btnEsignStamp"
+                    title="Click a cell, then stamp your name and today's date">
+                <i class="fas fa-signature mr-1"></i> E-Sign
+            </button>
+            <span id="docxEsignStatus" class="badge badge-light text-secondary px-3 py-2" style="display:none;"></span>
+        </div>
+    @endif
 </div>
-@endif
 <div class="container-fluid py-4">
     <div class="row justify-content-center">
         <div class="col-lg-11 col-xl-10">
@@ -334,8 +470,12 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                 {{ ($importSourceSectionTitle ?? '') !== '' ? $importSourceSectionTitle : 'Fill DOCX Fields' }}
                             </h5>
                             <p class="mb-0 text-white-50 small mt-1">
-                                @if(!empty($requalFillLocked))
-                                    Pre-approval first. The document and Fill with DOCX stay locked until every pre-approver has approved.
+                                @if(!empty($isPreApprovalMode))
+                                    Pre-Approval Drafting: All protocol descriptions, specifications, and acceptance criteria are editable. Use "+ Add Row" and "Delete Row" to customize tables before sending for Pre-Approval.
+                                @elseif(!empty($requalFillLocked))
+                                    Pre-approval in progress. The document stays locked until every pre-approver has approved.
+                                @elseif(in_array(($importSource ?? ''), ['requalification', 'revalidation'], true) && ($report->status ?? '') === 'pre_approved')
+                                    Pre-approval complete! Protocol structure is locked. Fill observed values, pass/fail results, and submit for Post-Approval.
                                 @elseif(($importSource ?? '') === 'new_equipment_qualification')
                                     Fill New Equipment Qualification — empty cells are editable; pre-approved content stays locked.
                                 @elseif(!empty($useTablePreview))
@@ -352,11 +492,6 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                     <i class="fas fa-cloud-upload-alt mr-1"></i> Draft saved {{ $draftSavedAt }}
                                 @endif
                             </span>
-                            {{-- Save is automatic, so the button stays hidden.
-                            <button type="button" class="btn btn-light shadow-sm mr-2" id="btnSaveDraft">
-                                <i class="fas fa-save mr-1"></i> Save
-                            </button>
-                            --}}
                             <span class="badge badge-light px-3 py-2 text-primary shadow-sm font-weight-bold">
                                 {{ count($fields) }} Total Fields
                             </span>
@@ -364,9 +499,10 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                     </div>
                 </div>
 
-                <form action="{{ route('reports.docx-import.fill', $report) }}" method="POST" id="docxFillForm" class="esign-required {{ !empty($requalFillLocked) ? 'requal-fill-locked' : '' }}" enctype="multipart/form-data">
+                <form action="{{ route('reports.docx-import.fill', $report) }}" method="POST" id="docxFillForm" class="esign-required {{ (!empty($requalFillLocked) && empty($isPreApprovalMode)) ? 'requal-fill-locked' : '' }}" enctype="multipart/form-data">
                     @csrf
                     <input type="hidden" name="password">
+                    <input type="hidden" name="table_ops" id="docxTableOpsInput" value="[]">
                     {{-- Hidden header cell values synced from  and table inputs --}}
                     <input type="hidden" name="fields[header_0_row_2_col_2]" id="header_facility_hidden"
                            value="{{ old('fields.header_0_row_2_col_2', $facilitySection) }}">
@@ -390,9 +526,9 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                             </div>
                         @endif
 
-                        @if(($importSource ?? '') === 'requalification' && ($report->status ?? '') === 'pre_approved')
+                        @if(in_array(($importSource ?? ''), ['requalification', 'revalidation'], true) && ($report->status ?? '') === 'pre_approved')
                             <div class="alert alert-success">
-                                Pre-approval is complete. Fill the document. Fill with DOCX is now available.
+                                <i class="fas fa-check-circle mr-1"></i> Pre-approval is complete! All template specifications and acceptance criteria are now locked. Please fill the execution results below and submit for Post-Approval.
                             </div>
                         @endif
 
@@ -400,9 +536,9 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                             <div class="card mb-4 border" id="requalPreApprovalCard">
                                 <div class="card-header font-weight-bold">Pre Approval</div>
                                 <div class="card-body">
-                                    @if(!empty($requalPreEditable))
+                                    @if(!empty($requalPreEditable) || !empty($isPreApprovalMode))
                                         <p class="mb-3">
-                                            Select all seven pre-approval users in the order shown. Approval goes to each person one by one. The document and Fill with DOCX stay locked until every one has approved.
+                                            Select all seven pre-approval users in the order shown. Approval goes to each person one by one. Once approved, the document structure and acceptance criteria will be locked.
                                         </p>
                                         <input type="hidden" name="requal_pre_submit" value="1">
                                     @else
@@ -415,7 +551,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                             <div class="col-md-6 mb-3">
                                                 <label class="form-label font-weight-bold" for="pre_{{ $roleKey }}">{{ $roleTitle }}</label>
                                                 <select class="form-control" id="pre_{{ $roleKey }}" name="{{ $roleKey }}"
-                                                        @if(empty($requalPreEditable)) disabled @else required @endif>
+                                                        @if(empty($requalPreEditable) && empty($isPreApprovalMode)) disabled @else required @endif>
                                                     <option value="">-- Select User --</option>
                                                     @foreach($users as $user)
                                                         <option value="{{ $user->id }}"
@@ -588,6 +724,17 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                             </div>
                         @endif
 
+                        @if(!empty($isPreApprovalMode))
+                            <div class="alert alert-primary py-2 px-3 mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                <div class="d-flex align-items-center">
+                                    <span class="badge badge-primary mr-2"><i class="fas fa-edit mr-1"></i> Pre-Approval Drafting Mode</span>
+                                    <span class="small font-weight-bold text-dark">
+                                        All protocol descriptions, specifications, and acceptance criteria are editable. Use the floating <span class="badge badge-primary px-2 py-1"><i class="fas fa-plus"></i> Add Row</span> and <span class="badge badge-danger px-2 py-1"><i class="fas fa-trash-alt"></i> Delete Row</span> buttons on the top-right to customize tables.
+                                    </span>
+                                </div>
+                            </div>
+                        @endif
+
                         {{-- Primary UI: Python-rendered DOCX table with inline editable cells --}}
                         @if(!empty($useTablePreview))
                             @php
@@ -751,12 +898,12 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                             <i class="fas fa-times mr-1"></i> Cancel
                         </a>
                         --}}
-                        @if(!empty($requalFillLocked) && !empty($requalPreEditable))
+                        @if(!empty($requalFillLocked) && !empty($requalPreEditable) && (int)($report->created_by ?? 0) === (int)auth()->id())
                             <button type="submit" class="btn btn-primary shadow-sm" id="btnSubmit">
                                 <i class="fas fa-user-check mr-1"></i>
                                 <span id="btnText">Send for Pre Approval</span>
                             </button>
-                        @elseif(empty($requalFillLocked) && count($fields) > 0)
+                        @elseif(empty($requalFillLocked) && count($fields) > 0 && (int)($report->created_by ?? 0) === (int)auth()->id())
                             <button type="submit" class="btn btn-primary shadow-sm" id="btnSubmit">
                                 <i class="fas fa-file-export mr-1"></i>
                                 <span id="btnText">Generate & Submit for Post Approval</span>
@@ -775,14 +922,237 @@ document.addEventListener('DOMContentLoaded', function () {
     const btnSubmit = document.getElementById('btnSubmit');
     const btnText   = document.getElementById('btnText');
     const requalFillLocked = @json(!empty($requalFillLocked));
+    const isPreApprovalMode = @json(!empty($isPreApprovalMode));
 
-    if (requalFillLocked && form) {
+    if (requalFillLocked && !isPreApprovalMode && form) {
         form.querySelectorAll('.docx-preview-wrapper input, .docx-preview-wrapper select, .docx-preview-wrapper textarea, .requal-locked-block input, .requal-locked-block select, .requal-locked-block textarea').forEach(function (el) {
             el.disabled = true;
         });
         form.querySelectorAll('.docx-preview-wrapper [contenteditable="true"]').forEach(function (el) {
             el.setAttribute('contenteditable', 'false');
         });
+    }
+
+    let tableOps = [];
+    let selectedRow = null;
+    let selectedTable = null;
+
+    if (isPreApprovalMode) {
+        const rowInfo = document.getElementById('selectedRowInfo');
+        const btnAddRow = document.getElementById('btnDocxAddRow');
+        const btnDeleteRow = document.getElementById('btnDocxDeleteRow');
+        const tableOpsInput = document.getElementById('docxTableOpsInput');
+
+        // Row selection on cell click inside preview tables
+        document.addEventListener('click', function (e) {
+            const cell = e.target.closest('.docx-preview-wrapper table.docx-table:not(.header-table) td, .docx-preview-wrapper table.docx-table:not(.header-table) th');
+            if (!cell) return;
+            const row = cell.closest('tr');
+            if (!row) return;
+
+            document.querySelectorAll('.docx-preview-wrapper table.docx-table tr.docx-selected-row').forEach(function (r) {
+                r.classList.remove('docx-selected-row');
+            });
+
+            row.classList.add('docx-selected-row');
+            selectedRow = row;
+            selectedTable = row.closest('table');
+
+            if (rowInfo) {
+                const tIdx = selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable);
+                const rIdx = selectedRow.getAttribute('data-row-index') || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow);
+                rowInfo.innerHTML = '<span class="text-primary font-weight-bold">Selected Table ' + (parseInt(tIdx) + 1) + ', Row ' + (parseInt(rIdx) + 1) + '</span> — Ready to Add or Delete.';
+            }
+        });
+
+        // Add Row
+        if (btnAddRow) {
+            btnAddRow.addEventListener('click', function () {
+                if (!selectedTable || !selectedRow) {
+                    const firstTable = document.querySelector('.docx-preview-wrapper table.docx-table:not(.header-table)');
+                    if (!firstTable) {
+                        alert('No editable table found in document.');
+                        return;
+                    }
+                    const rows = firstTable.querySelectorAll('tr');
+                    selectedTable = firstTable;
+                    selectedRow = rows[rows.length - 1];
+                    selectedRow.classList.add('docx-selected-row');
+                }
+
+                let templateRow = selectedRow;
+                if (Array.from(selectedTable.querySelectorAll('tr')).indexOf(templateRow) === 0) {
+                    const allRows = selectedTable.querySelectorAll('tr');
+                    if (allRows.length > 1) {
+                        templateRow = allRows[1];
+                    }
+                }
+
+                const newRow = templateRow.cloneNode(true);
+                newRow.classList.remove('docx-selected-row');
+                newRow.setAttribute('data-is-added-row', '1');
+
+                // Clear input values in cloned row
+                newRow.querySelectorAll('input[type="text"], textarea').forEach(function (inp) {
+                    inp.value = '';
+                    inp.name = 'fields[new_row_' + Math.random().toString(36).substring(2, 9) + ']';
+                    inp.removeAttribute('readonly');
+                    inp.disabled = false;
+                });
+                newRow.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(function (chk) {
+                    chk.checked = false;
+                });
+                newRow.querySelectorAll('select').forEach(function (sel) {
+                    sel.selectedIndex = 0;
+                    sel.disabled = false;
+                });
+                newRow.querySelectorAll('.locked').forEach(function (el) {
+                    el.classList.remove('locked');
+                    el.classList.add('editable');
+                });
+                newRow.querySelectorAll('td').forEach(function (td) {
+                    if (!td.querySelector('input, textarea, select')) {
+                        td.innerHTML = '<input type="text" class="docx-input" value="">';
+                        td.classList.add('editable');
+                    }
+                });
+
+                // Insert after currently selected row
+                selectedRow.after(newRow);
+
+                const tIdx = parseInt(selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable));
+                const afterRow = parseInt(selectedRow.getAttribute('data-row-index') || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow));
+                const headers = Array.from(selectedTable.querySelectorAll('tr:first-child td, tr:first-child th')).map(function (th) {
+                    return th.textContent.trim();
+                });
+
+                tableOps.push({
+                    op: 'insert',
+                    table: tIdx,
+                    after_row: afterRow,
+                    headers: headers,
+                    _rowEl: newRow
+                });
+
+                // Move selection to newly added row
+                document.querySelectorAll('.docx-preview-wrapper table.docx-table tr.docx-selected-row').forEach(function (r) {
+                    r.classList.remove('docx-selected-row');
+                });
+                newRow.classList.add('docx-selected-row');
+                selectedRow = newRow;
+
+                syncTableOpsInput();
+
+                if (rowInfo) {
+                    rowInfo.innerHTML = '<span class="text-success font-weight-bold">Row Added!</span> Type text into the new cells.';
+                }
+                const firstInput = newRow.querySelector('input, textarea');
+                if (firstInput) firstInput.focus();
+            });
+        }
+
+        // Delete Row
+        if (btnDeleteRow) {
+            btnDeleteRow.addEventListener('click', function () {
+                if (!selectedTable || !selectedRow) {
+                    alert('Please click on a row inside a table first to select it.');
+                    return;
+                }
+                if (Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow) === 0) {
+                    alert('Cannot delete the table header row.');
+                    return;
+                }
+                if (selectedRow.querySelector('td[colspan]') && selectedRow.querySelectorAll('td').length === 1) {
+                    alert('Cannot delete a section banner row.');
+                    return;
+                }
+                if (selectedTable.querySelectorAll('tr').length <= 2) {
+                    alert('Cannot delete the last remaining data row of this table.');
+                    return;
+                }
+
+                if (!confirm('Are you sure you want to delete this row?')) {
+                    return;
+                }
+
+                if (selectedRow.getAttribute('data-is-added-row') === '1') {
+                    tableOps = tableOps.filter(function (op) {
+                        return op._rowEl !== selectedRow;
+                    });
+                    selectedRow.remove();
+                } else {
+                    const tIdx = parseInt(selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable));
+                    const rIdx = parseInt(selectedRow.getAttribute('data-row-index') || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow));
+                    const headers = Array.from(selectedTable.querySelectorAll('tr:first-child td, tr:first-child th')).map(function (th) {
+                        return th.textContent.trim();
+                    });
+
+                    tableOps.push({
+                        op: 'delete',
+                        table: tIdx,
+                        row: rIdx,
+                        headers: headers
+                    });
+                    selectedRow.remove();
+                }
+
+                selectedRow = null;
+                selectedTable = null;
+                syncTableOpsInput();
+                if (rowInfo) {
+                    rowInfo.textContent = 'Row deleted. Click any cell to select another row.';
+                }
+            });
+        }
+
+        function syncTableOpsInput() {
+            if (!tableOpsInput) return;
+            const serialized = tableOps.map(function (op) {
+                if (op.op === 'insert') {
+                    const values = op._rowEl
+                        ? Array.from(op._rowEl.querySelectorAll('td')).map(function (td) {
+                            const inp = td.querySelector('input, textarea, select');
+                            return inp ? (inp.value || '').trim() : td.textContent.trim();
+                        })
+                        : (op.values || []);
+                    return {
+                        op: 'insert',
+                        table: op.table,
+                        after_row: op.after_row,
+                        headers: op.headers,
+                        values: values
+                    };
+                }
+                return {
+                    op: op.op,
+                    table: op.table,
+                    row: op.row,
+                    headers: op.headers
+                };
+            });
+            tableOpsInput.value = JSON.stringify(serialized);
+        }
+
+        window.syncDocxTableOps = syncTableOpsInput;
+
+        // Keep tableOps continuously synced as user edits cells
+        document.addEventListener('input', function (e) {
+            if (e.target && e.target.closest('.docx-preview-wrapper')) {
+                syncTableOpsInput();
+            }
+        });
+
+        // Collect tableOps values before form submit
+        if (form) {
+            form.addEventListener('submit', function () {
+                syncTableOpsInput();
+            });
+        }
+        if (btnSubmit) {
+            btnSubmit.addEventListener('click', function () {
+                syncTableOpsInput();
+            });
+        }
     }
 
     /** Active users for signature-table approver dropdowns (same labels as fill_docx.blade.php). */
@@ -884,11 +1254,131 @@ document.addEventListener('DOMContentLoaded', function () {
         return '';
     };
 
+    const preApproverRoles = [
+        'prepared_by_engineering_name',
+        'checked_by_engineering_name',
+        'checked_by_production_name',
+        'checked_by_validation_name',
+        'checked_by_quality_name',
+        'approved_by_user_name',
+        'approved_by_quality_name'
+    ];
+
+    /**
+     * Synchronize the 7 Pre-Approval dropdowns in the top card (#pre_{roleKey})
+     * with the 7 signature dropdowns in the document preview table (PRE APPROVAL SIGNATURE).
+     * Any selection in either dropdown automatically updates the other and sets the hidden name field.
+     */
+    const setupPreApproverSync = function () {
+        const firstCardSelect = document.getElementById('pre_prepared_by_engineering_name');
+        const preCard = document.getElementById('requalPreApprovalCard');
+        if (!firstCardSelect && !preCard) {
+            return;
+        }
+
+        const allPreviewApprovers = Array.from(
+            document.querySelectorAll('.docx-preview-wrapper select.approver-field')
+        );
+
+        preApproverRoles.forEach(function (roleKey, idx) {
+            const cardSelect = document.getElementById('pre_' + roleKey);
+
+            // Find matching preview select: by data-approver-role first, else by index among preview approvers
+            let previewSelect = document.querySelector(
+                '.docx-preview-wrapper select.approver-field[data-approver-role="' + roleKey + '"]'
+            );
+            if (!previewSelect && idx < allPreviewApprovers.length) {
+                previewSelect = allPreviewApprovers[idx];
+            }
+
+            if (!previewSelect) return;
+
+            previewSelect.dataset.approverRole = roleKey;
+            previewSelect.dataset.isPreApprover = '1';
+            previewSelect.dataset.hydrated = '1';
+            previewSelect.removeAttribute('required');
+            previewSelect.required = false;
+
+            // Populate options from docxUsers if not populated
+            if (previewSelect.options.length <= 1) {
+                previewSelect.innerHTML = '<option value="">-- Select User --</option>';
+                docxUsers.forEach(function (user) {
+                    const opt = document.createElement('option');
+                    opt.value = user.id;
+                    opt.textContent = user.label;
+                    previewSelect.appendChild(opt);
+                });
+            }
+
+            const fieldLoc = previewSelect.dataset.fieldLocation || '';
+            const nameHidden = fieldLoc
+                ? document.querySelector('input.approver-name-field[data-field-location="' + fieldLoc + '"]')
+                : null;
+            if (nameHidden) {
+                nameHidden.dataset.isPreApprover = '1';
+                nameHidden.dataset.approverRole = roleKey;
+            }
+
+            const updateHiddenName = function (userId) {
+                if (!nameHidden) return;
+                const selUser = docxUsers.find(function (u) { return String(u.id) === String(userId); });
+                nameHidden.value = selUser ? selUser.label : '';
+            };
+
+            // Initial sync: cardSelect value > previewSelect data-user-id > previewSelect value
+            let initialUserId = '';
+            if (cardSelect && cardSelect.value) {
+                initialUserId = cardSelect.value;
+            } else if (previewSelect.dataset.userId) {
+                initialUserId = previewSelect.dataset.userId;
+            } else if (previewSelect.value) {
+                initialUserId = previewSelect.value;
+            }
+
+            if (initialUserId) {
+                previewSelect.value = String(initialUserId);
+                if (cardSelect && String(cardSelect.value) !== String(initialUserId)) {
+                    cardSelect.value = String(initialUserId);
+                }
+                updateHiddenName(initialUserId);
+            }
+
+            // Sync Card -> Preview Table
+            if (cardSelect) {
+                cardSelect.addEventListener('change', function () {
+                    const val = cardSelect.value;
+                    if (previewSelect.value !== val) {
+                        previewSelect.value = val;
+                        updateHiddenName(val);
+                        previewSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                });
+            }
+
+            // Sync Preview Table -> Card
+            previewSelect.addEventListener('change', function () {
+                const val = previewSelect.value;
+                if (cardSelect && cardSelect.value !== val) {
+                    cardSelect.value = val;
+                    cardSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                updateHiddenName(val);
+            });
+        });
+    };
+
     /** Hydrate signature-table approver placeholders with user options from DB. */
     const hydrateApproverFields = function () {
         document.querySelectorAll('select.approver-field').forEach(function (sel) {
+            if (sel.dataset.isPreApprover === '1') return;
             if (sel.dataset.hydrated === '1') return;
             sel.dataset.hydrated = '1';
+
+            // Post-approval selects must never be required during pre-approval mode
+            if (isPreApprovalMode || document.querySelector('input[name="requal_pre_submit"]')) {
+                sel.removeAttribute('required');
+                sel.required = false;
+            }
 
             let role = sel.dataset.approverRole || '';
             if (!role) {
@@ -1032,6 +1522,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
+    setupPreApproverSync();
     hydrateApproverFields();
     ensureAttachmentFileInputs();
     prepareDateTimeInputs(false);
@@ -1039,14 +1530,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (form && btnSubmit) {
         form.addEventListener('submit', function () {
-            if (form.querySelector('input[name="requal_pre_submit"]')) {
-                btnSubmit.disabled = true;
-                if (btnText) btnText.innerText = 'Sending for pre-approval...';
-                return;
+            if (window.syncDocxTableOps) {
+                window.syncDocxTableOps();
             }
             document.querySelectorAll('select.approver-field').forEach(function (sel) {
                 sel.dispatchEvent(new Event('change'));
             });
+
+            if (form.querySelector('input[name="requal_pre_submit"]')) {
+                document.querySelectorAll('.docx-preview-wrapper select.approver-field').forEach(function (sel) {
+                    sel.removeAttribute('required');
+                    sel.required = false;
+                });
+                if (btnText) btnText.innerText = 'Sending for pre-approval...';
+                const icon = btnSubmit.querySelector('i');
+                if (icon) icon.className = 'spinner-border spinner-border-sm mr-1';
+                setTimeout(function () {
+                    btnSubmit.disabled = true;
+                }, 10);
+                return;
+            }
             btnSubmit.disabled = true;
             if (btnText) btnText.innerText = 'Filling Document, please wait...';
             const icon = btnSubmit.querySelector('i');
@@ -1320,6 +1823,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const hidden = approverHiddenByRole[role];
         if (!hidden || !hidden.value) return;
         document.querySelectorAll('select.approver-field').forEach(function (sel) {
+            if (sel.dataset.isPreApprover === '1') return;
             const selRole = sel.dataset.approverRole
                 || inferApproverRoleFromApprovalPageTable(sel)
                 || inferApproverRoleFromReportApprovalTable(sel)
@@ -1387,7 +1891,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const saveDraftNow = function (opts) {
         opts = opts || {};
-        if (requalFillLocked || !form || finalSubmitting) {
+        if ((requalFillLocked && !isPreApprovalMode) || !form || finalSubmitting) {
             return Promise.resolve(false);
         }
         if (draftSaving) {

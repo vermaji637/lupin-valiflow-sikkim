@@ -172,7 +172,7 @@
                                 {{-- DOCX import: creator fills or re-edits via the same fill form as fresh import --}}
                                 @if($docxNeedsFill && $isCreator)
                                     @php
-                                        $requalPreGate = ($r->import_source ?? '') === 'requalification'
+                                        $requalPreGate = in_array(($r->import_source ?? ''), ['requalification', 'revalidation'], true)
                                             && in_array($r->status, ['pre_setup', 'pre_pending', 'pre_returned'], true)
                                             && $r->stage !== 'post';
                                     @endphp
@@ -183,11 +183,11 @@
                                     @else
                                         <a href="{{ route('reports.docx-import.fill-form', $r) }}" class="btn btn-sm btn-primary">
                                             @if($requalPreGate)
-                                                Select Pre Approvers
+                                                Edit Protocol &amp; Send for Pre-Approval
                                             @elseif($isReturnedForCorrection)
                                                 Edit &amp; Resubmit
                                             @else
-                                                Fill &amp; Submit
+                                                Fill Execution &amp; Submit
                                             @endif
                                         </a>
                                     @endif

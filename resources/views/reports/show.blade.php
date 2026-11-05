@@ -59,7 +59,7 @@
         <h3 class="mb-2 mb-md-0">{{ $report->displayCode() }}</h3>
 
         <div class="d-flex align-items-center flex-wrap">
-            @if(empty($report->docx_import_path))
+            @if(empty($report->docx_import_path) && (int)$report->created_by === (int)auth()->id())
                 <button type="button" class="btn btn-primary btn-icon-split shadow-sm mr-2 mb-2" data-toggle="modal" data-target="#importDocxModal">
                     <span class="icon text-white-50">
                         <i class="fas fa-file-import"></i>
@@ -68,7 +68,7 @@
                 </button>
             @endif
 
-            @if($report->docx_import_status === 'pending' && $report->docx_import_path)
+            @if($report->docx_import_status === 'pending' && $report->docx_import_path && (int)$report->created_by === (int)auth()->id())
                 <a href="{{ route('reports.docx-import.fill-form', $report) }}" class="btn btn-warning btn-icon-split shadow-sm mr-2 mb-2">
                     <span class="icon text-white-50">
                         <i class="fas fa-edit"></i>
@@ -262,6 +262,25 @@
             @endphp
             @if($rejectStep && $rejectStep->remark)
                 <div class="mt-2 mb-0"><strong>Remark:</strong> {{ $rejectStep->remark }}</div>
+            @endif
+        </div>
+    @endif
+
+    {{-- ================= PRE APPROVAL PENDING (CREATOR RECALL) ================= --}}
+    @if($report->status === 'pre_pending' && ($isCreator || (auth()->user() && auth()->user()->isAdmin())))
+        <div class="alert alert-info d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <i class="fas fa-info-circle mr-1"></i>
+                <strong>Pre-approval is in progress.</strong> The document is under review by the pre-approval committee.
+            </div>
+            @if(in_array($report->import_source, ['requalification', 'revalidation'], true) && $isCreator)
+                <form action="{{ route('reports.docx-import.recall-pre', $report) }}" method="POST" class="d-inline mb-0">
+                    @csrf
+                    <button type="submit" class="btn btn-sm btn-outline-warning shadow-sm font-weight-bold"
+                            onclick="return confirm('Recall this protocol back to draft mode to add rows or make edits?');">
+                        <i class="fas fa-undo mr-1"></i> Recall to Edit Draft
+                    </button>
+                </form>
             @endif
         </div>
     @endif

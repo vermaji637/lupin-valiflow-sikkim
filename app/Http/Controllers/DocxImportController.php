@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\Process\Process;
 
 // Orchestrates DOCX import: parse templates via Python, fill fields, stamp POST approvals, and regenerate documents.
 class DocxImportController extends Controller
@@ -218,8 +219,11 @@ class DocxImportController extends Controller
                 $reportData['reference_protocol_no'] = $identity['reference_protocol_no'];
             }
 
-            // Requalification waits for PRE approval before anyone can fill the document.
-            $isRequalification = $importSource === 'requalification';
+            // Requalification and Revalidation wait for PRE approval before anyone can fill post execution details.
+            $requiresPreApproval = in_array($importSource, ['requalification', 'revalidation'], true);
+            if ($requiresPreApproval) {
+                $fields = $this->applyRequalificationPreApprovalUnlockRules($fields);
+            }
             $report = Report::create([
                 'template_id'        => $template->id,
                 'templatedata'       => [],
@@ -234,8 +238,8 @@ class DocxImportController extends Controller
                     ?: ($document->equipment->equipment_name ?? null),
                 'equipment_id'       => $request->input('equipment_id')
                     ?: ($document->equipment->equipment_id ?? null),
-                'stage'              => $isRequalification ? 'pre' : 'post',
-                'status'             => $isRequalification ? 'pre_setup' : 'post_pending',
+                'stage'              => $requiresPreApproval ? 'pre' : 'post',
+                'status'             => $requiresPreApproval ? 'pre_setup' : 'post_pending',
                 'current_step_order' => 0,
                 'created_by'         => auth()->id(),
                 'docx_import_path'   => $fileId,
@@ -257,7 +261,7 @@ class DocxImportController extends Controller
 
             // Warm preview cache with report-level defaults (equipment, cover fields) before redirect.
             $prefilledFields = $this->applyReportPrefills($report, $fields);
-            $this->requestPreviewHtml($fileId, $pythonUrl, $prefilledFields, $report->id);
+            $this->requestPreviewHtml($fileId, $pythonUrl, $prefilledFields, $report->id, $requiresPreApproval ? 'pre_approval' : 'edit');
 
             ProtocolAuditLogger::recordImported($report, $file->getClientOriginalName());
 
@@ -268,8 +272,8 @@ class DocxImportController extends Controller
 
             return redirect()
                 ->route('reports.docx-import.fill-form', $report)
-                ->with('status', $isRequalification
-                    ? 'Document imported. Select the pre-approval users. The document stays locked until pre-approval is complete.'
+                ->with('status', $requiresPreApproval
+                    ? 'Document imported. You can edit content, add/delete table rows, and select pre-approval users.'
                     : 'DOCX imported. Fill blank fields and submit for POST approval.');
 
         } catch (\Throwable $e) {
@@ -3548,7 +3552,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     'original_filename' => $originalFilename,
                     'fields'            => $fieldsToPython,
                     'attachment_links'  => $this->formatAttachmentLinksForPython($attachmentLinks),
-                    'equipment_id'      => $report->import_source === 'requalification'
+                    'equipment_id'      => in_array($report->import_source, ['requalification', 'revalidation'], true)
                         ? (string) ($report->equipment_id ?? '')
                         : '',
                 ]);
@@ -3836,6 +3840,18 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 ->with('error', 'This protocol was rejected and cannot be filled again.');
         }
 
+        if ((int) $report->created_by !== (int) auth()->id()) {
+            return redirect()
+                ->route('reports.show', $report)
+                ->with('info', 'Only the document creator can edit or submit for approval. Approvers can review, approve, send back, or reject on the report page.');
+        }
+
+        if (in_array($report->status, ['pre_pending', 'post_pending'], true)) {
+            return redirect()
+                ->route('reports.show', $report)
+                ->with('info', 'This document is currently pending approval.');
+        }
+
         // Re-apply metadata upgrades on stored fields in case parser rules changed.
         $fields          = $report->docx_import_fields ?? [];
         $fields          = $this->upgradeCommentsTextareaLocations(
@@ -3876,18 +3892,50 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
             }
         }
-        $fields = $this->lockConnectedAccessoriesDescriptions($fields);
-        $fields = $this->lockExistingTableContent($fields);
+
+        $isPreApprovalMode = in_array($report->import_source, ['requalification', 'revalidation'], true)
+            && in_array($report->status, ['pre_setup', 'pre_returned'], true)
+            && $report->stage === 'pre';
+
+        if ($isPreApprovalMode) {
+            $hasParagraphContent = collect($fields)->contains(fn ($f) => is_array($f) && ($f['type'] ?? '') === 'paragraph_content');
+            $hasCol0Fields = collect($fields)->contains(fn ($f) => is_array($f) && str_ends_with((string) ($f['location'] ?? ''), '_col_0'));
+            if ((! $hasParagraphContent || ! $hasCol0Fields) && ! empty($report->docx_import_path)) {
+                $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
+                $reparsed = $this->reparseDocxForReport($report);
+                if (! empty($reparsed)) {
+                    $fields = $reparsed;
+                    $report->docx_import_fields = $fields;
+                    $report->save();
+                }
+            }
+
+            $fields = $this->applyRequalificationPreApprovalUnlockRules($fields);
+            $previewMode = 'pre_approval';
+            $report->docx_import_fields = $fields;
+            $report->save();
+        } else {
+            if (in_array(($report->import_source ?? ''), ['requalification', 'revalidation'], true)) {
+                $fields = $this->applyRequalificationPostPreApprovalLockRules($fields);
+                $previewMode = 'requalification';
+            } else {
+                $fields = $this->lockConnectedAccessoriesDescriptions($fields);
+                $fields = $this->lockExistingTableContent($fields);
+                $previewMode = 'edit';
+            }
+            $report->docx_import_fields = $fields;
+            $report->save();
+        }
 
         $fileId          = $report->docx_import_path;
         $docxTemplateAvailable = $this->attemptAutoRestoreDocxTemplate($report);
         $pythonUrl       = env('PYTHON_NLP_URL', 'http://127.0.0.1:8001');
         // Fetch table-layout HTML from Python /preview; empty result uses flat field list.
-        $previewHtml     = $fileId ? $this->requestPreviewHtml($fileId, $pythonUrl, $fields, $report->id) : '';
+        $previewHtml     = $fileId ? $this->requestPreviewHtml($fileId, $pythonUrl, $fields, $report->id, $previewMode) : '';
 
         if (trim($previewHtml) === '' && $docxTemplateAvailable && $fileId) {
             $this->flushDocxPreviewCache($fileId, $report->id);
-            $previewHtml = $this->requestPreviewHtml($fileId, $pythonUrl, $fields, $report->id);
+            $previewHtml = $this->requestPreviewHtml($fileId, $pythonUrl, $fields, $report->id, $previewMode);
         }
         // Replace attachment cells with download links when files were uploaded earlier.
         if (trim($previewHtml) !== '') {
@@ -4033,7 +4081,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'draftSavedAt',
             'requalFillLocked',
             'requalPreEditable',
-            'draftPreApprovers'
+            'draftPreApprovers',
+            'isPreApprovalMode'
         ));
     }
 
@@ -4050,7 +4099,11 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ], 403);
         }
 
-        if ($this->requalificationFillIsLocked($report)) {
+        $isPreApprovalDraft = in_array($report->import_source, ['requalification', 'revalidation'], true)
+            && in_array($report->status, ['pre_setup', 'pre_returned'], true)
+            && $report->stage === 'pre';
+
+        if ($this->requalificationFillIsLocked($report) && ! $isPreApprovalDraft) {
             return response()->json([
                 'success' => true,
                 'locked'  => true,
@@ -4128,8 +4181,16 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if ($isReturnedEdit) {
             $importFields = $this->unlockDocxFieldsForReturnedEdit($importFields);
         }
-        $importFields = $this->lockConnectedAccessoriesDescriptions($importFields);
-        $importFields = $this->lockExistingTableContent($importFields);
+        if ($isPreApprovalDraft) {
+            $importFields = $this->applyRequalificationPreApprovalUnlockRules($importFields);
+        } else {
+            if (in_array(($report->import_source ?? ''), ['requalification', 'revalidation'], true)) {
+                $importFields = $this->applyRequalificationPostPreApprovalLockRules($importFields);
+            } else {
+                $importFields = $this->lockConnectedAccessoriesDescriptions($importFields);
+                $importFields = $this->lockExistingTableContent($importFields);
+            }
+        }
         $importFields = $this->applyRequalificationPreApproverNames($report, $importFields);
 
         $formFields = $request->input('fields', []);
@@ -4353,6 +4414,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'post_checked_by_validation_name',
             'post_approved_by_quality_name',
         ] as $roleKey) {
+            if ($request->filled($roleKey) && is_numeric($request->input($roleKey))) {
+                $data[$roleKey] = (int) $request->input($roleKey);
+            }
+        }
+
+        foreach (array_keys(self::PRE_APPROVER_FIELDS) as $roleKey) {
             if ($request->filled($roleKey) && is_numeric($request->input($roleKey))) {
                 $data[$roleKey] = (int) $request->input($roleKey);
             }
@@ -4647,12 +4714,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     }
 
     /**
-     * Requalification stays locked until every PRE approver has approved.
+     * Requalification and Revalidation stay locked until every PRE approver has approved.
      * Reports already in the POST stage keep the previous fill behaviour.
      */
     private function requalificationFillIsLocked(Report $report): bool
     {
-        if ($report->import_source !== 'requalification') {
+        if (! in_array($report->import_source, ['requalification', 'revalidation'], true)) {
             return false;
         }
 
@@ -4669,7 +4736,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
     private function submitRequalificationPreApproval(Request $request, Report $report)
     {
-        if ($report->import_source !== 'requalification' || ! $this->requalificationFillIsLocked($report)) {
+        if (! in_array($report->import_source, ['requalification', 'revalidation'], true) || ! $this->requalificationFillIsLocked($report)) {
             return back()->with('error', 'Pre-approval has already been completed for this document.');
         }
 
@@ -4692,9 +4759,237 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if (! is_array($data)) {
             $data = [];
         }
-        $data['import_source'] = 'requalification';
+        $data['import_source'] = $report->import_source;
         foreach (array_keys(self::PRE_APPROVER_FIELDS) as $roleKey) {
             $data[$roleKey] = (int) $request->input($roleKey);
+        }
+
+        $formFields = $request->input('fields', []);
+        $tableOpsRaw = $request->input('table_ops');
+        $tableOps = [];
+        if (is_string($tableOpsRaw)) {
+            $tableOps = json_decode($tableOpsRaw, true) ?: [];
+        } elseif (is_array($tableOpsRaw)) {
+            $tableOps = $tableOpsRaw;
+        }
+
+        // Apply updated field values
+        $storedFields = $report->docx_import_fields ?? [];
+        if (! is_array($storedFields)) {
+            $storedFields = [];
+        }
+
+        $report->data = $data;
+        $storedFields = $this->applyRequalificationPreApproverNames($report, $storedFields);
+
+        $fieldsToPython = [];
+        foreach ($storedFields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if ($loc === '') {
+                continue;
+            }
+            $val = array_key_exists($loc, $formFields) ? (string) $formFields[$loc] : (string) ($field['value'] ?? '');
+            if (trim($val) === '' && ($field['type'] ?? '') === 'approver' && ! empty($field['value'])) {
+                $val = (string) $field['value'];
+            }
+            $storedFields[$idx]['value'] = $val;
+            $fieldsToPython[] = [
+                'location' => $loc,
+                'value'    => $val,
+                'locked'   => false,
+                'type'     => $field['type'] ?? '',
+            ];
+        }
+
+        // Include any new preview fields not in storedFields
+        $knownLocs = array_column($fieldsToPython, 'location');
+        foreach ($formFields as $loc => $val) {
+            if (! is_string($loc) || in_array($loc, $knownLocs, true)) {
+                continue;
+            }
+            if (! preg_match('/^(para_|table_|header_|txbx_)/', $loc)) {
+                continue;
+            }
+            $fieldsToPython[] = [
+                'location' => $loc,
+                'value'    => (string) $val,
+                'locked'   => false,
+                'type'     => '',
+            ];
+        }
+
+        $pythonUrl = env('PYTHON_NLP_URL', 'http://127.0.0.1:8001');
+        $fileId    = $report->docx_import_path;
+
+        if ($fileId && $this->ensureDocxTemplateOnDisk($report)) {
+            $outputFilename   = "pre_approved_{$report->id}.docx";
+            $generatedRelPath = "generated_reports/{$fileId}_filled.docx";
+            $fillSucceeded    = false;
+
+            Log::info('Requalification pre-approval fill initiated', [
+                'report_id' => $report->id,
+                'file_id'   => $fileId,
+                'table_ops' => count($tableOps),
+                'fields'    => count($fieldsToPython),
+            ]);
+
+            // Attempt 1: HTTP service
+            try {
+                $response = Http::timeout(120)->asJson()->post("{$pythonUrl}/fill", [
+                    'file_id'           => $fileId,
+                    'original_filename' => $outputFilename,
+                    'fields'            => $fieldsToPython,
+                    'table_ops'         => $tableOps,
+                    'equipment_id'      => (string) ($report->equipment_id ?? ''),
+                ]);
+
+                if ($response->successful() && Storage::disk('public')->exists($generatedRelPath)) {
+                    $fillSucceeded = true;
+                    Log::info('Python /fill HTTP succeeded for pre-approval');
+                } else {
+                    Log::warning('Python /fill HTTP error in pre-approval, using CLI fallback: ' . ($response ? $response->body() : ''));
+                }
+            } catch (\Throwable $e) {
+                Log::info('Python /fill HTTP unavailable in pre-approval, using CLI fallback: ' . $e->getMessage());
+            }
+
+            // Attempt 2: CLI fallback
+            if (! $fillSucceeded) {
+                try {
+                    $pythonBin = base_path('python-service/venv/Scripts/python.exe');
+                    if (! is_file($pythonBin)) {
+                        $pythonBin = 'python';
+                    }
+                    $cliScript = base_path('python-service/cli.py');
+                    $templatePath = $this->getDocxTemplateAbsolutePath($fileId);
+                    if (! $templatePath || ! is_file($templatePath)) {
+                        $templatePath = storage_path('app/public/templates/docx/' . $fileId . '.docx');
+                    }
+
+                    $outDir = storage_path('app/public/generated_reports');
+                    if (! is_dir($outDir)) {
+                        @mkdir($outDir, 0755, true);
+                    }
+                    $cliOutputPath = $outDir . DIRECTORY_SEPARATOR . "{$fileId}_filled.docx";
+
+                    $tmpFields = tempnam(sys_get_temp_dir(), 'pre_fill_fields_');
+                    file_put_contents($tmpFields, json_encode($fieldsToPython, JSON_UNESCAPED_UNICODE));
+
+                    $tmpAtt = tempnam(sys_get_temp_dir(), 'pre_fill_att_');
+                    file_put_contents($tmpAtt, json_encode((object) [], JSON_UNESCAPED_UNICODE));
+
+                    $tmpTableOps = tempnam(sys_get_temp_dir(), 'pre_fill_ops_');
+                    file_put_contents($tmpTableOps, json_encode($tableOps, JSON_UNESCAPED_UNICODE));
+
+                    $eqId = (string) ($report->equipment_id ?? '');
+
+                    $process = new Process([
+                        $pythonBin,
+                        $cliScript,
+                        'fill',
+                        $templatePath,
+                        $tmpFields,
+                        $cliOutputPath,
+                        $tmpAtt,
+                        $eqId,
+                        $tmpTableOps,
+                    ]);
+                    $process->setTimeout(120);
+                    $process->run();
+                    @unlink($tmpFields);
+                    @unlink($tmpAtt);
+                    @unlink($tmpTableOps);
+
+                    $cliOutput = trim($process->getOutput());
+                    $jsonStart = strpos($cliOutput, '{');
+                    if ($jsonStart !== false) {
+                        $parsed = json_decode(substr($cliOutput, $jsonStart), true);
+                        if (is_array($parsed) && ($parsed['status'] ?? '') === 'success' && is_file($cliOutputPath)) {
+                            $fillSucceeded = true;
+                            Log::info('Python /fill CLI fallback succeeded in pre-approval submission');
+                        }
+                    }
+
+                    if (! $fillSucceeded) {
+                        Log::error('Python /fill CLI fallback failed in pre-approval', [
+                            'exit_code' => $process->getExitCode(),
+                            'output'    => $process->getOutput(),
+                            'error'     => $process->getErrorOutput(),
+                        ]);
+                    }
+                } catch (\Throwable $cliEx) {
+                    Log::error('Python /fill CLI fallback exception in pre-approval: ' . $cliEx->getMessage());
+                }
+            }
+
+            if ($fillSucceeded && Storage::disk('public')->exists($generatedRelPath)) {
+                $newFileContent = Storage::disk('public')->get($generatedRelPath);
+                $newFileId      = (string) \Illuminate\Support\Str::uuid();
+                $newTemplatePath = storage_path('app/public/templates/docx/' . $newFileId . '.docx');
+                @mkdir(dirname($newTemplatePath), 0755, true);
+                file_put_contents($newTemplatePath, $newFileContent);
+
+                $parsedFields = null;
+
+                // Try HTTP parse
+                try {
+                    $parseResponse = Http::timeout(90)
+                        ->attach('file', $newFileContent, $outputFilename)
+                        ->post("{$pythonUrl}/parse");
+
+                    if ($parseResponse->successful() && is_array($parseResponse->json())) {
+                        $parseResult  = $parseResponse->json();
+                        $parsedFields = $parseResult['fields'] ?? [];
+                    }
+                } catch (\Throwable $e) {
+                    Log::info('Python /parse HTTP unavailable in pre-approval, using CLI parse: ' . $e->getMessage());
+                }
+
+                // CLI parse fallback
+                if ($parsedFields === null) {
+                    try {
+                        $pythonBin = base_path('python-service/venv/Scripts/python.exe');
+                        if (! is_file($pythonBin)) {
+                            $pythonBin = 'python';
+                        }
+                        $cliScript = base_path('python-service/cli.py');
+                        $process = new Process([$pythonBin, $cliScript, 'parse', $newTemplatePath]);
+                        $process->setTimeout(60);
+                        $process->run();
+
+                        $cliOutput = trim($process->getOutput());
+                        $jsonStart = strpos($cliOutput, '{"status"');
+                        if ($jsonStart !== false) {
+                            $decoded = json_decode(substr($cliOutput, $jsonStart), true);
+                            if (is_array($decoded) && ($decoded['status'] ?? '') === 'success') {
+                                $parsedFields = $decoded['fields'] ?? [];
+                            }
+                        }
+                    } catch (\Throwable $cliEx) {
+                        Log::error('Python /parse CLI fallback failed in pre-approval: ' . $cliEx->getMessage());
+                    }
+                }
+
+                if (! empty($parsedFields)) {
+                    $newFields = $this->normalizeImportFields($parsedFields);
+                    $newFields = $this->applySourceSpecificImportFieldRules($newFields, $report->import_source);
+
+                    $this->mirrorDocxTemplateAfterParse($newFileId, $newFileContent, $outputFilename);
+                    $data['original_docx_path'] = $fileId;
+                    $report->docx_import_path   = $newFileId;
+                    $storedFields               = $newFields;
+                    $this->flushDocxPreviewCache($fileId, $report->id);
+                    $this->flushDocxPreviewCache($newFileId, $report->id);
+                    Log::info('Requalification pre-approval template replaced with filled template', [
+                        'old_file_id'      => $fileId,
+                        'new_file_id'      => $newFileId,
+                        'new_fields_count' => count($newFields),
+                    ]);
+                }
+            }
         }
 
         $report->approvalSteps()->where('stage', 'pre')->delete();
@@ -4720,7 +5015,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'stage'              => 'pre',
             'status'             => $first ? 'pre_pending' : 'pre_approved',
             'current_step_order' => $first?->step_order ?? 0,
+            'docx_import_fields' => $storedFields,
             'docx_import_status' => 'pending',
+            'rendered_html'      => null,
         ]);
 
         if ($first) {
@@ -4737,6 +5034,32 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         return redirect()
             ->route('reports.show', $report)
             ->with('status', 'Sent for pre-approval. The document stays locked until every pre-approver has approved.');
+    }
+
+    /**
+     * Recall a pre-approval request back to draft mode so creator can add/delete rows or edit.
+     */
+    public function recallRequalificationPreApproval(Report $report)
+    {
+        $isCreator = (int) $report->created_by === (int) auth()->id();
+        $isSuperAdmin = (auth()->user() && auth()->user()->isAdmin()) || auth()->id() === 1;
+
+        abort_unless($isCreator || $isSuperAdmin, 403);
+
+        if ($report->status === 'pre_pending' && $report->stage === 'pre') {
+            $report->approvalSteps()->where('stage', 'pre')->delete();
+            $report->update([
+                'status'             => 'pre_setup',
+                'current_step_order' => 0,
+                'rendered_html'      => null,
+            ]);
+            $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
+
+            return redirect()->route('reports.docx-import.fill-form', $report)
+                ->with('status', 'Pre-approval recalled. You can now edit the document, add/delete rows, and re-send for pre-approval.');
+        }
+
+        return redirect()->route('reports.show', $report);
     }
 
     /**
@@ -4760,6 +5083,18 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             return redirect()
                 ->route('reports.show', $report)
                 ->with('error', 'This protocol was rejected and cannot be filled again.');
+        }
+
+        if ((int) $report->created_by !== (int) auth()->id()) {
+            return redirect()
+                ->route('reports.show', $report)
+                ->with('error', 'Only the document creator can edit or submit for approval.');
+        }
+
+        if (in_array($report->status, ['pre_pending', 'post_pending'], true)) {
+            return redirect()
+                ->route('reports.show', $report)
+                ->with('error', 'This document is currently pending approval.');
         }
 
         // E-sign password required before submitting filled DOCX for POST approval.
@@ -4799,8 +5134,21 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if (in_array($report->status, ['post_returned', 'pre_returned'], true)) {
             $importFields = $this->unlockDocxFieldsForReturnedEdit($importFields);
         }
-        $importFields = $this->lockConnectedAccessoriesDescriptions($importFields);
-        $importFields = $this->lockExistingTableContent($importFields);
+
+        $isPreApprovalDraft = in_array($report->import_source, ['requalification', 'revalidation'], true)
+            && in_array($report->status, ['pre_setup', 'pre_returned'], true)
+            && $report->stage === 'pre';
+
+        if ($isPreApprovalDraft) {
+            $importFields = $this->applyRequalificationPreApprovalUnlockRules($importFields);
+        } else {
+            if (in_array(($report->import_source ?? ''), ['requalification', 'revalidation'], true)) {
+                $importFields = $this->applyRequalificationPostPreApprovalLockRules($importFields);
+            } else {
+                $importFields = $this->lockConnectedAccessoriesDescriptions($importFields);
+                $importFields = $this->lockExistingTableContent($importFields);
+            }
+        }
         $importFields = $this->applyRequalificationPreApproverNames($report, $importFields);
 
         $usesApprovalPage     = $this->reportUsesApprovalPageTable($importFields);
@@ -5097,25 +5445,79 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $attachmentLinks = $this->buildAttachmentLinksMap($report, $uploadedAttachments);
 
             // Call Python /fill to write cell values and hyperlinks into the output DOCX.
-            $response = Http::timeout(90)
-                ->asJson()
-                ->post("{$pythonUrl}/fill", [
-                    'file_id'           => $fileId,
-                    'original_filename' => $originalFilename,
-                    'fields'            => $fieldsToPython,
-                    'attachment_links'  => $this->formatAttachmentLinksForPython($attachmentLinks),
-                    'equipment_id'      => $report->import_source === 'requalification'
-                        ? (string) ($report->equipment_id ?? '')
-                        : '',
-                ]);
+            $result = null;
+            try {
+                $response = Http::timeout(90)
+                    ->asJson()
+                    ->post("{$pythonUrl}/fill", [
+                        'file_id'           => $fileId,
+                        'original_filename' => $originalFilename,
+                        'fields'            => $fieldsToPython,
+                        'attachment_links'  => $this->formatAttachmentLinksForPython($attachmentLinks),
+                        'equipment_id'      => in_array($report->import_source, ['requalification', 'revalidation'], true)
+                            ? (string) ($report->equipment_id ?? '')
+                            : '',
+                    ]);
 
-            if (!$response->successful()) {
-                Log::error('Python /fill failed: ' . $response->body());
-                return redirect()->back()->with('error', 'Failed to generate filled DOCX: ' . $response->body());
+                if ($response->successful()) {
+                    $result = $response->json();
+                    Log::info('Python /fill response', ['result' => $result]);
+                } else {
+                    Log::warning('Python /fill HTTP error: ' . $response->body());
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Python /fill HTTP request exception: ' . $e->getMessage());
             }
 
-            $result         = $response->json();
-            Log::info('Python response', ['result' => $result]);
+            // CLI fallback if Python HTTP service is unavailable
+            if (! is_array($result) || empty($result['output_filename'])) {
+                try {
+                    $pythonBin = base_path('python-service/venv/Scripts/python.exe');
+                    if (! is_file($pythonBin)) {
+                        $pythonBin = 'python';
+                    }
+                    $cliScript = base_path('python-service/cli.py');
+                    $templatePath = storage_path('app/public/templates/docx/' . $fileId . '.docx');
+                    $cliOutputFilename = "{$fileId}_filled.docx";
+                    $outDir = storage_path('app/public/generated_reports');
+                    if (! is_dir($outDir)) {
+                        @mkdir($outDir, 0755, true);
+                    }
+                    $cliOutputPath = $outDir . DIRECTORY_SEPARATOR . $cliOutputFilename;
+
+                    $tmpFields = tempnam(sys_get_temp_dir(), 'fill_fields_');
+                    file_put_contents($tmpFields, json_encode($fieldsToPython, JSON_UNESCAPED_UNICODE));
+                    $tmpAtt = tempnam(sys_get_temp_dir(), 'fill_att_');
+                    file_put_contents($tmpAtt, json_encode($this->formatAttachmentLinksForPython($attachmentLinks), JSON_UNESCAPED_UNICODE));
+
+                    $eqId = in_array($report->import_source, ['requalification', 'revalidation'], true)
+                        ? (string) ($report->equipment_id ?? '')
+                        : '';
+
+                    $process = new Process([$pythonBin, $cliScript, 'fill', $templatePath, $tmpFields, $cliOutputPath, $tmpAtt, $eqId]);
+                    $process->setTimeout(90);
+                    $process->run();
+                    @unlink($tmpFields);
+                    @unlink($tmpAtt);
+
+                    $cliOutput = trim($process->getOutput());
+                    $jsonStart = strpos($cliOutput, '{');
+                    if ($jsonStart !== false) {
+                        $parsed = json_decode(substr($cliOutput, $jsonStart), true);
+                        if (is_array($parsed) && ($parsed['status'] ?? '') === 'success') {
+                            $result = $parsed;
+                            Log::info('Python /fill CLI fallback succeeded', ['result' => $result]);
+                        }
+                    }
+                } catch (\Throwable $cliEx) {
+                    Log::error('Python /fill CLI fallback failed: ' . $cliEx->getMessage());
+                }
+            }
+
+            if (! is_array($result) || empty($result['output_filename'])) {
+                Log::error('Python /fill failed and CLI fallback failed');
+                return redirect()->back()->with('error', 'Failed to generate filled DOCX.');
+            }
 
             $repairedValues = $result['repaired_field_values'] ?? [];
             if (is_array($repairedValues) && $repairedValues !== []) {
@@ -5588,6 +5990,150 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if ($importSource === 'new_equipment_qualification') {
             return $this->applyNeqFillFieldRules($fields);
         }
+        if (in_array($importSource, ['requalification', 'revalidation'], true)) {
+            return $this->applyRequalificationPreApprovalUnlockRules($fields);
+        }
+
+        return $fields;
+    }
+
+    /**
+     * Requalification / Revalidation Pre-Approval drafting rules:
+     * Unlocks all protocol content (paragraphs, table labels, table cells, criteria)
+     * so creators can edit the protocol prior to pre-approval sign-off.
+     * Only table row 0 headers, serial numbers, and approval stamps stay non-editable.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function applyRequalificationPreApprovalUnlockRules(array $fields): array
+    {
+        $unlocked = 0;
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+
+            $type = strtolower(trim((string) ($field['type'] ?? '')));
+            $location = strtolower(trim((string) ($field['location'] ?? '')));
+
+            // Never unlock table header rows (row 0)
+            if (preg_match('/^table_\d+_row_0(_col_\d+)?$/', $location)) {
+                $fields[$idx]['locked'] = true;
+                continue;
+            }
+
+            // Sl. No column stays locked
+            if ($type === 'table_sl_no') {
+                $fields[$idx]['locked'] = true;
+                continue;
+            }
+
+            // Approval stamp cells stay managed by e-sign workflow
+            if (str_starts_with($type, 'approval_stamp') || ($field['stamp_eligible'] ?? true) === false) {
+                continue;
+            }
+
+            // Approver selector dropdowns are editable for selecting signers
+            if ($type === 'approver') {
+                $fields[$idx]['locked'] = false;
+                continue;
+            }
+
+            // All content paragraphs, blanks, table cells, and 2-col labels are editable!
+            $fields[$idx]['locked'] = false;
+            $unlocked++;
+        }
+
+        Log::info('Requalification/Revalidation pre-approval unlock rules applied', [
+            'unlocked_fields' => $unlocked,
+            'total_fields' => count($fields),
+        ]);
+
+        return $fields;
+    }
+
+    /**
+     * Requalification / Revalidation Post-Pre-Approval lock rules:
+     * Once Pre-Approval is granted (status is pre_approved or stage is execution),
+     * all protocol template content MUST BE LOCKED:
+     * - All body paragraphs (Objective, Scope, Responsibilities, etc.) -> locked = true
+     * - All 2-column parameter keys / labels on the left (Tag. No., Plant / Module, MOC, etc., Col 0) -> locked = true
+     * - All table row 0 headers -> locked = true
+     * - All table serial numbers (Sl. No.) -> locked = true
+     * - Connected accessories descriptions & existing template content -> locked = true
+     *
+     * ONLY execution fill fields remain editable (locked = false):
+     * - 2-column description/details on the right (Col 1) -> locked = false
+     * - Multi-column execution entry columns (Observation, Done By, Date, Result, Remarks, Attachment) -> locked = false
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function applyRequalificationPostPreApprovalLockRules(array $fields): array
+    {
+        $fields = $this->lockConnectedAccessoriesDescriptions($fields);
+        $fields = $this->lockExistingTableContent($fields);
+
+        $lockedCount = 0;
+        $unlockedCount = 0;
+
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+
+            $type = strtolower(trim((string) ($field['type'] ?? '')));
+            $location = strtolower(trim((string) ($field['location'] ?? '')));
+
+            // 1. Table row 0 headers always locked
+            if (preg_match('/^table_\d+_row_0(_col_\d+)?$/', $location)) {
+                $fields[$idx]['locked'] = true;
+                $lockedCount++;
+                continue;
+            }
+
+            // 2. Serial number column always locked
+            if ($type === 'table_sl_no') {
+                $fields[$idx]['locked'] = true;
+                $lockedCount++;
+                continue;
+            }
+
+            // 3. Approval stamps managed by e-sign workflow
+            if (str_starts_with($type, 'approval_stamp')) {
+                continue;
+            }
+
+            // 4. All paragraphs MUST BE LOCKED post-pre-approval (Objective, Scope, Responsibilities, etc.)
+            if ($type === 'paragraph_content' || str_starts_with($location, 'para_') || str_starts_with($type, 'para')) {
+                if ($type !== 'paragraph_blank_part') {
+                    $fields[$idx]['locked'] = true;
+                    $lockedCount++;
+                    continue;
+                }
+            }
+
+            // 5. 2-column table keys (Col 0) MUST BE LOCKED: Tag. No., Plant / Module, MOC, etc.
+            if ($type === 'table_2col_label' || str_ends_with($location, '_col_0')) {
+                $fields[$idx]['locked'] = true;
+                $lockedCount++;
+                continue;
+            }
+
+            // 6. 2-column table fill values (Col 1) MUST BE UNLOCKED: only fill bus ho!
+            if ($type === 'table_2col' || str_ends_with($location, '_col_1') || preg_match('/^table_\d+_row_\d+$/', $location)) {
+                $fields[$idx]['locked'] = false;
+                $unlockedCount++;
+                continue;
+            }
+        }
+
+        Log::info('Requalification/Revalidation post-pre-approval lock rules applied', [
+            'locked_fields'   => $lockedCount,
+            'unlocked_fields' => $unlockedCount,
+            'total_fields'    => count($fields),
+        ]);
 
         return $fields;
     }
@@ -6003,6 +6549,89 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         return $this->ensureDocxTemplateOnDisk($report);
     }
 
+    private function reparseDocxForReport(Report $report): ?array
+    {
+        $fileId = trim((string) ($report->docx_import_path ?? ''));
+        if ($fileId === '') {
+            return null;
+        }
+
+        $this->ensureDocxTemplateOnDisk($report);
+        $filePath = $this->getDocxTemplateAbsolutePath($fileId);
+        if ($filePath === null || ! is_file($filePath)) {
+            return null;
+        }
+
+        $parsedFields = null;
+        $pythonUrl = env('PYTHON_NLP_URL', 'http://127.0.0.1:8001');
+
+        try {
+            $response = Http::timeout(30)
+                ->attach('file', file_get_contents($filePath), basename($filePath))
+                ->post("{$pythonUrl}/parse");
+
+            if ($response->successful() && is_array($response->json())) {
+                $result = $response->json();
+                $parsedFields = $result['fields'] ?? [];
+            }
+        } catch (\Throwable $e) {
+            Log::info('HTTP reparse unavailable, attempting CLI parse: ' . $e->getMessage());
+        }
+
+        // Direct Python CLI fallback if HTTP server is unavailable
+        if (empty($parsedFields)) {
+            try {
+                $pythonBin = base_path('python-service/venv/Scripts/python.exe');
+                if (! is_file($pythonBin)) {
+                    $pythonBin = 'python';
+                }
+                $cliScript = base_path('python-service/cli.py');
+                $process = new Process([$pythonBin, $cliScript, 'parse', $filePath]);
+                $process->setTimeout(60);
+                $process->run();
+                $output = $process->getOutput();
+                if ($output) {
+                    $jsonStart = strpos($output, '{"status"');
+                    if ($jsonStart !== false) {
+                        $decoded = json_decode(substr($output, $jsonStart), true);
+                        if (is_array($decoded) && ($decoded['status'] ?? '') === 'success') {
+                            $parsedFields = $decoded['fields'] ?? [];
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('CLI reparse failed: ' . $e->getMessage());
+            }
+        }
+
+        if (! empty($parsedFields)) {
+            $newFields = $this->normalizeImportFields($parsedFields);
+            $existing = is_array($report->docx_import_fields) ? $report->docx_import_fields : [];
+            $existingByLoc = [];
+            foreach ($existing as $ef) {
+                if (is_array($ef) && ! empty($ef['location'])) {
+                    $existingByLoc[$ef['location']] = $ef;
+                }
+            }
+            foreach ($newFields as $idx => $nf) {
+                $loc = $nf['location'] ?? '';
+                if (isset($existingByLoc[$loc])) {
+                    $prev = $existingByLoc[$loc];
+                    if (($prev['value'] ?? '') !== '') {
+                        $newFields[$idx]['value'] = $prev['value'];
+                    }
+                    if (isset($prev['approver_role'])) {
+                        $newFields[$idx]['approver_role'] = $prev['approver_role'];
+                    }
+                }
+            }
+
+            return $this->applySourceSpecificImportFieldRules($newFields, (string) $report->import_source);
+        }
+
+        return null;
+    }
+
     private function mirrorDocxTemplateAfterParse(string $fileId, string $fileContents, string $extension = 'docx'): void
     {
         $ext = strtolower($extension) === 'doc' ? '.doc' : '.docx';
@@ -6076,8 +6705,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $fieldsHash = md5(json_encode(array_values($fields), JSON_UNESCAPED_UNICODE));
         $cacheVer   = $this->docxPreviewCacheVersion($fileId, $reportId);
         $cacheKey   = $reportId
-            ? "docx_preview:v52:{$mode}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
-            : "docx_preview:v52:{$mode}:{$fileId}:{$cacheVer}:{$fieldsHash}";
+            ? "docx_preview:v63:{$mode}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
+            : "docx_preview:v63:{$mode}:{$fileId}:{$cacheVer}:{$fieldsHash}";
         $cached     = Cache::get($cacheKey);
 
         // Return cached HTML when fields and mode have not changed since last preview.
@@ -6138,6 +6767,34 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ]);
         }
 
+        // Direct Python CLI fallback if HTTP preview service is down/offline
+        if (is_file($templatePath)) {
+            try {
+                $pythonBin = base_path('python-service/venv/Scripts/python.exe');
+                if (! is_file($pythonBin)) {
+                    $pythonBin = 'python';
+                }
+                $cliScript = base_path('python-service/cli.py');
+                $tmpJsonFile = tempnam(sys_get_temp_dir(), 'prev_fields_');
+                file_put_contents($tmpJsonFile, json_encode(array_values($fields), JSON_UNESCAPED_UNICODE));
+                $process = new Process([$pythonBin, $cliScript, 'preview', $templatePath, $tmpJsonFile, $mode]);
+                $process->setTimeout(60);
+                $process->run();
+                $htmlOutput = $process->getOutput();
+                @unlink($tmpJsonFile);
+                if ($htmlOutput && strlen(trim($htmlOutput)) > 0) {
+                    $htmlStart = strpos($htmlOutput, '<div class="docx-preview"');
+                    if ($htmlStart !== false) {
+                        $htmlOutput = substr($htmlOutput, $htmlStart);
+                    }
+                    Cache::put($cacheKey, $htmlOutput, now()->addDays(7));
+                    return $htmlOutput;
+                }
+            } catch (\Throwable $ex) {
+                Log::warning('DOCX preview CLI fallback failed: ' . $ex->getMessage());
+            }
+        }
+
         return is_string($cached) ? $cached : '';
     }
 
@@ -6156,7 +6813,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
      */
     private function applyRequalificationPreApproverNames(Report $report, array $fields): array
     {
-        if ($report->import_source !== 'requalification' || $fields === []) {
+        if (! in_array($report->import_source, ['requalification', 'revalidation'], true) || $fields === []) {
             return $fields;
         }
 
@@ -6269,6 +6926,13 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
     private function writePreApproverRow(array &$fields, int $idx, array $data, string $roleKey, ?string $approvedDate, bool $lockApproved = false): void
     {
+        $fields[$idx]['approver_role'] = $roleKey;
+        $fields[$idx]['is_pre_approver'] = true;
+
+        if (! empty($data[$roleKey])) {
+            $fields[$idx]['user_id'] = (int) $data[$roleKey];
+        }
+
         $name = $this->preApproverNameAndDesignation($data, $roleKey);
         if ($name === '') {
             return;
@@ -6320,7 +6984,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
     private function requalificationPreApprovalIsComplete(Report $report): bool
     {
-        return $report->import_source === 'requalification'
+        return in_array($report->import_source, ['requalification', 'revalidation'], true)
             && in_array($report->status, ['pre_approved', 'post_pending', 'post_returned', 'approved'], true);
     }
 
@@ -6519,35 +7183,34 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $location = strtolower(trim((string) ($field['location'] ?? '')));
         $value = trim((string) ($field['value'] ?? ''));
 
-        // LIST OF ATTACHMENT / multicol data cells share column labels like
-        // "List of Attachment" / "Sl. No." — those are NOT TOC entries.
-        if (in_array($type, ['table_multicol', 'table_sl_no', 'attachment', 'table_radio'], true)) {
+        // Paragraph content, blanks, table data cells are NOT TOC entries.
+        if (in_array($type, [
+            'table_multicol', 'table_sl_no', 'attachment', 'table_radio',
+            'paragraph_content', 'table_2col_label', 'table_2col',
+            'paragraph_blank', 'paragraph_blank_part', 'paragraph_checkbox', 'paragraph_radio'
+        ], true)) {
             return false;
         }
 
-        // Data rows in tables: table_N_row_R_col_C with R >= 1.
-        if (preg_match('/^table_\d+_row_(\d+)_col_\d+$/', $location, $m) && (int) $m[1] >= 1) {
-            // Only treat as TOC when the value itself looks like a TOC line, never by column label alone.
+        // Data rows in tables: table_N_row_R_col_C or table_N_row_R with R >= 1.
+        if (preg_match('/^table_\d+_row_(\d+)(_col_\d+)?$/', $location, $m) && (int) $m[1] >= 1) {
+            // Only treat as TOC when the value itself looks like a TOC line (dots + page number).
             return $this->isTocEntryText($value !== '' ? $value : (string) ($field['label'] ?? ''));
         }
 
         $tocLabels = [
-            'sl. no.', 'sl no', 's.no', 's. no.', 'description',
+            'sl. no.', 'sl no', 's.no', 's. no.',
             '1.0', '2.0', '3.0', '4.0', '5.0', '6.0', '7.0',
-            'objective', 'methodology',
             'observation / results and evaluation',
-            'list of attachment',
             'deviation and corrective action taken (if any)',
             'report approval',
         ];
 
-        // Label-only TOC match: only for paragraph / 1-col / toc_entry — not grid cells.
+        // Label-only TOC match: only for toc_entry / table_1col
         if (in_array($label, $tocLabels, true)) {
-            if ($type === '' || in_array($type, ['toc_entry', 'table_1col', 'para', 'paragraph'], true)
-                || str_starts_with($location, 'para_')) {
+            if ($type === 'toc_entry' || $type === 'table_1col') {
                 return true;
             }
-            // Header row of a data table (row 0) can keep label lock without destroying row values.
             if (preg_match('/^table_\d+_row_0(_col_\d+)?$/', $location)) {
                 return true;
             }

@@ -654,7 +654,7 @@ private function lockAllFields(string $html): string
                     'current_step_order' => 0,
                 ]);
                 $fresh = $report->fresh();
-                if ($fresh && $fresh->import_source === 'requalification' && $fresh->docx_import_path) {
+                if ($fresh && in_array($fresh->import_source, ['requalification', 'revalidation'], true) && $fresh->docx_import_path) {
                     $creator = \App\Models\User::find($fresh->created_by);
                     if ($creator) {
                         app(ReportApprovalNotifier::class)->notifyApprover(
