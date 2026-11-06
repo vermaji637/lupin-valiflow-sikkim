@@ -1407,6 +1407,13 @@ def fill_docx(
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     shutil.copy2(template_path, output_path)
     doc = Document(output_path)
+    try:
+        from doc_parser import normalize_attachment_list_paragraphs_to_table
+        if normalize_attachment_list_paragraphs_to_table(doc):
+            doc.save(output_path)
+            doc = Document(output_path)
+    except Exception:
+        pass
 
     repaired_values: dict[str, str] = {}
 

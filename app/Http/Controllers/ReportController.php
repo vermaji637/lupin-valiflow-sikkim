@@ -649,11 +649,18 @@ private function lockAllFields(string $html): string
     }
         } else {
             if ($report->stage === 'pre') {
+                // The date of the last pre-approval step becomes the Effective Date.
+                $lastPreDate = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y');
+                $data['effective_date'] = $lastPreDate;
                 $report->update([
                     'status'             => 'pre_approved',
                     'current_step_order' => 0,
+                    'data'               => $data,
                 ]);
                 $fresh = $report->fresh();
+                if ($fresh && ! empty($fresh->docx_import_path)) {
+                    app(DocxImportController::class)->syncEffectiveDateOnPreApprovalComplete($fresh, $lastPreDate);
+                }
                 if ($fresh && in_array($fresh->import_source, ['requalification', 'revalidation'], true) && $fresh->docx_import_path) {
                     $creator = \App\Models\User::find($fresh->created_by);
                     if ($creator) {
@@ -665,9 +672,13 @@ private function lockAllFields(string $html): string
                     }
                 }
             } else {
+                if (empty($data['effective_date'])) {
+                    $data['effective_date'] = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y');
+                }
                 $report->update([
                     'status'             => 'approved',
                     'current_step_order' => 0,
+                    'data'               => $data,
                 ]);
 
                 app(ReportApprovalNotifier::class)->notifyFullyApproved($report->fresh());

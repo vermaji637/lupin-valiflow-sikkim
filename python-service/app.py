@@ -17,6 +17,7 @@ from doc_parser import (
     is_paragraph_yes_no_radio,
     paragraph_yes_no_label,
     is_list_of_attachment_table,
+    normalize_attachment_list_paragraphs_to_table,
     is_attachment_upload_column,
     is_report_approval_block_table,
     get_table_column_headers,
@@ -431,11 +432,28 @@ async def preview_document(
                         ff["locked"] = sv.get("locked", ff.get("locked", True))
                 else:
                     # In post-pre-approval execution / standard mode:
-                    # Paragraphs and 2-col keys (Col 0) are strictly locked!
-                    if ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
+                    is_pre = (
+                        sv.get("is_pre_approver")
+                        or ff.get("is_pre_approver")
+                        or sv.get("approver_role") in (
+                            "prepared_by_engineering_name",
+                            "checked_by_engineering_name",
+                            "checked_by_production_name",
+                            "checked_by_validation_name",
+                            "checked_by_quality_name",
+                            "approved_by_user_name",
+                            "approved_by_quality_name",
+                        )
+                        or (loc and bool(re.match(r"^table_[123]_row_\d+_col_\d+$", loc)))
+                    )
+                    if is_pre:
                         ff["locked"] = True
-                    # 2-col values (Col 1) are fillable!
-                    elif ff.get("type") == "table_2col" or (loc and (loc.endswith("_col_1") or re.match(r"^table_\d+_row_\d+$", loc))):
+                        ff["is_pre_approver"] = True
+                    # Paragraphs and 2-col keys (Col 0) are strictly locked!
+                    elif ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
+                        ff["locked"] = True
+                    # 2-col values (Col 1) are fillable (excluding approvers and locked fields)!
+                    elif (ff.get("type") == "table_2col" or (loc and (loc.endswith("_col_1") or re.match(r"^table_\d+_row_\d+$", loc)))) and ff.get("type") != "approver":
                         ff["locked"] = False
                     elif "locked" in sv:
                         ff["locked"] = sv["locked"]
@@ -447,11 +465,12 @@ async def preview_document(
                     "user_id",
                     "signature_date_location",
                     "stamp_eligible",
+                    "is_pre_approver",
                 ):
                     if meta_key not in sv:
                         continue
                     val = sv[meta_key]
-                    if meta_key == "stamp_eligible" or val not in (None, ""):
+                    if meta_key in ("stamp_eligible", "is_pre_approver") or val not in (None, ""):
                         ff[meta_key] = val
             else:
                 parent_para = ff.get("parent_para")
@@ -586,6 +605,40 @@ def _para_text_from_element(p_element, exclude_textboxes: bool = False) -> str:
         return _parser_para_text(p_element, exclude_textboxes=True)
     texts = [t.text for t in p_element.findall(f".//{{{W_NS}}}t") if t.text]
     return "".join(texts).strip()
+
+
+def _parse_toc_entry_element(p_element) -> tuple[str, str]:
+    """Extract clean title and page number from a Word TOC paragraph."""
+    tokens = []
+    for elem in p_element.iter():
+        tag = elem.tag.split("}")[-1]
+        if tag == "t" and elem.text:
+            tokens.append(elem.text)
+        elif tag == "tab":
+            tokens.append(" ")
+    raw = "".join(tokens).strip()
+    if not raw or raw.lower() == "table of contents":
+        return "", ""
+
+    # Match trailing page number (digits at end)
+    m = re.search(r"^(.*?)[ \t\.\u2026\u22ef]+(\d+)\s*$", raw)
+    if not m:
+        m = re.search(r"^(.*?)(\d+)\s*$", raw)
+
+    if m:
+        title_part = m.group(1).strip()
+        page_num = m.group(2).strip()
+    else:
+        title_part = raw
+        page_num = ""
+
+    # Clean trailing dots, leader dots, colons from title
+    title_part = re.sub(r"[\.\u2026\u22ef\t_:]+$", "", title_part).strip()
+    # Ensure space between section number and title, e.g. '1.0OBJECTIVE' -> '1.0 OBJECTIVE'
+    title_part = re.sub(r"^(\d+\.\d+)\s*([A-Za-z])", r"\1 \2", title_part)
+    title_part = re.sub(r"\s+", " ", title_part)
+
+    return title_part, page_num
 
 
 # ── _collect_widget_debug() ─────────────────────────
@@ -832,6 +885,44 @@ def _render_textbox_html(
             )
             continue
 
+        if re.search(r"\beffective\s*date\b", inner_text, re.IGNORECASE):
+            label_part = "EFFECTIVE DATE: "
+            eff_val = ""
+            field = field_map.get(location_base) or field_map.get(f"{location_base}_blank_0")
+            if field:
+                eff_val = field.get("value", "") or ""
+            if not eff_val:
+                for f_item in field_map.values():
+                    if f_item.get("cover_field") == "effective_date":
+                        eff_val = f_item.get("value", "") or ""
+                        field = f_item
+                        break
+            if _is_readonly_mode(mode):
+                if eff_val:
+                    display = _render_readonly_span(eff_val, field or {}, location_base)
+                    lines.append(
+                        f'<p class="docx-para docx-textbox-line docx-para-editable">'
+                        f"{_escape_html(label_part)}{display}</p>"
+                    )
+                else:
+                    lines.append(
+                        f'<p class="docx-para docx-textbox-line docx-para-editable">'
+                        f"{_escape_html(label_part)}</p>"
+                    )
+            else:
+                inp = _render_field_input(
+                    location_base,
+                    field or {"label": "Effective Date", "value": eff_val, "type": "textbox_blank", "widget": "date"},
+                    css_class="docx-input-inline",
+                    value=eff_val,
+                    inline=True,
+                )
+                lines.append(
+                    f'<p class="docx-para docx-textbox-line docx-para-editable">'
+                    f"{_escape_html(label_part)}{inp}</p>"
+                )
+            continue
+
         field = field_map.get(location_base)
         colon_text = dedupe_colon_label(inner_text)
         if inner_text and has_paragraph_blank(inner_text) and PARA_COLON_BLANK_RE.search(
@@ -997,23 +1088,31 @@ def _render_approver_cell(field: dict, mode: str = "edit", colspan_attr: str = "
     date_loc = _escape_html(field.get("signature_date_location", ""))
     value = field.get("value", "")
     user_id = field.get("user_id", "")
-    if _is_readonly_mode(mode) or _is_field_locked(field):
+    is_pre = (
+        field.get("is_pre_approver")
+        or role in (
+            "prepared_by_engineering_name",
+            "checked_by_engineering_name",
+            "checked_by_production_name",
+            "checked_by_validation_name",
+            "checked_by_quality_name",
+            "approved_by_user_name",
+            "approved_by_quality_name",
+        )
+        or bool(re.match(r"^table_[123]_row_\d+_col_\d+$", location))
+    )
+    if _is_readonly_mode(mode) or _is_field_locked(field) or (is_pre and mode != "pre_approval"):
         display = _render_readonly_span(value, field, location)
+        hidden_input = (
+            f'<input type="hidden" name="fields[{location}]" value="{_escape_html(value)}">'
+            if location else ""
+        )
         return _readonly_td(
-            display,
+            f"{display}{hidden_input}",
             colspan_attr=colspan_attr,
             location=location,
-            extra_class="readonly docx-approver-readonly",
+            extra_class="readonly docx-approver-readonly font-weight-bold text-dark",
         )
-    is_pre = field.get("is_pre_approver") or role in (
-        "prepared_by_engineering_name",
-        "checked_by_engineering_name",
-        "checked_by_production_name",
-        "checked_by_validation_name",
-        "checked_by_quality_name",
-        "approved_by_user_name",
-        "approved_by_quality_name",
-    )
     is_pre_attr = ' data-is-pre-approver="1"' if is_pre else ""
     required = "" if (is_pre or mode == "pre_approval") else (" required" if role else "")
     user_id_attr = f' data-user-id="{user_id}"' if user_id else ""
@@ -1601,7 +1700,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                 html.append(_render_approver_cell(field, mode, colspan_attr=colspan_attr))
                 continue
 
-            if field and field.get("type") == "attachment" and not _is_field_locked(field):
+            if field and (field.get("type") == "attachment" or field.get("widget") == "file") and not _is_field_locked(field):
                 html.append(_render_attachment_cell(field, mode, colspan_attr=colspan_attr))
                 continue
 
@@ -1612,7 +1711,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                 not readonly
                 and r_idx > 0
                 and is_attachment_upload_column(table, header_label)
-                and (field is None or str(field.get("type", "")) == "attachment")
+                and (field is None or str(field.get("type", "")) == "attachment" or field.get("widget") == "file")
             ):
                 upload_field = field or {
                     "location": f"table_{t_idx}_row_{r_idx}_col_{col_idx}",
@@ -1839,6 +1938,11 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
     from docx import Document
 
     doc = Document(template_path)
+    if normalize_attachment_list_paragraphs_to_table(doc):
+        try:
+            doc.save(template_path)
+        except Exception:
+            pass
     field_map = {f["location"]: f for f in fields}
     paragraphs = doc.paragraphs
 
@@ -1935,28 +2039,37 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
             W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
             sdt_paras = child.findall(f".//{{{W_NS}}}p")
             if sdt_paras:
-                toc_lines = []
+                toc_entries = []
                 for sp in sdt_paras:
-                    p_text = _para_text_from_element(sp)
-                    if p_text and p_text.strip():
-                        toc_lines.append(p_text.strip())
-                if toc_lines:
+                    title, page = _parse_toc_entry_element(sp)
+                    if title:
+                        toc_entries.append((title, page))
+                if toc_entries:
                     html_parts.append(
-                        '<div class="docx-toc-card" style="margin: 16px 0; padding: 14px 18px; '
+                        '<div class="docx-toc-card" style="margin: 16px 0; padding: 16px 20px; '
                         'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-family: inherit;">'
                     )
                     html_parts.append(
-                        '<div style="font-weight: 700; font-size: 13px; color: #475569; '
-                        'margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px;">'
+                        '<div style="font-weight: 700; font-size: 14px; color: #334155; '
+                        'margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">'
                         '📋 Table of Contents</div>'
                     )
-                    for line in toc_lines:
-                        html_parts.append(
-                            f'<div class="docx-toc-line" style="display: flex; justify-content: space-between; '
-                            f'padding: 3px 0; font-size: 13px; color: #334155; border-bottom: 1px dotted #e2e8f0;">'
-                            f'<span>{_escape_html(line)}</span>'
-                            f'</div>'
-                        )
+                    for title, page in toc_entries:
+                        if page:
+                            html_parts.append(
+                                f'<div class="docx-toc-line" style="display: flex; align-items: baseline; justify-content: space-between; '
+                                f'padding: 4px 0; font-size: 13px; color: #334155; line-height: 1.6;">'
+                                f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500;">{_escape_html(title)}</span>'
+                                f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 10px; min-width: 24px; height: 1em;"></span>'
+                                f'<span class="toc-page" style="flex-shrink: 0; font-weight: 600; color: #1e293b;">{_escape_html(page)}</span>'
+                                f'</div>'
+                            )
+                        else:
+                            html_parts.append(
+                                f'<div class="docx-toc-line" style="padding: 4px 0; font-size: 13px; color: #334155; line-height: 1.6;">'
+                                f'<span class="toc-title" style="font-weight: 500;">{_escape_html(title)}</span>'
+                                f'</div>'
+                            )
                     html_parts.append('</div>')
 
     html_parts.append("</div>")

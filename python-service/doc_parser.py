@@ -803,6 +803,85 @@ def is_list_of_attachment_table(table) -> bool:
     return "list of attachment" in text
 
 
+def normalize_attachment_list_paragraphs_to_table(doc) -> bool:
+    """
+    If document has 'LIST OF ATTACHMENT:' heading followed by loose attachment paragraphs
+    (Attachment-1, Attachment-2, etc.) instead of a table, converts them into a 3-column
+    Table Grid table: ['Sl. No.', 'List of Attachment', 'Attachment No.'].
+    Returns True if modified.
+    """
+    heading_p = None
+    heading_idx = None
+    for i, p in enumerate(doc.paragraphs):
+        t = p.text.strip().upper()
+        if "LIST OF ATTACHMENT" in t or "LIST OF ATTACHMENTS" in t:
+            heading_p = p
+            heading_idx = i
+            break
+
+    if heading_p is None:
+        return False
+
+    # Check if a table already follows (within next 4 elements)
+    curr = heading_p._p.getnext()
+    steps = 0
+    while curr is not None and steps < 4:
+        if curr.tag.endswith("tbl"):
+            return False
+        curr = curr.getnext()
+        steps += 1
+
+    # Collect consecutive attachment paragraphs
+    intro_p = heading_p
+    att_paras = []
+    for i in range(heading_idx + 1, len(doc.paragraphs)):
+        p = doc.paragraphs[i]
+        t = p.text.strip()
+        if re.match(r"^Attachment\s*[-–—]?\s*\d+", t, re.IGNORECASE):
+            att_paras.append((p, t))
+        elif not att_paras and t != "" and "SUMMARY" not in t.upper() and "CONCLUSION" not in t.upper():
+            intro_p = p
+        elif att_paras and ("SUMMARY" in t.upper() or "CONCLUSION" in t.upper() or t.startswith("13.") or t.startswith("14.")):
+            break
+
+    if not att_paras:
+        return False
+
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+
+    tbl = doc.add_table(rows=len(att_paras) + 1, cols=3)
+    tbl.style = "Table Grid"
+
+    headers = ["Sl. No.", "List of Attachment", "Attachment No."]
+    hdr_row = tbl.rows[0]
+    for c_idx, title in enumerate(headers):
+        cell = hdr_row.cells[c_idx]
+        cell.text = title
+        for p in cell.paragraphs:
+            for r in p.runs:
+                r.bold = True
+        shd_elem = parse_xml(f'<w:shd {nsdecls("w")} w:fill="D9D9D9"/>')
+        cell._tc.get_or_add_tcPr().append(shd_elem)
+
+    for r_idx, (p_elem, t) in enumerate(att_paras, start=1):
+        m = re.match(r"^Attachment\s*[-–—]?\s*\d+\s*\(?\s*(.*?)\s*\)?$", t, re.IGNORECASE)
+        clean_title = m.group(1).rstrip(")") if m else t
+        row = tbl.rows[r_idx]
+        row.cells[0].text = f"{r_idx}.0"
+        row.cells[1].text = clean_title
+        row.cells[2].text = ""
+
+    intro_p._p.addnext(tbl._tbl)
+
+    for p_elem, _ in att_paras:
+        parent = p_elem._p.getparent()
+        if parent is not None:
+            parent.remove(p_elem._p)
+
+    return True
+
+
 # True when this column should accept a file upload (includes List of Attachment No. col).
 def is_attachment_upload_column(table, header_label: str) -> bool:
     """
@@ -1567,6 +1646,11 @@ def _mark_prefilled_signature_rows(fillable_fields: list) -> list:
 # Main parser: walk all body tables and paragraphs and return fillable field metadata.
 def parse_docx(file_path: str) -> dict:
     doc = Document(file_path)
+    if normalize_attachment_list_paragraphs_to_table(doc):
+        try:
+            doc.save(file_path)
+        except Exception:
+            pass
 
     result = {
         "tables": [],

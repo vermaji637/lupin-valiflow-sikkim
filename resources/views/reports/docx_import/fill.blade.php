@@ -502,7 +502,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                 <form action="{{ route('reports.docx-import.fill', $report) }}" method="POST" id="docxFillForm" class="esign-required {{ (!empty($requalFillLocked) && empty($isPreApprovalMode)) ? 'requal-fill-locked' : '' }}" enctype="multipart/form-data">
                     @csrf
                     <input type="hidden" name="password">
-                    <input type="hidden" name="table_ops" id="docxTableOpsInput" value="[]">
+                    <input type="hidden" name="table_ops" id="docxTableOpsInput" value="{{ json_encode($report->data['table_ops'] ?? []) }}">
                     {{-- Hidden header cell values synced from  and table inputs --}}
                     <input type="hidden" name="fields[header_0_row_2_col_2]" id="header_facility_hidden"
                            value="{{ old('fields.header_0_row_2_col_2', $facilitySection) }}">
@@ -933,7 +933,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    let tableOps = [];
+    let tableOps = @json($report->data['table_ops'] ?? []);
     let selectedRow = null;
     let selectedTable = null;
 
@@ -961,7 +961,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (rowInfo) {
                 const tIdx = selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable);
                 const rIdx = selectedRow.getAttribute('data-row-index') || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow);
-                rowInfo.innerHTML = '<span class="text-primary font-weight-bold">Selected Table ' + (parseInt(tIdx) + 1) + ', Row ' + (parseInt(rIdx) + 1) + '</span> — Ready to Add or Delete.';
+                // rowInfo.innerHTML = '<span class="text-primary font-weight-bold">Selected Table ' + (parseInt(tIdx) + 1) + ', Row ' + (parseInt(rIdx) + 1) + '</span> — Ready to Add or Delete.';
             }
         });
 
@@ -1131,6 +1131,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 };
             });
             tableOpsInput.value = JSON.stringify(serialized);
+            if (typeof window.docxScheduleDraftSave === 'function') {
+                window.docxScheduleDraftSave();
+            }
         }
 
         window.syncDocxTableOps = syncTableOpsInput;
@@ -1225,6 +1228,17 @@ document.addEventListener('DOMContentLoaded', function () {
     const inferApproverRoleFromRow = function (sel) {
         const row = sel.closest('tr');
         if (!row) return '';
+        const loc = sel.dataset.fieldLocation || '';
+        if (/^table_[123]_row_\d+_col_\d+$/.test(loc) || sel.dataset.isPreApprover === '1') {
+            return '';
+        }
+        const table = sel.closest('table');
+        if (table) {
+            const tableText = ((table.innerText || '') + ' ' + (table.previousElementSibling ? table.previousElementSibling.innerText : '')).toLowerCase();
+            if (tableText.includes('pre-approval') || tableText.includes('prior to starting')) {
+                return '';
+            }
+        }
         const text = (row.textContent || '').toLowerCase();
         if (text.includes('quality') || text.includes('assurance') || /\bqa\b/.test(text)) {
             const tableTitle = ((sel.closest('table') || {}).innerText || '').slice(0, 80).toLowerCase();
@@ -1264,12 +1278,77 @@ document.addEventListener('DOMContentLoaded', function () {
         'approved_by_quality_name'
     ];
 
+    const preApprovedUserNames = @json($preApprovedUserNames ?? []);
+
+    /**
+     * Lock pre-approved cells into static readonly text when pre-approval is complete or in post-fill stage.
+     * Prevents any pre-approval signature cells from showing editable dropdowns.
+     */
+    const lockPreApprovedCells = function () {
+        if (isPreApprovalMode) return;
+        if ('{{ $importSource ?? '' }}' !== 'requalification') return;
+        const allApprovers = Array.from(document.querySelectorAll('.docx-preview-wrapper select.approver-field'));
+
+        preApproverRoles.forEach(function (roleKey, idx) {
+            let previewSelect = document.querySelector(
+                '.docx-preview-wrapper select.approver-field[data-approver-role="' + roleKey + '"]'
+            );
+            if (!previewSelect && idx < allApprovers.length) {
+                const candidate = allApprovers[idx];
+                const loc = candidate.dataset.fieldLocation || '';
+                if (/^table_[123]_row_\d+_col_\d+$/.test(loc) || candidate.dataset.isPreApprover === '1') {
+                    previewSelect = candidate;
+                }
+            }
+            if (!previewSelect) return;
+
+            const loc = previewSelect.dataset.fieldLocation || '';
+            const td = previewSelect.closest('td');
+            const savedName = (preApprovedUserNames && preApprovedUserNames[roleKey])
+                ? preApprovedUserNames[roleKey]
+                : (previewSelect.dataset.userName || previewSelect.value || '');
+
+            if (td) {
+                td.className = 'docx-cell readonly docx-approver-readonly font-weight-bold text-dark';
+                td.innerHTML = '<span class="docx-readonly-value font-weight-bold text-dark" data-field="' + loc + '">'
+                    + (savedName || '—')
+                    + '</span>'
+                    + (loc ? '<input type="hidden" name="fields[' + loc + ']" value="' + String(savedName).replace(/"/g, '&quot;') + '">' : '');
+            } else {
+                previewSelect.disabled = true;
+                previewSelect.style.display = 'none';
+            }
+        });
+
+        document.querySelectorAll('.docx-preview-wrapper select.approver-field').forEach(function (sel) {
+            const loc = sel.dataset.fieldLocation || '';
+            const role = sel.dataset.approverRole || '';
+            if (/^table_[123]_row_\d+_col_\d+$/.test(loc) || sel.dataset.isPreApprover === '1' || preApproverRoles.includes(role)) {
+                const td = sel.closest('td');
+                const savedName = (role && preApprovedUserNames && preApprovedUserNames[role])
+                    ? preApprovedUserNames[role]
+                    : (sel.dataset.userName || sel.value || '');
+                if (td) {
+                    td.className = 'docx-cell readonly docx-approver-readonly font-weight-bold text-dark';
+                    td.innerHTML = '<span class="docx-readonly-value font-weight-bold text-dark" data-field="' + loc + '">'
+                        + (savedName || '—')
+                        + '</span>'
+                        + (loc ? '<input type="hidden" name="fields[' + loc + ']" value="' + String(savedName).replace(/"/g, '&quot;') + '">' : '');
+                } else {
+                    sel.disabled = true;
+                    sel.style.display = 'none';
+                }
+            }
+        });
+    };
+
     /**
      * Synchronize the 7 Pre-Approval dropdowns in the top card (#pre_{roleKey})
      * with the 7 signature dropdowns in the document preview table (PRE APPROVAL SIGNATURE).
      * Any selection in either dropdown automatically updates the other and sets the hidden name field.
      */
     const setupPreApproverSync = function () {
+        if ('{{ $importSource ?? '' }}' !== 'requalification') return;
         const firstCardSelect = document.getElementById('pre_prepared_by_engineering_name');
         const preCard = document.getElementById('requalPreApprovalCard');
         if (!firstCardSelect && !preCard) {
@@ -1371,6 +1450,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const hydrateApproverFields = function () {
         document.querySelectorAll('select.approver-field').forEach(function (sel) {
             if (sel.dataset.isPreApprover === '1') return;
+            if (/^table_[123]_row_\d+_col_\d+$/.test(sel.dataset.fieldLocation || '')) return;
+            if (preApproverRoles.includes(sel.dataset.approverRole || '')) return;
             if (sel.dataset.hydrated === '1') return;
             sel.dataset.hydrated = '1';
 
@@ -1522,8 +1603,10 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
+    lockPreApprovedCells();
     setupPreApproverSync();
     hydrateApproverFields();
+    lockPreApprovedCells();
     ensureAttachmentFileInputs();
     prepareDateTimeInputs(false);
     bindAttachmentFields();

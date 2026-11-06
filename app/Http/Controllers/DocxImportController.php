@@ -222,6 +222,34 @@ class DocxImportController extends Controller
             // Requalification and Revalidation wait for PRE approval before anyone can fill post execution details.
             $requiresPreApproval = in_array($importSource, ['requalification', 'revalidation'], true);
             if ($requiresPreApproval) {
+                $hasAttachmentFields = collect($fields)->contains(
+                    fn ($f) => is_array($f) && (($f['type'] ?? '') === 'attachment' || ($f['widget'] ?? '') === 'file')
+                );
+                $hasAttachmentParas = collect($fields)->contains(
+                    fn ($f) => is_array($f) && str_contains(strtolower($f['label'] ?? ''), 'attachment-')
+                );
+                if ($hasAttachmentParas && ! $hasAttachmentFields) {
+                    $destPath = storage_path('app/public/templates/docx/' . $fileId . '.docx');
+                    if (is_file($destPath)) {
+                        $pythonBin = base_path('python-service/venv/Scripts/python.exe');
+                        if (! is_file($pythonBin)) {
+                            $pythonBin = 'python';
+                        }
+                        $cliScript = base_path('python-service/cli.py');
+                        $process = new Process([$pythonBin, $cliScript, 'parse', $destPath]);
+                        $process->setTimeout(60);
+                        $process->run();
+                        $cliOutput = trim($process->getOutput());
+                        $jsonStart = strpos($cliOutput, '{"status"');
+                        if ($jsonStart !== false) {
+                            $decoded = json_decode(substr($cliOutput, $jsonStart), true);
+                            if (is_array($decoded) && ($decoded['status'] ?? '') === 'success' && ! empty($decoded['fields'])) {
+                                $fields = $this->normalizeImportFields($decoded['fields']);
+                                $fields = $this->applySourceSpecificImportFieldRules($fields, $importSource);
+                            }
+                        }
+                    }
+                }
                 $fields = $this->applyRequalificationPreApprovalUnlockRules($fields);
             }
             $report = Report::create([
@@ -353,6 +381,7 @@ class DocxImportController extends Controller
             $saved = $this->patchReadonlyHeaderTitles($saved, $report, $stampedFields);
             $saved = $this->enrichReadonlyPreviewForShow($saved, $report);
             $saved = $this->applyAttachmentLinksToPreviewHtml($saved, $report);
+            $saved = $this->formatEffectiveDateInPreviewHtml($saved, $report);
 
             return $saved;
         }
@@ -366,6 +395,7 @@ class DocxImportController extends Controller
         $enriched = $this->enrichReadonlyPreviewForShow($snapshot, $report);
         $enriched = $this->injectDocxFieldValuesIntoHtml($enriched, $stampedFields, $report);
         $enriched = $this->applyAttachmentLinksToPreviewHtml($enriched, $report);
+        $enriched = $this->formatEffectiveDateInPreviewHtml($enriched, $report);
 
         // Persist freshly generated preview so later page loads avoid another Python round-trip.
         if (
@@ -1477,9 +1507,10 @@ class DocxImportController extends Controller
         }
 
         $effectiveDate = (string) ($formFields['effective_date'] ?? $data['effective_date'] ?? '');
-        // Default Effective Date to today when cover expects it but user has not supplied one yet.
+        // Resolve Effective Date from last approved step/revision/report when cover expects it but user has not supplied one yet.
         if ($effectiveDate === '' && $this->reportHasCoverField($importFields, 'effective_date')) {
-            $effectiveDate = now()->timezone('Asia/Kolkata')->format('d-m-Y');
+            $effectiveDate = $this->resolveEffectiveDate($report, $importFields);
+            $effectiveDate = $this->formatEffectiveDateForDocx($effectiveDate);
         } else {
             $effectiveDate = $this->formatEffectiveDateForDocx($effectiveDate);
         }
@@ -2363,30 +2394,154 @@ class DocxImportController extends Controller
         return $map;
     }
 
-    // Resolves Effective Date for the fill form, defaulting to today in Asia/Kolkata timezone.
+    /**
+     * Resolves Effective Date:
+     * - Before pre-approval is complete (pre_setup, pre_pending, pre_returned):
+     *   MUST NOT be automatic - stays blank.
+     * - Once pre-approval is completed:
+     *   Uses the date of the last pre-approval step.
+     */
     private function resolveEffectiveDate(Report $report, array $fields): string
     {
-        $data = $report->data ?? [];
-        if (is_string($data)) {
-            $data = json_decode($data, true) ?? [];
-        }
-        if (is_array($data) && ! empty($data['effective_date'])) {
-            return $this->normalizeEffectiveDateForForm((string) $data['effective_date']);
+        try {
+            $isPreApproved = in_array($report->status, ['pre_approved', 'post_setup', 'post_pending', 'post_returned', 'approved'], true);
+
+            // Find the last approved step in stage 'pre'
+            $lastPreStep = $report->approvalSteps()
+                ->where('stage', 'pre')
+                ->whereNotNull('approved_at')
+                ->orderByDesc('step_order')
+                ->first();
+
+            // If pre-approval is completed or all pre steps were approved:
+            if ($isPreApproved || ($lastPreStep && ! $report->approvalSteps()->where('stage', 'pre')->whereNull('approved_at')->exists())) {
+                if ($lastPreStep && $lastPreStep->approved_at) {
+                    return \Carbon\Carbon::parse($lastPreStep->approved_at)->timezone('Asia/Kolkata')->format('Y-m-d');
+                }
+
+                // Fallback to explicitly stored effective_date on report data
+                $data = $report->data ?? [];
+                if (is_string($data)) {
+                    $data = json_decode($data, true) ?? [];
+                }
+                if (is_array($data) && ! empty($data['effective_date'])) {
+                    return $this->normalizeEffectiveDateForForm((string) $data['effective_date']);
+                }
+            }
+        } catch (\Throwable $e) {
+            // Ignore step query issues
         }
 
-        $loc = $this->findCoverFieldLocation($fields, 'effective_date');
-        if ($loc !== null) {
-            foreach ($fields as $field) {
-                if (is_array($field) && ($field['location'] ?? '') === $loc) {
-                    $val = trim((string) ($field['value'] ?? ''));
-                    if ($val !== '') {
-                        return $this->normalizeEffectiveDateForForm($val);
-                    }
+        // Before pre-approval is complete: effective date must remain BLANK (not automatic)
+        return '';
+    }
+
+    /**
+     * Finds the effective date of the last COMPLETED / APPROVED revision in Revision History.
+     * When drafting a new revision, the last row in the grid represents the current draft,
+     * so the preceding row represents the latest historically approved revision.
+     */
+    private function findLatestRevisionHistoryEffectiveDate(array $fields): ?string
+    {
+        $revisionTables = [];
+        $tableLabels = [];
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if (! preg_match('/^table_(\d+)_row_(\d+)_col_(\d+)$/', $loc, $m)) {
+                continue;
+            }
+            $t = (int) $m[1];
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $tableLabels[$t][$label] = true;
+        }
+
+        foreach ($tableLabels as $t => $lbls) {
+            $hasRev = false;
+            $hasEff = false;
+            foreach (array_keys($lbls) as $l) {
+                if (str_contains($l, 'revision') || str_contains($l, 'rev no') || str_contains($l, 'rev. no')) {
+                    $hasRev = true;
                 }
+                if (str_contains($l, 'effective')) {
+                    $hasEff = true;
+                }
+            }
+            if ($hasRev && $hasEff) {
+                $revisionTables[] = $t;
             }
         }
 
-        return now()->timezone('Asia/Kolkata')->format('Y-m-d');
+        foreach ($revisionTables as $tableNum) {
+            $rowMap = [];
+            foreach ($fields as $field) {
+                if (! is_array($field)) {
+                    continue;
+                }
+                $loc = (string) ($field['location'] ?? '');
+                if (! preg_match('/^table_' . $tableNum . '_row_(\d+)_col_(\d+)$/', $loc, $m)) {
+                    continue;
+                }
+                $r = (int) $m[1];
+                $label = strtolower(trim((string) ($field['label'] ?? '')));
+                if (str_contains($label, 'effective')) {
+                    $val = trim((string) ($field['value'] ?? ''));
+                    $rowMap[$r] = $val;
+                }
+            }
+
+            if (count($rowMap) === 0) {
+                continue;
+            }
+
+            ksort($rowMap);
+            $maxRow = max(array_keys($rowMap));
+
+            // The last row is the current unapproved revision being drafted.
+            // Take the latest filled date from prior rows.
+            $priorDates = [];
+            foreach ($rowMap as $r => $val) {
+                if ($r < $maxRow && $val !== '') {
+                    $priorDates[$r] = $val;
+                }
+            }
+            if (! empty($priorDates)) {
+                return end($priorDates);
+            }
+
+            $all = array_filter($rowMap, fn ($v) => $v !== '');
+            if (! empty($all)) {
+                return end($all);
+            }
+        }
+
+        return null;
+    }
+
+    private function findQualificationHistoryApprovedDate(array $fields): ?string
+    {
+        $dates = [];
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $val = trim((string) ($field['value'] ?? ''));
+            if ($val === '') {
+                continue;
+            }
+            if (preg_match_all('/(?:completed\s+on|approval\s+date[:\s]*)\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i', $val, $matches)) {
+                foreach ($matches[1] as $d) {
+                    $dates[] = $d;
+                }
+            }
+        }
+        if (empty($dates)) {
+            return null;
+        }
+
+        return end($dates);
     }
 
     /** HTML date input uses Y-m-d; DOCX cover cells use d-m-Y. */
@@ -2443,9 +2598,11 @@ class DocxImportController extends Controller
                 }
             }
         }
-        // Last resort: stamp today's date so cover never exports blank.
         if ($date === '') {
-            $date = now()->timezone('Asia/Kolkata')->format('d-m-Y');
+            $resolved = $this->resolveEffectiveDate($report, $fields);
+            if ($resolved !== '') {
+                $date = $this->formatEffectiveDateForDocx($resolved);
+            }
         }
 
         $fields = $this->syncEffectiveDateDisplayFields($fields, $date);
@@ -2528,6 +2685,45 @@ class DocxImportController extends Controller
         ];
 
         return $fields;
+    }
+
+    /**
+     * Stamped onto the document once the final pre-approver signs.
+     * The last pre-approval step date becomes the protocol's Effective Date.
+     */
+    public function syncEffectiveDateOnPreApprovalComplete(Report $report, string $effectiveDate): void
+    {
+        $fields = $report->docx_import_fields;
+        if (! is_array($fields)) {
+            return;
+        }
+
+        $formattedDocxDate = $this->formatEffectiveDateForDocx($effectiveDate);
+        $primaryLoc = $this->findPrimaryEffectiveDateLocation($this->upgradeProtocolCoverFieldMetadata($fields));
+
+        $changed = false;
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if ($loc === '' || $this->isRevisionHistoryEffectiveDateLocation($fields, $loc)) {
+                continue;
+            }
+            if ($loc === $primaryLoc || $this->isEffectiveDateLikeField($field)) {
+                $fields[$idx]['value'] = $formattedDocxDate;
+                $changed = true;
+            }
+        }
+
+        if ($changed) {
+            $report->docx_import_fields = $fields;
+            $report->save();
+        }
+
+        if ($report->docx_import_path) {
+            $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
+        }
     }
 
     /**
@@ -3893,14 +4089,23 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
         }
 
-        $isPreApprovalMode = in_array($report->import_source, ['requalification', 'revalidation'], true)
-            && in_array($report->status, ['pre_setup', 'pre_returned'], true)
-            && $report->stage === 'pre';
+        $isRequalOrReval = in_array(($report->import_source ?? ''), ['requalification', 'revalidation'], true);
 
-        if ($isPreApprovalMode) {
-            $hasParagraphContent = collect($fields)->contains(fn ($f) => is_array($f) && ($f['type'] ?? '') === 'paragraph_content');
-            $hasCol0Fields = collect($fields)->contains(fn ($f) => is_array($f) && str_ends_with((string) ($f['location'] ?? ''), '_col_0'));
-            if ((! $hasParagraphContent || ! $hasCol0Fields) && ! empty($report->docx_import_path)) {
+        if ($isRequalOrReval && ! empty($report->docx_import_path)) {
+            $hasAttachmentFields = collect($fields)->contains(
+                fn ($f) => is_array($f) && (($f['type'] ?? '') === 'attachment' || ($f['widget'] ?? '') === 'file')
+            );
+            $hasAttachmentParas = collect($fields)->contains(
+                fn ($f) => is_array($f) && str_contains(strtolower($f['label'] ?? ''), 'attachment-')
+            );
+            $hasParagraphContent = collect($fields)->contains(
+                fn ($f) => is_array($f) && ($f['type'] ?? '') === 'paragraph_content'
+            );
+            $hasCol0Fields = collect($fields)->contains(
+                fn ($f) => is_array($f) && str_ends_with((string) ($f['location'] ?? ''), '_col_0')
+            );
+
+            if (($hasAttachmentParas && ! $hasAttachmentFields) || ! $hasParagraphContent || ! $hasCol0Fields) {
                 $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
                 $reparsed = $this->reparseDocxForReport($report);
                 if (! empty($reparsed)) {
@@ -3909,15 +4114,25 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     $report->save();
                 }
             }
+        }
 
+        $isPreApprovalMode = $isRequalOrReval
+            && in_array($report->status, ['pre_setup', 'pre_returned'], true)
+            && $report->stage === 'pre';
+
+        if ($isPreApprovalMode) {
             $fields = $this->applyRequalificationPreApprovalUnlockRules($fields);
             $previewMode = 'pre_approval';
             $report->docx_import_fields = $fields;
             $report->save();
         } else {
-            if (in_array(($report->import_source ?? ''), ['requalification', 'revalidation'], true)) {
+            if ($isRequalOrReval) {
                 $fields = $this->applyRequalificationPostPreApprovalLockRules($fields);
+                $fields = $this->applyRequalificationPreApproverNames($report, $fields);
                 $previewMode = 'requalification';
+                if (! empty($report->docx_import_path)) {
+                    $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
+                }
             } else {
                 $fields = $this->lockConnectedAccessoriesDescriptions($fields);
                 $fields = $this->lockExistingTableContent($fields);
@@ -4041,11 +4256,17 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $requalPreEditable = $requalFillLocked
             && in_array($report->status, ['pre_setup', 'pre_returned'], true);
         $draftPreApprovers = [];
+        $preApprovedUserNames = [];
         foreach (array_keys(self::PRE_APPROVER_FIELDS) as $roleKey) {
             if (! empty($reportData[$roleKey]) && is_numeric($reportData[$roleKey])) {
                 $draftPreApprovers[$roleKey] = (int) $reportData[$roleKey];
             }
+            $preApprovedUserNames[$roleKey] = $this->preApproverNameAndDesignation($reportData, $roleKey);
         }
+
+        $isPreApprovalMode = in_array($report->import_source, ['requalification', 'revalidation'], true)
+            && in_array($report->status, ['pre_setup', 'pre_returned'], true)
+            && $report->stage === 'pre';
 
         return view('reports.docx_import.fill', compact(
             'report',
@@ -4082,6 +4303,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'requalFillLocked',
             'requalPreEditable',
             'draftPreApprovers',
+            'preApprovedUserNames',
             'isPreApprovalMode'
         ));
     }
@@ -4423,6 +4645,18 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             if ($request->filled($roleKey) && is_numeric($request->input($roleKey))) {
                 $data[$roleKey] = (int) $request->input($roleKey);
             }
+        }
+
+        $tableOpsRaw = $request->input('table_ops');
+        if (is_string($tableOpsRaw)) {
+            $tableOps = json_decode($tableOpsRaw, true) ?: [];
+        } elseif (is_array($tableOpsRaw)) {
+            $tableOps = $tableOpsRaw;
+        } else {
+            $tableOps = [];
+        }
+        if (! empty($tableOps)) {
+            $data['table_ops'] = $tableOps;
         }
 
         $savedAt = now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
@@ -4781,6 +5015,20 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         $report->data = $data;
         $storedFields = $this->applyRequalificationPreApproverNames($report, $storedFields);
+        $effectiveDateLocation = $this->findEffectiveDateFieldLocation($storedFields);
+
+        // For Revalidation, the DOCX only contains post-approval tables (REPORT APPROVAL).
+        // Pre-approval is workflow-only and must NEVER write into any approver tables in the DOCX.
+        $revalApproverTables = [];
+        if (($report->import_source ?? '') === 'revalidation') {
+            foreach ($storedFields as $f) {
+                if (is_array($f) && (($f['type'] ?? '') === 'approver' || ($f['widget'] ?? '') === 'approver' || str_starts_with((string) ($f['approver_role'] ?? ''), 'post_'))) {
+                    if (preg_match('/^table_(\d+)_/', (string) ($f['location'] ?? ''), $m)) {
+                        $revalApproverTables[(int) $m[1]] = true;
+                    }
+                }
+            }
+        }
 
         $fieldsToPython = [];
         foreach ($storedFields as $idx => $field) {
@@ -4794,6 +5042,14 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $val = array_key_exists($loc, $formFields) ? (string) $formFields[$loc] : (string) ($field['value'] ?? '');
             if (trim($val) === '' && ($field['type'] ?? '') === 'approver' && ! empty($field['value'])) {
                 $val = (string) $field['value'];
+            }
+            // Effective Date is NOT yet approved during pre-approval submission; keep blank until QA signs
+            if ($this->isEffectiveDateLikeField($field) && ! $this->isRevisionHistoryEffectiveDateLocation($storedFields, $loc)) {
+                $val = '';
+            }
+            // For revalidation, REPORT APPROVAL is strictly for post-approval; keep all approver tables blank during pre-approval
+            if (! empty($revalApproverTables) && preg_match('/^table_(\d+)_/', $loc, $m) && isset($revalApproverTables[(int) $m[1]])) {
+                $val = '';
             }
             $storedFields[$idx]['value'] = $val;
             $fieldsToPython[] = [
@@ -4812,6 +5068,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
             if (! preg_match('/^(para_|table_|header_|txbx_)/', $loc)) {
                 continue;
+            }
+            if (($effectiveDateLocation !== null && $loc === $effectiveDateLocation) || (str_contains(strtolower($loc), 'effective') && ! $this->isRevisionHistoryEffectiveDateLocation($storedFields, $loc))) {
+                $val = '';
+            }
+            if (! empty($revalApproverTables) && preg_match('/^table_(\d+)_/', $loc, $m) && isset($revalApproverTables[(int) $m[1]])) {
+                $val = '';
             }
             $fieldsToPython[] = [
                 'location' => $loc,
@@ -5037,29 +5299,13 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     }
 
     /**
-     * Recall a pre-approval request back to draft mode so creator can add/delete rows or edit.
+     * Recall a pre-approval request back to draft mode - DISABLED per workflow policy.
+     * Once sent for pre-approval, the document remains locked until an approver sends it back.
      */
     public function recallRequalificationPreApproval(Report $report)
     {
-        $isCreator = (int) $report->created_by === (int) auth()->id();
-        $isSuperAdmin = (auth()->user() && auth()->user()->isAdmin()) || auth()->id() === 1;
-
-        abort_unless($isCreator || $isSuperAdmin, 403);
-
-        if ($report->status === 'pre_pending' && $report->stage === 'pre') {
-            $report->approvalSteps()->where('stage', 'pre')->delete();
-            $report->update([
-                'status'             => 'pre_setup',
-                'current_step_order' => 0,
-                'rendered_html'      => null,
-            ]);
-            $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
-
-            return redirect()->route('reports.docx-import.fill-form', $report)
-                ->with('status', 'Pre-approval recalled. You can now edit the document, add/delete rows, and re-send for pre-approval.');
-        }
-
-        return redirect()->route('reports.show', $report);
+        return redirect()->route('reports.show', $report)
+            ->with('info', 'Once sent for pre-approval, the document cannot be recalled. It remains locked and can only be edited if an approver sends it back for correction.');
     }
 
     /**
@@ -5623,7 +5869,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             )) {
                 $effectiveDate = trim((string) $request->input('effective_date', ''));
                 if ($effectiveDate === '') {
-                    $effectiveDate = now()->timezone('Asia/Kolkata')->format('Y-m-d');
+                    $effectiveDate = $this->resolveEffectiveDate($report, $importFields);
                 }
                 $data['effective_date'] = $this->formatEffectiveDateForDocx($effectiveDate);
             }
@@ -6105,7 +6351,14 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
 
-            // 4. All paragraphs MUST BE LOCKED post-pre-approval (Objective, Scope, Responsibilities, etc.)
+            // 4. Attachment upload fields MUST BE UNLOCKED during execution fill mode so users can attach files
+            if ($type === 'attachment' || ($field['widget'] ?? '') === 'file') {
+                $fields[$idx]['locked'] = false;
+                $unlockedCount++;
+                continue;
+            }
+
+            // 5. All paragraphs MUST BE LOCKED post-pre-approval (Objective, Scope, Responsibilities, etc.)
             if ($type === 'paragraph_content' || str_starts_with($location, 'para_') || str_starts_with($type, 'para')) {
                 if ($type !== 'paragraph_blank_part') {
                     $fields[$idx]['locked'] = true;
@@ -6114,15 +6367,29 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 }
             }
 
-            // 5. 2-column table keys (Col 0) MUST BE LOCKED: Tag. No., Plant / Module, MOC, etc.
+            // Pre-approval approver cells and signatures: ALWAYS LOCKED post-pre-approval
+            $role = (string) ($field['approver_role'] ?? '');
+            $isPreApprover = ! empty($field['is_pre_approver'])
+                || in_array($role, array_keys(self::PRE_APPROVER_FIELDS), true)
+                || preg_match('/^table_[123]_row_\d+_col_\d+$/', $location);
+
+            if ($isPreApprover) {
+                $fields[$idx]['locked'] = true;
+                $fields[$idx]['stamp_eligible'] = false;
+                $fields[$idx]['widget'] = 'text';
+                $lockedCount++;
+                continue;
+            }
+
+            // 6. 2-column table keys (Col 0) MUST BE LOCKED: Tag. No., Plant / Module, MOC, etc.
             if ($type === 'table_2col_label' || str_ends_with($location, '_col_0')) {
                 $fields[$idx]['locked'] = true;
                 $lockedCount++;
                 continue;
             }
 
-            // 6. 2-column table fill values (Col 1) MUST BE UNLOCKED: only fill bus ho!
-            if ($type === 'table_2col' || str_ends_with($location, '_col_1') || preg_match('/^table_\d+_row_\d+$/', $location)) {
+            // 7. 2-column table fill values (Col 1) MUST BE UNLOCKED: only 2-col values, not multicol tables!
+            if ($type !== 'approver' && ($type === 'table_2col' || ($type !== 'table_multicol' && (str_ends_with($location, '_col_1') || preg_match('/^table_\d+_row_\d+$/', $location))))) {
                 $fields[$idx]['locked'] = false;
                 $unlockedCount++;
                 continue;
@@ -6573,6 +6840,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             if ($response->successful() && is_array($response->json())) {
                 $result = $response->json();
                 $parsedFields = $result['fields'] ?? [];
+                if (! empty($result['file_id'])) {
+                    $newDocxPath = storage_path('app/public/templates/docx/' . $result['file_id'] . '.docx');
+                    if (is_file($newDocxPath) && $newDocxPath !== $filePath) {
+                        @copy($newDocxPath, $filePath);
+                    }
+                }
             }
         } catch (\Throwable $e) {
             Log::info('HTTP reparse unavailable, attempting CLI parse: ' . $e->getMessage());
@@ -6608,20 +6881,94 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $newFields = $this->normalizeImportFields($parsedFields);
             $existing = is_array($report->docx_import_fields) ? $report->docx_import_fields : [];
             $existingByLoc = [];
+            $existingByRole = [];
+            $oldHadAttachmentTable = false;
             foreach ($existing as $ef) {
                 if (is_array($ef) && ! empty($ef['location'])) {
                     $existingByLoc[$ef['location']] = $ef;
+                    if (($ef['type'] ?? '') === 'attachment' || ($ef['widget'] ?? '') === 'file') {
+                        $oldHadAttachmentTable = true;
+                    }
+                    if (! empty($ef['approver_role'])) {
+                        $existingByRole[$ef['approver_role']] = $ef;
+                    }
                 }
             }
+
+            // Detect if an attachment table was newly inserted (e.g. at table_16)
+            $attTableIdx = null;
+            if (! $oldHadAttachmentTable) {
+                foreach ($newFields as $nf) {
+                    if (($nf['type'] ?? '') === 'attachment' || ($nf['widget'] ?? '') === 'file') {
+                        if (preg_match('/^table_(\d+)_/', $nf['location'] ?? '', $m)) {
+                            $attTableIdx = (int) $m[1];
+                            break;
+                        }
+                    }
+                }
+            }
+
             foreach ($newFields as $idx => $nf) {
                 $loc = $nf['location'] ?? '';
-                if (isset($existingByLoc[$loc])) {
-                    $prev = $existingByLoc[$loc];
+
+                // If this cell is in the newly inserted attachment table, keep parser values!
+                if ($attTableIdx !== null && preg_match('/^table_' . $attTableIdx . '_/', $loc)) {
+                    continue;
+                }
+
+                // Determine previous location if tables shifted
+                $prevLoc = $loc;
+                if ($attTableIdx !== null && preg_match('/^table_(\d+)_(.+)$/', $loc, $matches)) {
+                    $tIdx = (int) $matches[1];
+                    $rest = $matches[2];
+                    if ($tIdx > $attTableIdx) {
+                        $prevLoc = 'table_' . ($tIdx - 1) . '_' . $rest;
+                    }
+                }
+
+                if (isset($existingByLoc[$prevLoc])) {
+                    $prev = $existingByLoc[$prevLoc];
+                    $lblNf = strtolower(trim((string) ($nf['label'] ?? '')));
+                    $lblPrev = strtolower(trim((string) ($prev['label'] ?? '')));
+                    $isCompatible = true;
+                    if (str_contains($lblNf, 'attachment') !== str_contains($lblPrev, 'attachment')) {
+                        $isCompatible = false;
+                    }
+                    if (str_contains($lblNf, 'revision') !== str_contains($lblPrev, 'revision')) {
+                        $isCompatible = false;
+                    }
+                    if (($nf['type'] ?? '') === 'attachment' && ($prev['type'] ?? '') !== 'attachment') {
+                        $isCompatible = false;
+                    }
+
+                    if ($isCompatible) {
+                        if (($prev['value'] ?? '') !== '') {
+                            $newFields[$idx]['value'] = $prev['value'];
+                        }
+                        if (isset($prev['approver_role'])) {
+                            $newFields[$idx]['approver_role'] = $prev['approver_role'];
+                        }
+                        if (isset($prev['user_id'])) {
+                            $newFields[$idx]['user_id'] = $prev['user_id'];
+                        }
+                        if (isset($prev['is_pre_approver'])) {
+                            $newFields[$idx]['is_pre_approver'] = $prev['is_pre_approver'];
+                        }
+                    }
+                }
+
+                // Also map by approver role if present
+                $role = $nf['approver_role'] ?? '';
+                if ($role !== '' && isset($existingByRole[$role])) {
+                    $prev = $existingByRole[$role];
                     if (($prev['value'] ?? '') !== '') {
                         $newFields[$idx]['value'] = $prev['value'];
                     }
-                    if (isset($prev['approver_role'])) {
-                        $newFields[$idx]['approver_role'] = $prev['approver_role'];
+                    if (isset($prev['user_id'])) {
+                        $newFields[$idx]['user_id'] = $prev['user_id'];
+                    }
+                    if (isset($prev['is_pre_approver'])) {
+                        $newFields[$idx]['is_pre_approver'] = $prev['is_pre_approver'];
                     }
                 }
             }
@@ -6705,8 +7052,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $fieldsHash = md5(json_encode(array_values($fields), JSON_UNESCAPED_UNICODE));
         $cacheVer   = $this->docxPreviewCacheVersion($fileId, $reportId);
         $cacheKey   = $reportId
-            ? "docx_preview:v63:{$mode}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
-            : "docx_preview:v63:{$mode}:{$fileId}:{$cacheVer}:{$fieldsHash}";
+            ? "docx_preview:v64:{$mode}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
+            : "docx_preview:v64:{$mode}:{$fileId}:{$cacheVer}:{$fieldsHash}";
         $cached     = Cache::get($cacheKey);
 
         // Return cached HTML when fields and mode have not changed since last preview.
@@ -6813,7 +7160,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
      */
     private function applyRequalificationPreApproverNames(Report $report, array $fields): array
     {
-        if (! in_array($report->import_source, ['requalification', 'revalidation'], true) || $fields === []) {
+        // Requalification templates contain explicit PRE-APPROVAL SIGNATURE tables (tables 1, 2, 3).
+        // Revalidation templates only contain REPORT APPROVAL tables (reserved exclusively for POST-approval).
+        // Therefore pre-approver names must only be stamped for requalification protocols.
+        if (($report->import_source ?? '') !== 'requalification' || $fields === []) {
             return $fields;
         }
 
@@ -6985,7 +7335,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     private function requalificationPreApprovalIsComplete(Report $report): bool
     {
         return in_array($report->import_source, ['requalification', 'revalidation'], true)
-            && in_array($report->status, ['pre_approved', 'post_pending', 'post_returned', 'approved'], true);
+            && ($report->stage === 'post' || in_array($report->status, ['pre_approved', 'post_pending', 'post_returned', 'approved'], true));
     }
 
     /**
@@ -7031,9 +7381,6 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     private function applyReportPrefills(Report $report, array $fields): array
     {
         $effectiveDateForPreview = $this->resolveEffectiveDate($report, $fields);
-        if ($effectiveDateForPreview === '') {
-            $effectiveDateForPreview = now()->timezone('Asia/Kolkata')->format('Y-m-d');
-        }
 
         $labelPrefill = [
             'name of equipment'              => $report->equipment_name ?? '',
@@ -7053,10 +7400,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             // stamp the protocol effective date onto them.
             if (
                 $this->isEffectiveDateLikeField($field)
-                && $effectiveDateForPreview !== ''
                 && ! $this->isRevisionHistoryEffectiveDateLocation($fields, $location)
             ) {
-                $field['value'] = $effectiveDateForPreview;
+                $field['value'] = $effectiveDateForPreview !== '' ? $effectiveDateForPreview : '';
                 $field['widget'] = 'date';
                 $field['cover_field'] = $field['cover_field'] ?? 'effective_date';
             }
@@ -8320,7 +8666,46 @@ HTML;
     // Entry point: turn editable preview HTML into static HTML for report show.
     private function enrichReadonlyPreviewForShow(string $html, Report $report): string
     {
-        return $this->convertPreviewHtmlToReadonly($html, $report);
+        $readonlyHtml = $this->convertPreviewHtmlToReadonly($html, $report);
+        return $this->formatEffectiveDateInPreviewHtml($readonlyHtml, $report);
+    }
+
+    /**
+     * Ensures Effective Date is blank while pending approval, and displays QA's approval date once pre-approved.
+     */
+    private function formatEffectiveDateInPreviewHtml(string $html, Report $report): string
+    {
+        if (trim($html) === '') {
+            return $html;
+        }
+
+        $isPreApproved = in_array($report->status, ['pre_approved', 'post_setup', 'post_pending', 'post_returned', 'approved'], true);
+
+        $qaApprovalDate = '';
+        if ($isPreApproved) {
+            $lastPreStep = $report->relationLoaded('approvalSteps')
+                ? $report->approvalSteps->where('stage', 'pre')->whereNotNull('approved_at')->sortByDesc('step_order')->first()
+                : $report->approvalSteps()->where('stage', 'pre')->whereNotNull('approved_at')->orderByDesc('step_order')->first();
+
+            if ($lastPreStep && $lastPreStep->approved_at) {
+                $qaApprovalDate = \Carbon\Carbon::parse($lastPreStep->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y');
+            } elseif (! empty($report->data['effective_date'])) {
+                $qaApprovalDate = $this->formatEffectiveDateForDocx((string) $report->data['effective_date']);
+            }
+        }
+
+        return preg_replace_callback(
+            '/(<p\b[^>]*>)\s*(?:EFFECTIVE\s*(?:DATE\s*)?:?\s*)*(EFFECTIVE\s*DATE\s*:?\s*)(?:<span[^>]*>[^<]*<\/span>|<input[^>]*>|[0-9]{2,4}[-\/\.][0-9]{1,2}[-\/\.][0-9]{2,4}|[A-Za-z0-9_\-\.\/\s]+?)?(<\/p>)/i',
+            function ($m) use ($isPreApproved, $qaApprovalDate) {
+                $tagOpen = $m[1];
+                $tagClose = $m[3];
+                if ($isPreApproved && $qaApprovalDate !== '') {
+                    return $tagOpen . 'EFFECTIVE DATE: <span class="docx-readonly-value">' . htmlspecialchars($qaApprovalDate) . '</span>' . $tagClose;
+                }
+                return $tagOpen . 'EFFECTIVE DATE: ' . $tagClose;
+            },
+            $html
+        );
     }
 
     /**

@@ -176,19 +176,29 @@
                                             && in_array($r->status, ['pre_setup', 'pre_pending', 'pre_returned'], true)
                                             && $r->stage !== 'post';
                                     @endphp
-                                    @if($requalPreGate && $r->status === 'pre_pending')
+                                    @if($r->status === 'pre_pending')
                                         <a href="{{ route('reports.show', $r) }}" class="btn btn-sm btn-secondary">
                                             Pre Approval In Progress
                                         </a>
-                                    @else
+                                    @elseif($r->status === 'post_pending')
+                                        <a href="{{ route('reports.show', $r) }}" class="btn btn-sm btn-info text-white">
+                                            Post Approval In Progress
+                                        </a>
+                                    @elseif($requalPreGate && $r->status === 'pre_setup')
                                         <a href="{{ route('reports.docx-import.fill-form', $r) }}" class="btn btn-sm btn-primary">
-                                            @if($requalPreGate)
-                                                Edit Protocol &amp; Send for Pre-Approval
-                                            @elseif($isReturnedForCorrection)
-                                                Edit &amp; Resubmit
-                                            @else
-                                                Fill Execution &amp; Submit
-                                            @endif
+                                            Edit Protocol &amp; Send for Pre-Approval
+                                        </a>
+                                    @elseif($isReturnedForCorrection)
+                                        <a href="{{ route('reports.docx-import.fill-form', $r) }}" class="btn btn-sm btn-primary">
+                                            Edit &amp; Resubmit
+                                        </a>
+                                    @elseif($r->status === 'pre_approved')
+                                        <a href="{{ route('reports.docx-import.fill-form', $r) }}" class="btn btn-sm btn-primary">
+                                            Fill Execution &amp; Submit
+                                        </a>
+                                    @else
+                                        <a href="{{ route('reports.show', $r) }}" class="btn btn-sm btn-secondary">
+                                            View Report
                                         </a>
                                     @endif
 
