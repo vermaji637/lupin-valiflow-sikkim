@@ -26,6 +26,8 @@ from doc_parser import (
     is_report_number_label,
     is_date_field_label,
     element_has_drawing_checkbox,
+    is_two_col_header_row,
+    is_two_col_grid_table,
     is_toc_table,
     is_toc_list_table,
     is_toc_entry_text,
@@ -420,13 +422,25 @@ async def preview_document(
         fields = []
         for ff in fresh:
             loc = ff.get("location")
+            lbl_lower = (ff.get("label") or "").lower()
+            val_lower = (str(ff.get("value") or "")).lower()
+            is_heading_or_fixed = (
+                any(k in lbl_lower for k in ("methodology", "report approval"))
+                or any(k in val_lower for k in ("methodology", "report approval"))
+            )
+            is_col_0_label = ff.get("type") == "table_2col_label" or bool(loc and loc.endswith("_col_0"))
+
             if loc in stored_by_loc:
                 sv = stored_by_loc[loc]
                 if sv.get("value") not in (None, ""):
                     ff["value"] = sv["value"]
-                # In pre-approval mode, unlock all content fields
-                if is_pre_approval_mode:
-                    if ff.get("type") not in ("approval_stamp", "table_sl_no") and not (loc and loc.endswith("_row_0")):
+                if is_heading_or_fixed or is_col_0_label:
+                    ff["locked"] = True
+                # In pre-approval mode, unlock content fields (except row_0 headers and col_0 labels)
+                elif is_pre_approval_mode:
+                    if loc and loc.endswith("_row_0_col_1") and ff.get("type") == "table_2col":
+                        ff["locked"] = False
+                    elif ff.get("type") not in ("approval_stamp", "table_sl_no") and not (loc and loc.endswith("_row_0")):
                         ff["locked"] = False
                     else:
                         ff["locked"] = sv.get("locked", ff.get("locked", True))
@@ -444,19 +458,22 @@ async def preview_document(
                             "approved_by_user_name",
                             "approved_by_quality_name",
                         )
-                        or (loc and bool(re.match(r"^table_[123]_row_\d+_col_\d+$", loc)))
                     )
                     if is_pre:
                         ff["locked"] = True
                         ff["is_pre_approver"] = True
+                    elif "locked" in sv:
+                        sv_locked = sv["locked"]
+                        if isinstance(sv_locked, str):
+                            ff["locked"] = sv_locked.strip().lower() in ("1", "true", "yes")
+                        else:
+                            ff["locked"] = bool(sv_locked)
                     # Paragraphs and 2-col keys (Col 0) are strictly locked!
                     elif ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
                         ff["locked"] = True
                     # 2-col values (Col 1) are fillable (excluding approvers and locked fields)!
                     elif (ff.get("type") == "table_2col" or (loc and (loc.endswith("_col_1") or re.match(r"^table_\d+_row_\d+$", loc)))) and ff.get("type") != "approver":
                         ff["locked"] = False
-                    elif "locked" in sv:
-                        ff["locked"] = sv["locked"]
                 # Laravel may upgrade approval-page Name cells to approver dropdowns after parse.
                 for meta_key in (
                     "type",
@@ -474,19 +491,27 @@ async def preview_document(
                         ff[meta_key] = val
             else:
                 parent_para = ff.get("parent_para")
-                if parent_para is not None and parent_para in legacy_para_by_index:
+                if is_heading_or_fixed or is_col_0_label:
+                    ff["locked"] = True
+                elif parent_para is not None and parent_para in legacy_para_by_index:
                     sv = legacy_para_by_index[parent_para]
                     if sv.get("value") not in (None, ""):
                         ff["value"] = sv["value"]
                     if is_pre_approval_mode:
                         ff["locked"] = False
                     else:
-                        if ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
+                        if "locked" in sv:
+                            sv_locked = sv["locked"]
+                            if isinstance(sv_locked, str):
+                                ff["locked"] = sv_locked.strip().lower() in ("1", "true", "yes")
+                            else:
+                                ff["locked"] = bool(sv_locked)
+                        elif ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
                             ff["locked"] = True
-                        elif "locked" in sv:
-                            ff["locked"] = sv["locked"]
                 elif is_pre_approval_mode:
-                    if ff.get("type") not in ("approval_stamp", "table_sl_no") and not (loc and loc.endswith("_row_0")):
+                    if loc and loc.endswith("_row_0_col_1") and ff.get("type") == "table_2col":
+                        ff["locked"] = False
+                    elif ff.get("type") not in ("approval_stamp", "table_sl_no") and not (loc and loc.endswith("_row_0")):
                         ff["locked"] = False
                 else:
                     if ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
@@ -1176,6 +1201,8 @@ def _render_field_input(
     loc = _escape_html(location)
     ph = _escape_html(placeholder or field.get("label", ""))
     val = _escape_html(value or field.get("value", "") or "")
+    if val.strip() in ("—", "-", "–"):
+        val = ""
 
     if widget == "textarea":
         return (
@@ -1223,10 +1250,21 @@ def _render_paragraph(
     field_map: dict,
     mode: str = "edit",
 ) -> str:
+    if not para_text or not para_text.strip():
+        return ""
     para_text = dedupe_repeated_text(para_text)
-    # 1.0 OBJECTIVE: and the other protocol headings are titles, not fill boxes.
-    if is_locked_section_title(para_text):
-        return f'<p class="docx-para">{_escape_html(dedupe_colon_label(dedupe_repeated_text(para_text)))}</p>'
+    clean_p = dedupe_colon_label(para_text).strip()
+    clean_upper = clean_p.upper()
+    # 1.0 OBJECTIVE:, METHODOLOGY:, REPORT APPROVAL: headings are titles, not fill boxes.
+    if (
+        is_locked_section_title(para_text)
+        or is_section_heading_paragraph(para_text)
+        or re.match(r"^(?:\d+(?:\.\d+)*\s*)?(?:METHODOLOGY|REPORT APPROVAL)\b", clean_upper)
+    ):
+        return f'<p class="docx-para docx-heading-target" data-heading-text="{_escape_html(clean_upper)}">{_escape_html(clean_p)}</p>'
+
+    if field and field.get("type") == "paragraph_content" and PARA_BLANK_RE.search(para_text):
+        field["type"] = "paragraph_blank"
 
     if field and field.get("type") == "paragraph_content":
         val = field.get("value")
@@ -1234,7 +1272,9 @@ def _render_paragraph(
             val = para_text
         val = dedupe_repeated_text(val)
         if _is_readonly_mode(mode) or mode != "pre_approval" or _is_field_locked(field):
-            return f'<p class="docx-para">{_escape_html(val)}</p>'
+            h_cls = " docx-heading-target" if (is_section_heading_paragraph(val) or is_locked_section_title(val)) else ""
+            h_attr = f' data-heading-text="{_escape_html(val.upper().strip())}"' if h_cls else ""
+            return f'<p class="docx-para{h_cls}"{h_attr}>{_escape_html(val)}</p>'
         else:
             loc = _escape_html(field.get("location", f"para_{para_index}"))
             val_esc = _escape_html(val)
@@ -1645,23 +1685,54 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
             colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
 
             text = dedupe_colon_label(cell.text.strip())
-            is_header = r_idx == 0
+            is_header = r_idx == 0 and not (is_two_col and not is_two_col_grid_table(table) and not is_two_col_header_row(cells, table.rows))
             cell_style = "font-weight:bold;" if is_header else ""
             rowspan_attr = ""
 
             if is_header:
                 style = _inline_cell_style(cell_style + "background:#f1f5f9; color:#1e293b;", readonly=readonly)
                 html.append(
-                    f'<th class="docx-cell docx-table-header" style="{style}"{rowspan_attr}{colspan_attr}>'
+                    f'<th class="docx-cell docx-table-header docx-heading-target" data-heading-text="{_escape_html(text.upper())}" style="{style}"{rowspan_attr}{colspan_attr}>'
                     f"{_escape_html(text)}</th>"
                 )
                 continue
 
             if toc_table or is_toc_entry_text(text):
                 style = _inline_cell_style(cell_style, readonly=readonly)
+                lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+                rendered_lines = []
+                for l_idx, line in enumerate(lines):
+                    m_toc = re.search(r"^(.*?)[ \t\.\u2026\u22ef]{3,}\s*(\d+)\s*$", line)
+                    if m_toc and not readonly:
+                        title_part = m_toc.group(1).strip()
+                        page_part = m_toc.group(2).strip()
+                        loc = f"table_{t_idx}_row_{r_idx}_toc_{l_idx}"
+                        val = page_part
+                        if field_map and loc in field_map:
+                            stored = field_map[loc].get("value")
+                            if stored is not None and str(stored).strip() != "":
+                                val = str(stored).strip()
+                        m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title_part)
+                        sec_num = m_sec.group(1) if m_sec else ""
+                        clean_title = m_sec.group(2) if m_sec else title_part
+                        rendered_lines.append(
+                            f'<div class="docx-toc-line" style="display: flex; align-items: baseline; justify-content: space-between; padding: 2px 0;" data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}">'
+                            f'<span class="toc-title">{_escape_html(title_part)}</span>'
+                            f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 8px; min-width: 16px; height: 1em;"></span>'
+                            f'<input type="number" min="1" max="999" name="fields[{loc}]" '
+                            f'class="docx-input docx-toc-page-input" '
+                            f'data-toc-sec="{_escape_html(sec_num)}" '
+                            f'data-toc-title="{_escape_html(clean_title)}" '
+                            f'value="{_escape_html(val)}" '
+                            f'style="width: 52px; height: 24px; text-align: center; font-weight: 600; font-size: 12px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7; margin-left: 6px;">'
+                            f'</div>'
+                        )
+                    else:
+                        rendered_lines.append(f'<div>{_escape_html(line)}</div>')
+                cell_content = "".join(rendered_lines) if rendered_lines else _escape_html(text)
                 html.append(
                     f'<td class="docx-cell" style="{style}"{rowspan_attr}{colspan_attr}>'
-                    f"{_escape_html(text)}</td>"
+                    f"{cell_content}</td>"
                 )
                 continue
 
@@ -1735,17 +1806,36 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
             if is_two_col and col_idx == 0:
                 col0_loc = field["location"] if (field and "location" in field) else f"table_{t_idx}_row_{r_idx}_col_0"
                 col0_val = (field.get("value") if field else "") or text
-                if readonly or mode != "pre_approval" or (field and _is_field_locked(field)):
-                    display = _render_readonly_span(col0_val, field, col0_loc)
+                if col0_val.strip() in ("—", "-", "–"):
+                    col0_val = ""
+                is_label_type = (field and field.get("type") == "table_2col_label") or (field is None)
+                field_label = (field.get("label", "") if field else "") or row_label or text
+                is_deviation = "deviation" in field_label.lower() or "deviation" in text.lower()
+                if not is_two_col_grid_table(table) or readonly or (field and _is_field_locked(field)) or (is_label_type and mode != "pre_approval"):
+                    display = _render_readonly_span(text or col0_val, field, col0_loc)
                     html.append(_readonly_td(display, cell_style=cell_style, rowspan_attr=rowspan_attr, colspan_attr=colspan_attr, location=col0_loc))
+                    continue
                 else:
-                    inp = _render_field_input(
-                        col0_loc,
-                        field or {"location": col0_loc, "label": text, "type": "table_2col_label"},
-                        css_class="docx-input",
-                        placeholder="Parameter / Item...",
-                        value=col0_val,
-                    )
+                    use_textarea = is_deviation or _is_textarea_cell(field, row_label, rowspan)
+                    ph = "Enter deviation..." if is_deviation else "Parameter / Item..."
+                    if use_textarea:
+                        widget_field = dict(field) if field else {"location": col0_loc, "label": text, "type": "table_2col_grid"}
+                        widget_field["widget"] = "textarea"
+                        inp = _render_field_input(
+                            col0_loc,
+                            widget_field,
+                            css_class="docx-input",
+                            placeholder=ph,
+                            value=col0_val,
+                        )
+                    else:
+                        inp = _render_field_input(
+                            col0_loc,
+                            field or {"location": col0_loc, "label": text, "type": "table_2col_label"},
+                            css_class="docx-input",
+                            placeholder=ph,
+                            value=col0_val,
+                        )
                     html.append(
                         f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
                         f"{inp}</td>"
@@ -2049,19 +2139,52 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                         '<div class="docx-toc-card" style="margin: 16px 0; padding: 16px 20px; '
                         'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-family: inherit;">'
                     )
-                    html_parts.append(
-                        '<div style="font-weight: 700; font-size: 14px; color: #334155; '
-                        'margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">'
-                        '📋 Table of Contents</div>'
-                    )
-                    for title, page in toc_entries:
+                    if _is_readonly_mode(mode):
+                        html_parts.append(
+                            '<div style="font-weight: 700; font-size: 14px; color: #334155; '
+                            'margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">'
+                            '📋 Table of Contents</div>'
+                        )
+                    else:
+                        html_parts.append(
+                            '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">'
+                            '<span style="font-weight: 700; font-size: 14px; color: #334155; text-transform: uppercase; letter-spacing: 0.5px;">📋 Table of Contents</span>'
+                            '<button type="button" class="btn btn-sm btn-outline-primary btn-sync-toc" id="btnAutoSyncToc" style="font-size: 11px; padding: 2px 10px; border-radius: 12px; cursor: pointer; background: #fff; border: 1px solid #007bff; color: #007bff;" title="Auto-calculate page numbers based on document content length">'
+                            '<i class="fas fa-sync-alt mr-1"></i> Auto-Calculate Page Numbers'
+                            '</button>'
+                            '</div>'
+                        )
+                    for toc_idx, (title, page) in enumerate(toc_entries):
+                        loc = f"toc_sdt_{toc_idx}"
+                        val = page
+                        if field_map and loc in field_map:
+                            stored = field_map[loc].get("value")
+                            if stored is not None and str(stored).strip() != "":
+                                val = str(stored).strip()
+                        m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title)
+                        sec_num = m_sec.group(1) if m_sec else ""
+                        clean_title = m_sec.group(2) if m_sec else title
                         if page:
+                            if _is_readonly_mode(mode):
+                                page_html = f'<span class="toc-page" style="flex-shrink: 0; font-weight: 600; color: #1e293b;">{_escape_html(val)}</span>'
+                            else:
+                                page_html = (
+                                    f'<span class="toc-page-wrap" style="flex-shrink: 0; display: inline-flex; align-items: center;">'
+                                    f'<input type="number" min="1" max="999" name="fields[{loc}]" '
+                                    f'class="docx-input docx-toc-page-input" '
+                                    f'data-toc-sec="{_escape_html(sec_num)}" '
+                                    f'data-toc-title="{_escape_html(clean_title)}" '
+                                    f'value="{_escape_html(val)}" '
+                                    f'style="width: 52px; height: 26px; text-align: center; font-weight: 600; font-size: 13px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7; margin-left: 6px;">'
+                                    f'</span>'
+                                )
                             html_parts.append(
                                 f'<div class="docx-toc-line" style="display: flex; align-items: baseline; justify-content: space-between; '
-                                f'padding: 4px 0; font-size: 13px; color: #334155; line-height: 1.6;">'
+                                f'padding: 4px 0; font-size: 13px; color: #334155; line-height: 1.6;" '
+                                f'data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}">'
                                 f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500;">{_escape_html(title)}</span>'
                                 f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 10px; min-width: 24px; height: 1em;"></span>'
-                                f'<span class="toc-page" style="flex-shrink: 0; font-weight: 600; color: #1e293b;">{_escape_html(page)}</span>'
+                                f'{page_html}'
                                 f'</div>'
                             )
                         else:

@@ -1818,6 +1818,15 @@ class DocxImportController extends Controller
         if (str_contains($text, 'checked by') || str_contains($text, 'remark') || str_contains($text, 'comment')) {
             return true;
         }
+        if (str_contains($text, 'instrument id') || str_contains($text, 'serial no') || str_contains($text, 'model no')) {
+            return true;
+        }
+        if (str_contains($text, 'deviation') || str_contains($text, 'corrective action') || str_contains($text, 'preventive action')) {
+            return true;
+        }
+        if (str_contains($text, 'result') || str_contains($text, 'finding') || str_contains($text, 'evaluation')) {
+            return true;
+        }
 
         return preg_match('/\b(sign|signature|date|time)\b/', $text) === 1;
     }
@@ -4067,6 +4076,19 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 )
             )
         );
+        // Upgrade any paragraph with blanks that became paragraph_content back to paragraph_blank
+        foreach ($fields as $idx => $f) {
+            if (! is_array($f)) {
+                continue;
+            }
+            $loc = (string) ($f['location'] ?? '');
+            $lbl = strtolower((string) ($f['label'] ?? ''));
+            if (str_starts_with($loc, 'para_') && str_contains($lbl, 'following test were performed')) {
+                $fields[$idx]['type'] = 'paragraph_blank';
+                $fields[$idx]['widget'] = 'text';
+            }
+        }
+
         $coverFieldLocations = $this->buildCoverFieldLocationMap($fields);
         // Drop header cells that duplicate cover-page fields already mapped elsewhere.
         $fields          = $this->pruneSpuriousHeaderImportFields($fields, $coverFieldLocations);
@@ -4104,8 +4126,20 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $hasCol0Fields = collect($fields)->contains(
                 fn ($f) => is_array($f) && str_ends_with((string) ($f['location'] ?? ''), '_col_0')
             );
+            $hasTable0Row1 = collect($fields)->contains(
+                fn ($f) => is_array($f) && str_starts_with((string) ($f['location'] ?? ''), 'table_0_row_1')
+            );
+            $hasTable0Row0 = collect($fields)->contains(
+                fn ($f) => is_array($f) && str_starts_with((string) ($f['location'] ?? ''), 'table_0_row_0')
+            );
+            $hasSpuriousHeadings = collect($fields)->contains(
+                fn ($f) => is_array($f) && $this->isLockedSectionHeadingText((string) ($f['label'] ?? '')) && ($f['type'] ?? '') !== 'locked'
+            );
+            $hasFollowingTestContent = collect($fields)->contains(
+                fn ($f) => is_array($f) && str_contains(strtolower((string) ($f['label'] ?? '')), 'following test were performed') && ($f['type'] ?? '') !== 'paragraph_blank'
+            );
 
-            if (($hasAttachmentParas && ! $hasAttachmentFields) || ! $hasParagraphContent || ! $hasCol0Fields) {
+            if (($hasAttachmentParas && ! $hasAttachmentFields) || ! $hasParagraphContent || ! $hasCol0Fields || ($hasTable0Row1 && ! $hasTable0Row0) || $hasSpuriousHeadings || $hasFollowingTestContent) {
                 $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
                 $reparsed = $this->reparseDocxForReport($report);
                 if (! empty($reparsed)) {
@@ -4115,6 +4149,19 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 }
             }
         }
+
+        // Section headings (METHODOLOGY:, REPORT APPROVAL:, etc.) must never be editable form fields.
+        $fields = array_values(array_filter($fields, function ($f) {
+            if (! is_array($f)) {
+                return false;
+            }
+            $lbl = (string) ($f['label'] ?? '');
+            $type = (string) ($f['type'] ?? '');
+            if ($this->isLockedSectionHeadingText($lbl) && in_array($type, ['paragraph_blank', 'text', 'table_2col'], true)) {
+                return false;
+            }
+            return true;
+        }));
 
         $isPreApprovalMode = $isRequalOrReval
             && in_array($report->status, ['pre_setup', 'pre_returned'], true)
@@ -4177,6 +4224,19 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $effectiveDate       = $this->resolveEffectiveDate($report, $fields);
         $effectiveDateLocation = $this->findEffectiveDateFieldLocation($fields);
         $hasEffectiveDateField = $effectiveDateLocation !== null;
+        // Upgrade any paragraph with blanks that became paragraph_content back to paragraph_blank
+        foreach ($fields as $idx => $f) {
+            if (! is_array($f)) {
+                continue;
+            }
+            $loc = (string) ($f['location'] ?? '');
+            $lbl = strtolower((string) ($f['label'] ?? ''));
+            if (str_starts_with($loc, 'para_') && str_contains($lbl, 'following test were performed')) {
+                $fields[$idx]['type'] = 'paragraph_blank';
+                $fields[$idx]['widget'] = 'text';
+            }
+        }
+
         $coverFieldLocations = $this->buildCoverFieldLocationMap($fields);
         $showLegacyBladeHeader = ($coverFieldLocations['document_no'] ?? '') === 'header_0_row_4_col_2';
         $equipmentList   = Equipment::query()
@@ -4567,7 +4627,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             if (! is_string($location) || in_array($location, $knownLocations, true)) {
                 continue;
             }
-            if (! preg_match('/^(para_|table_|header_|txbx_)/', $location)) {
+            if (! preg_match('/^(para_|table_|header_|txbx_|toc_)/', $location)) {
                 continue;
             }
             $updatedFields[] = [
@@ -5381,6 +5441,18 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $importFields = $this->unlockDocxFieldsForReturnedEdit($importFields);
         }
 
+        foreach ($importFields as $idx => $f) {
+            if (! is_array($f)) {
+                continue;
+            }
+            $loc = (string) ($f['location'] ?? '');
+            $lbl = strtolower((string) ($f['label'] ?? ''));
+            if (str_starts_with($loc, 'para_') && str_contains($lbl, 'following test were performed')) {
+                $importFields[$idx]['type'] = 'paragraph_blank';
+                $importFields[$idx]['widget'] = 'text';
+            }
+        }
+
         $isPreApprovalDraft = in_array($report->import_source, ['requalification', 'revalidation'], true)
             && in_array($report->status, ['pre_setup', 'pre_returned'], true)
             && $report->stage === 'pre';
@@ -5581,7 +5653,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 if (! is_string($location) || in_array($location, $knownLocations, true)) {
                     continue;
                 }
-                if (! preg_match('/^(para_|table_|header_|txbx_)/', $location)) {
+                if (! preg_match('/^(para_|table_|header_|txbx_|toc_)/', $location)) {
                     continue;
                 }
                 $updatedFields[] = [
@@ -6263,6 +6335,26 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $type = strtolower(trim((string) ($field['type'] ?? '')));
             $location = strtolower(trim((string) ($field['location'] ?? '')));
 
+            // Never unlock 2-col label cells (col 0)
+            if ($type === 'table_2col_label' || str_ends_with($location, '_col_0')) {
+                $fields[$idx]['locked'] = true;
+                continue;
+            }
+
+            // Headings / fixed text stay locked
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            if ($this->isLockedSectionHeadingText($label) || str_contains($label, 'methodology') || str_contains($label, 'report approval')) {
+                $fields[$idx]['locked'] = true;
+                continue;
+            }
+
+            // Row 0 col 1 of 2-col key-value tables is fillable (Name of Equipment value)
+            if (preg_match('/^table_\d+_row_0_col_1$/', $location) && $type === 'table_2col') {
+                $fields[$idx]['locked'] = false;
+                $unlocked++;
+                continue;
+            }
+
             // Never unlock table header rows (row 0)
             if (preg_match('/^table_\d+_row_0(_col_\d+)?$/', $location)) {
                 $fields[$idx]['locked'] = true;
@@ -6300,6 +6392,38 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     }
 
     /**
+     * Checks if a table column label represents an execution fill field that must be editable post-pre-approval.
+     */
+    private function isExecutionFillColumn(string $label): bool
+    {
+        $label = strtolower(trim($label));
+        if ($label === '') {
+            return false;
+        }
+
+        if (str_contains($label, 'observation') || str_contains($label, 'result') || str_contains($label, 'evaluation') || str_contains($label, 'finding')) {
+            return true;
+        }
+        if (str_contains($label, 'instrument id') || str_contains($label, 'serial no') || str_contains($label, 'model no') || str_contains($label, 'identification no')) {
+            return true;
+        }
+        if (str_contains($label, 'calibration') || (str_contains($label, 'date') && ! str_contains($label, 'effective'))) {
+            return true;
+        }
+        if (str_contains($label, 'deviation') || str_contains($label, 'corrective action') || str_contains($label, 'preventive action')) {
+            return true;
+        }
+        if (str_contains($label, 'remark') || str_contains($label, 'comment') || str_contains($label, 'pass/fail') || str_contains($label, 'status')) {
+            return true;
+        }
+        if (str_starts_with($label, 'done by') || str_starts_with($label, 'performed by') || str_contains($label, 'tested by')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Requalification / Revalidation Post-Pre-Approval lock rules:
      * Once Pre-Approval is granted (status is pre_approved or stage is execution),
      * all protocol template content MUST BE LOCKED:
@@ -6310,6 +6434,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
      * - Connected accessories descriptions & existing template content -> locked = true
      *
      * ONLY execution fill fields remain editable (locked = false):
+     * - Paragraph fill-in-the-blanks (e.g. "demonstrate that _____ located at...") -> locked = false
      * - 2-column description/details on the right (Col 1) -> locked = false
      * - Multi-column execution entry columns (Observation, Done By, Date, Result, Remarks, Attachment) -> locked = false
      *
@@ -6331,6 +6456,14 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
             $type = strtolower(trim((string) ($field['type'] ?? '')));
             $location = strtolower(trim((string) ($field['location'] ?? '')));
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+
+            // Row 0 col 1 of 2-col key-value tables is fillable (Name of Equipment value)
+            if (preg_match('/^table_\d+_row_0_col_1$/', $location) && $type === 'table_2col') {
+                $fields[$idx]['locked'] = false;
+                $unlockedCount++;
+                continue;
+            }
 
             // 1. Table row 0 headers always locked
             if (preg_match('/^table_\d+_row_0(_col_\d+)?$/', $location)) {
@@ -6358,20 +6491,39 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
 
-            // 5. All paragraphs MUST BE LOCKED post-pre-approval (Objective, Scope, Responsibilities, etc.)
+            // 5. Paragraph content (Objective, Scope, etc.) locked, BUT paragraph blanks MUST REMAIN UNLOCKED for execution fill
+            // Except METHODOLOGY and REPORT APPROVAL, which are strictly locked
+            if ($this->isLockedSectionHeadingText($label) || str_contains($label, 'methodology') || str_contains($label, 'report approval')) {
+                $fields[$idx]['locked'] = true;
+                $lockedCount++;
+                continue;
+            }
+            if ($type === 'paragraph_blank' || $type === 'paragraph_blank_part') {
+                $fields[$idx]['locked'] = false;
+                $unlockedCount++;
+                continue;
+            }
             if ($type === 'paragraph_content' || str_starts_with($location, 'para_') || str_starts_with($type, 'para')) {
-                if ($type !== 'paragraph_blank_part') {
-                    $fields[$idx]['locked'] = true;
-                    $lockedCount++;
-                    continue;
-                }
+                $fields[$idx]['locked'] = true;
+                $lockedCount++;
+                continue;
             }
 
-            // Pre-approval approver cells and signatures: ALWAYS LOCKED post-pre-approval
+            // 6. Pre-approval approver cells and signatures: ALWAYS LOCKED post-pre-approval
             $role = (string) ($field['approver_role'] ?? '');
             $isPreApprover = ! empty($field['is_pre_approver'])
-                || in_array($role, array_keys(self::PRE_APPROVER_FIELDS), true)
-                || preg_match('/^table_[123]_row_\d+_col_\d+$/', $location);
+                || in_array($role, array_keys(self::PRE_APPROVER_FIELDS), true);
+
+            // In Requalification protocols, tables 1, 2, 3 are explicit pre-approval signature tables
+            // (never lock execution fill columns or non-signature tables)
+            if (! $isPreApprover && ! $this->isExecutionFillColumn($label)) {
+                $isPreApprover = preg_match('/^table_[123]_row_\d+_col_\d+$/', $location)
+                    && (
+                        $type === 'approver'
+                        || in_array($role, ['prepared_by_engineering_name', 'checked_by_engineering_name', 'checked_by_production_name', 'checked_by_validation_name', 'checked_by_quality_name', 'approved_by_user_name', 'approved_by_quality_name'], true)
+                        || (str_contains($label, 'signature') && preg_match('/^table_[123]_/', $location))
+                    );
+            }
 
             if ($isPreApprover) {
                 $fields[$idx]['locked'] = true;
@@ -6381,14 +6533,29 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
 
-            // 6. 2-column table keys (Col 0) MUST BE LOCKED: Tag. No., Plant / Module, MOC, etc.
+            // 7. Post-approval approver cells: keep unlocked so approvers can be chosen
+            if ($type === 'approver') {
+                $fields[$idx]['locked'] = false;
+                $unlockedCount++;
+                continue;
+            }
+
+            // 8. Execution fill columns (Observation / Result, Instrument ID, Serial No, Calibration dates, Deviations, etc.):
+            // MUST BE UNLOCKED so users can enter test execution data!
+            if ($this->isExecutionFillColumn($label)) {
+                $fields[$idx]['locked'] = false;
+                $unlockedCount++;
+                continue;
+            }
+
+            // 9. 2-column table keys (Col 0) MUST BE LOCKED: Tag. No., Plant / Module, MOC, etc.
             if ($type === 'table_2col_label' || str_ends_with($location, '_col_0')) {
                 $fields[$idx]['locked'] = true;
                 $lockedCount++;
                 continue;
             }
 
-            // 7. 2-column table fill values (Col 1) MUST BE UNLOCKED: only 2-col values, not multicol tables!
+            // 10. 2-column table fill values (Col 1) MUST BE UNLOCKED: only 2-col values, not multicol tables!
             if ($type !== 'approver' && ($type === 'table_2col' || ($type !== 'table_multicol' && (str_ends_with($location, '_col_1') || preg_match('/^table_\d+_row_\d+$/', $location))))) {
                 $fields[$idx]['locked'] = false;
                 $unlockedCount++;
@@ -7052,8 +7219,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $fieldsHash = md5(json_encode(array_values($fields), JSON_UNESCAPED_UNICODE));
         $cacheVer   = $this->docxPreviewCacheVersion($fileId, $reportId);
         $cacheKey   = $reportId
-            ? "docx_preview:v64:{$mode}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
-            : "docx_preview:v64:{$mode}:{$fileId}:{$cacheVer}:{$fieldsHash}";
+            ? "docx_preview:v68:{$mode}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
+            : "docx_preview:v68:{$mode}:{$fileId}:{$cacheVer}:{$fieldsHash}";
         $cached     = Cache::get($cacheKey);
 
         // Return cached HTML when fields and mode have not changed since last preview.
@@ -7412,6 +7579,11 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 return $field;
             }
 
+            // Never overwrite 2-column label cells (Col 0) with prefill values.
+            if (($field['type'] ?? '') === 'table_2col_label' || str_ends_with($location, '_col_0')) {
+                return $field;
+            }
+
             $location = $field['location'] ?? '';
             $label    = strtolower(trim((string) ($field['label'] ?? '')));
 
@@ -7530,6 +7702,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $value = trim((string) ($field['value'] ?? ''));
 
         // Paragraph content, blanks, table data cells are NOT TOC entries.
+        if (str_starts_with($location, 'toc_sdt_') || str_contains($location, '_toc_')) {
+            return false;
+        }
         if (in_array($type, [
             'table_multicol', 'table_sl_no', 'attachment', 'table_radio',
             'paragraph_content', 'table_2col_label', 'table_2col',
@@ -7748,6 +7923,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'deviations',
             'deviations (if any)',
             'qualification history',
+            'methodology',
+            'report approval',
+            'observation / results and evaluation',
+            'observation/results and evaluation',
         ];
         if (in_array($key, $exact, true)) {
             return true;
@@ -7771,6 +7950,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'operational qualification checks',
             'list of attachment',
             'revision history',
+            'methodology',
+            'report approval',
+            'observation / results',
+            'observation/results',
         ];
         foreach ($prefixes as $prefix) {
             if ($key === $prefix || str_starts_with($key, $prefix . ' ') || str_starts_with($key, $prefix . '(')) {

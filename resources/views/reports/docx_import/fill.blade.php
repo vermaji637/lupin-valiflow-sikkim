@@ -890,6 +890,64 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                             </div>
                         @endif
 
+                        @php
+                            $preApprovalSteps = $report->relationLoaded('approvalSteps')
+                                ? $report->approvalSteps->where('stage', 'pre')->sortBy('step_order')
+                                : $report->approvalSteps()->where('stage', 'pre')->orderBy('step_order')->get();
+                        @endphp
+                        @if($preApprovalSteps->isNotEmpty())
+                            <div class="card mt-4 mb-2 border shadow-sm">
+                                <div class="card-header bg-light font-weight-bold d-flex align-items-center">
+                                    <i class="fas fa-history text-primary mr-2"></i> Pre-Approval History
+                                </div>
+                                <div class="card-body p-0">
+                                    <div class="table-responsive">
+                                        <table class="table table-bordered table-striped mb-0">
+                                            <thead class="thead-light">
+                                                <tr>
+                                                    <th style="width: 70px;">Step</th>
+                                                    <th>Role / Stage</th>
+                                                    <th>Approver User</th>
+                                                    <th>Status</th>
+                                                    <th>Approved Date & Time</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach($preApprovalSteps as $step)
+                                                    <tr>
+                                                        <td class="text-center font-weight-bold">{{ $step->step_order }}</td>
+                                                        <td>
+                                                            <span class="badge badge-info">{{ $step->label ?? 'Approver' }}</span>
+                                                        </td>
+                                                        <td>
+                                                            <div class="font-weight-bold text-dark">
+                                                                {{ $step->user->first_name ?? '' }} {{ $step->user->last_name ?? '' }}
+                                                            </div>
+                                                            @if(!empty($step->user->designation))
+                                                                <div class="small text-muted">{{ $step->user->designation }}</div>
+                                                            @endif
+                                                        </td>
+                                                        <td>
+                                                            @if($step->approved_at)
+                                                                <span class="badge badge-success text-light"><i class="fas fa-check mr-1"></i> Approved</span>
+                                                            @elseif($step->rejected_at)
+                                                                <span class="badge badge-danger text-light"><i class="fas fa-times mr-1"></i> Rejected</span>
+                                                            @else
+                                                                <span class="badge badge-secondary text-light">Pending</span>
+                                                            @endif
+                                                        </td>
+                                                        <td>
+                                                            {{ $step->approved_at ? \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y h:i A') : '-' }}
+                                                        </td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        @endif
+
                     </div>
 
                     <div class="card-footer bg-light px-4 py-3 d-flex justify-content-end align-items-center">
@@ -2108,6 +2166,144 @@ document.addEventListener('DOMContentLoaded', function () {
             saveDraftNow({ keepalive: true, silent: true });
         }
     });
+
+    /* ── Table of Contents (TOC) Auto-Sync Page Numbers ── */
+    (function () {
+        function syncTocPageNumbers(silent) {
+            const preview = document.querySelector('.docx-preview-wrapper') || document.querySelector('.docx-preview');
+            if (!preview) return;
+
+            const tocInputs = Array.from(document.querySelectorAll('.docx-toc-page-input'));
+            if (tocInputs.length === 0) return;
+
+            const syncBtn = document.getElementById('btnAutoSyncToc');
+            if (syncBtn && !silent) {
+                const icon = syncBtn.querySelector('i');
+                if (icon) icon.classList.add('fa-spin');
+                syncBtn.disabled = true;
+            }
+
+            try {
+                // Find potential section headings in preview DOM
+                const candidates = Array.from(
+                    preview.querySelectorAll('.docx-heading-target, p.docx-para, th.docx-cell, td.docx-cell, h1, h2, h3, h4, h5')
+                ).filter(function (el) {
+                    return !el.closest('.docx-toc-card') && !el.closest('.docx-toc-line') && !el.classList.contains('docx-toc-page-input');
+                });
+
+                const previewRect = preview.getBoundingClientRect();
+                const previewTop = previewRect.top + window.scrollY;
+
+                // An A4 page at 96 DPI has standard height ~1123px.
+                // With top/bottom margins, body content height is approx 1000px to 1080px.
+                const previewWidth = preview.clientWidth || 800;
+                const pageHeight = Math.max(880, Math.round(previewWidth * 1.30));
+
+                // Find Section 1.0 (OBJECTIVE) as anchor for Page 3
+                let firstHeading = null;
+                for (let i = 0; i < candidates.length; i++) {
+                    const h = candidates[i];
+                    const txt = (h.dataset.headingText || h.textContent || '').trim().toUpperCase();
+                    if (/^(1\.0\s+)?OBJECTIVE\b/.test(txt)) {
+                        firstHeading = h;
+                        break;
+                    }
+                }
+
+                // Lupin documents start Section 1.0 on Page 3 (Page 1 = Cover/Pre-approval, Page 2 = TOC)
+                const basePage = 3;
+                const anchorTop = firstHeading
+                    ? (firstHeading.getBoundingClientRect().top + window.scrollY - previewTop)
+                    : (pageHeight * 2);
+
+                tocInputs.forEach(function (input) {
+                    const secNum = (input.dataset.tocSec || '').trim();
+                    const secTitle = (input.dataset.tocTitle || '').trim().toUpperCase();
+                    const cleanTitle = secTitle.replace(/^\d+(?:\.\d+)*\s*/, '').replace(/[\.\:\-_]+/g, ' ').trim();
+                    const words = cleanTitle.split(/\s+/).filter(function (w) {
+                        return w.length > 2 && !['AND', 'THE', 'FOR', 'ANY'].includes(w);
+                    });
+
+                    let matchedEl = null;
+
+                    // Pass 1: exact section number match (e.g. "1.0", "3.2", "16.0")
+                    if (secNum) {
+                        const secRegex = new RegExp('^' + secNum.replace(/\./g, '\\.') + '(\\s|$|\\:)');
+                        matchedEl = candidates.find(function (h) {
+                            const txt = (h.dataset.headingText || h.textContent || '').trim();
+                            return secRegex.test(txt);
+                        });
+                    }
+
+                    // Pass 2: keyword match if section number not in heading text
+                    if (!matchedEl && words.length > 0) {
+                        matchedEl = candidates.find(function (h) {
+                            const txt = (h.dataset.headingText || h.textContent || '').trim().toUpperCase();
+                            const matchCount = words.filter(function (kw) {
+                                return txt.includes(kw);
+                            }).length;
+                            return matchCount >= Math.min(2, words.length);
+                        });
+                    }
+
+                    if (matchedEl) {
+                        const elTop = matchedEl.getBoundingClientRect().top + window.scrollY - previewTop;
+                        let calculatedPage = basePage + Math.floor((elTop - anchorTop + 40) / pageHeight);
+                        if (calculatedPage < 1) calculatedPage = 1;
+
+                        const curVal = parseInt(input.value, 10);
+                        if (isNaN(curVal) || curVal !== calculatedPage) {
+                            input.value = calculatedPage;
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+                });
+
+                if (syncBtn && !silent) {
+                    setTimeout(function () {
+                        const icon = syncBtn.querySelector('i');
+                        if (icon) icon.classList.remove('fa-spin');
+                        syncBtn.disabled = false;
+                    }, 400);
+                }
+            } catch (err) {
+                console.warn('TOC auto-sync error:', err);
+                if (syncBtn) {
+                    const icon = syncBtn.querySelector('i');
+                    if (icon) icon.classList.remove('fa-spin');
+                    syncBtn.disabled = false;
+                }
+            }
+        }
+
+        // Attach to sync button clicks
+        document.addEventListener('click', function (e) {
+            const btn = e.target.closest('#btnAutoSyncToc, .btn-sync-toc');
+            if (btn) {
+                e.preventDefault();
+                syncTocPageNumbers(false);
+            }
+        });
+
+        // Auto-run once on load after layout is complete
+        window.addEventListener('DOMContentLoaded', function () {
+            setTimeout(function () { syncTocPageNumbers(true); }, 800);
+        });
+
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            setTimeout(function () { syncTocPageNumbers(true); }, 800);
+        }
+
+        // Optional debounce auto-sync when dynamic textareas or tables grow
+        let tocDebounce = null;
+        document.addEventListener('input', function (e) {
+            if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.classList.contains('docx-para-content'))) {
+                clearTimeout(tocDebounce);
+                tocDebounce = setTimeout(function () { syncTocPageNumbers(true); }, 1500);
+            }
+        });
+    })();
 
     @if(($importSource ?? '') === 'requalification' && empty($requalFillLocked))
     (function () {

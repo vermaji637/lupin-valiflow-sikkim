@@ -12,6 +12,8 @@ from doc_parser import (
     _para_text_from_element,
     looks_like_sl_no_value,
     is_sl_no_column_header,
+    is_two_col_grid_table,
+    is_two_col_header_row,
 )
 import regex as re
 import os
@@ -841,6 +843,8 @@ def _is_structural_table_row(doc, table_index: int, row_index: int) -> bool:
     except (IndexError, ValueError, KeyError):
         return False
     if row_index == 0:
+        if len(row.cells) == 2 and not is_two_col_grid_table(table) and not is_two_col_header_row(row.cells, table.rows):
+            return False
         return True
     header_texts = [c.text.strip() for c in table.rows[0].cells] if table.rows else []
     if _is_repeated_column_header_row(row, header_texts):
@@ -906,8 +910,9 @@ def _apply_single_field(
 ) -> None:
     """Apply one parsed field location to the open Document (body or header)."""
     normalized_type = str(field_type or "")
+    is_toc_update = location.startswith("toc_sdt_") or (location.startswith("table_") and "_toc_" in location)
     # Locked cells keep the original DOCX text — never overwrite pre-filled content.
-    if locked and normalized_type != "table_sl_no":
+    if locked and normalized_type != "table_sl_no" and not is_toc_update:
         return
     if value is None or str(value).strip() == "":
         return
@@ -922,7 +927,41 @@ def _apply_single_field(
     parts = location.split("_")
 
     try:
-        if location.startswith("header_"):
+        if location.startswith("toc_sdt_"):
+            m_sdt = re.match(r"^toc_sdt_(\d+)$", location)
+            if m_sdt:
+                sdt_idx = int(m_sdt.group(1))
+                W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                sdt_paras = doc._element.xpath("//w:sdt//w:p")
+                if sdt_idx < len(sdt_paras):
+                    p_el = sdt_paras[sdt_idx]
+                    for node in reversed(p_el.findall(f".//{{{W_NS}}}t")):
+                        txt = (node.text or "").strip()
+                        if re.search(r"\d+\s*$", txt):
+                            node.text = re.sub(r"\d+\s*$", str(value).strip(), node.text)
+                            break
+            return
+
+        elif location.startswith("table") and "_toc_" in location:
+            m_tbl_toc = re.match(r"^table_(\d+)_row_(\d+)_toc_(\d+)$", location)
+            if m_tbl_toc:
+                t_i = int(m_tbl_toc.group(1))
+                r_i = int(m_tbl_toc.group(2))
+                l_i = int(m_tbl_toc.group(3))
+                if t_i < len(doc.tables) and r_i < len(doc.tables[t_i].rows):
+                    cell = doc.tables[t_i].rows[r_i].cells[0]
+                    paras = cell.paragraphs
+                    if l_i < len(paras):
+                        p_el = paras[l_i]._element
+                        W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        for node in reversed(p_el.findall(f".//{{{W_NS}}}t")):
+                            txt = (node.text or "").strip()
+                            if re.search(r"\d+\s*$", txt):
+                                node.text = re.sub(r"\d+\s*$", str(value).strip(), node.text)
+                                break
+            return
+
+        elif location.startswith("header_"):
             cell = _resolve_header_cell(doc, location)
             if cell is not None:
                 if _normalize_header_compare(cell.text) == _normalize_header_compare(value):

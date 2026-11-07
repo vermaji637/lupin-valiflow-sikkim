@@ -619,7 +619,8 @@
             <table class="table table-bordered">
                 <thead>
                 <tr>
-                    <th>Step</th>
+                    <th style="width: 70px;">Step</th>
+                    <th>Role / Stage</th>
                     <th>User</th>
                     <th>Status</th>
                     <th>Date</th>
@@ -629,6 +630,9 @@
                 @foreach($preSteps as $step)
                     <tr>
                         <td>{{ $step->step_order }}</td>
+                        <td>
+                            <span class="badge bg-info text-dark">{{ $step->label ?? 'Approver' }}</span>
+                        </td>
                         <td>
                             {{ $step->user->first_name ?? '' }}
                             {{ $step->user->last_name ?? '' }}

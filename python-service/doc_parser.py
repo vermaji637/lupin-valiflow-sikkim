@@ -538,12 +538,32 @@ def has_paragraph_blank(text: str) -> bool:
     if not text or not text.strip():
         return False
     normalized = dedupe_colon_label(text)
+    t_lower = normalized.strip().lower()
+    if any(k in t_lower for k in ("methodology", "report approval")):
+        return False
     if find_paragraph_blanks(normalized):
         return True
     # Colon blank only applies to short field labels (e.g. "Model No.:", "Effective Date:"),
     # not full descriptive sentences like "Responsibilities of ... are defined below:".
     if PARA_COLON_BLANK_RE.search(normalized.strip()):
         cleaned = re.sub(r":\s*$", "", normalized).strip()
+        if is_locked_section_title(cleaned) or is_locked_section_title(normalized):
+            return False
+        if cleaned.lower() in (
+            "methodology",
+            "report approval",
+            "objective",
+            "scope",
+            "responsibility",
+            "table of contents",
+            "summary and conclusion",
+            "summary & conclusion",
+            "observation / results and evaluation",
+            "observation/results and evaluation",
+            "list of attachment",
+            "list of attachments",
+        ):
+            return False
         if len(cleaned) < 50 and len(cleaned.split()) <= 6:
             return True
     return False
@@ -694,6 +714,25 @@ def is_two_col_grid_table(table) -> bool:
     if "deviation" in left and "corrective" in right:
         return True
 
+    return False
+
+
+def is_two_col_header_row(cells, table_rows=None) -> bool:
+    """True when row 0 of a 2-column table is a true column-header row, e.g. Sl. No. | Description."""
+    if len(cells) != 2:
+        return False
+    c0 = cells[0].text.strip()
+    c1 = cells[1].text.strip()
+    if not c1:
+        return False
+    c0_lower = c0.lower()
+    if any(k in c0_lower for k in ("name of equipment", "equipment name", "tag no", "plant", "equipment id", "equipment identification", "make", "model", "location", "area covered")):
+        return False
+    c1_lower = c1.lower()
+    header_col0_words = ("sl. no", "sr. no", "sl no", "item", "parameter", "particular", "test", "check", "step", "deviation")
+    header_col1_words = ("description", "detail", "value", "specification", "acceptance", "result", "observation", "corrective", "action")
+    if any(w in c0_lower for w in header_col0_words) and any(w in c1_lower for w in header_col1_words):
+        return True
     return False
 
 
@@ -1435,6 +1474,15 @@ _LOCKED_SECTION_TITLES_EXACT = {
     "deviations",
     "deviations (if any)",
     "qualification history",
+    "methodology",
+    "report approval",
+    "table of contents",
+    "observation / results and evaluation",
+    "observation/results and evaluation",
+    "summary and conclusion",
+    "summary & conclusion",
+    "list of attachment",
+    "list of attachments",
 }
 # Longer lead-in sentences that are still headings, not fill lines.
 _LOCKED_SECTION_TITLE_LONG_PREFIXES = ()
@@ -1456,6 +1504,10 @@ _LOCKED_SECTION_TITLE_PREFIXES = (
     "operational qualification checks",
     "list of attachment",
     "revision history",
+    "methodology",
+    "report approval",
+    "observation / results",
+    "observation/results",
 )
 
 
@@ -1735,7 +1787,7 @@ def parse_docx(file_path: str) -> dict:
                                 "widget": "textarea",
                             })
                 else:
-                    if row_index == 0:
+                    if row_index == 0 and is_two_col_header_row(cells, table.rows):
                         continue
                     label = dedupe_colon_label(cells[0].text.strip())
                     value = cells[1].text.strip()
