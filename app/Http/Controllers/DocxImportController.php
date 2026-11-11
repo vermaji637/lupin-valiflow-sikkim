@@ -89,6 +89,7 @@ class DocxImportController extends Controller
     // Accepts a pre-approved VIVA DOCX, parses it, creates a POST-stage report, and sends user to fill form.
     public function storeFromProtocol(Request $request)
     {
+        @set_time_limit(300);
         $request->validate([
             'docx_file' => [
                 'required',
@@ -143,7 +144,7 @@ class DocxImportController extends Controller
 
             Log::info('Python /parse called', ['python_url' => $pythonUrl]);
 
-            $response = Http::timeout(90)
+            $response = Http::timeout(180)
                 ->attach('file', $fileContents, $file->getClientOriginalName())
                 ->post("{$pythonUrl}/parse");
 
@@ -177,7 +178,10 @@ class DocxImportController extends Controller
                 'summary' => $result['summary'] ?? null,
             ]);
 
-            if (!$fileId || empty($fields)) {
+            $parseSummary = is_array($result['summary'] ?? null) ? $result['summary'] : [];
+            $hasDocumentBody = ((int) ($parseSummary['tables'] ?? 0)) > 0
+                || ((int) ($parseSummary['paragraphs'] ?? 0)) > 0;
+            if (!$fileId || (empty($fields) && ! $hasDocumentBody)) {
                 return redirect()->back()->with('error', 'No fillable fields were detected in the uploaded DOCX.');
             }
 
@@ -193,30 +197,6 @@ class DocxImportController extends Controller
             // Optional document link pre-fills facility and equipment from the master document record.
             if ($request->filled('document_id')) {
                 $document = Document::with(['facility', 'equipment'])->find($request->document_id);
-            }
-
-            $fields = $this->upgradeProtocolCoverFieldMetadata(
-                is_array($fields) ? $fields : []
-            );
-            $identity = $this->extractProtocolIdentityFromFields($fields);
-            if ($request->filled('protocol_document_no')) {
-                $identity['document_number'] = trim((string) $request->input('protocol_document_no'));
-            }
-            if ($request->filled('reference_protocol_no')) {
-                $identity['reference_protocol_no'] = trim((string) $request->input('reference_protocol_no'));
-            }
-            $fields = $this->ensureProtocolIdentityHeaderFields(
-                $fields,
-                $identity['document_number'],
-                $identity['reference_protocol_no']
-            );
-
-            $reportData = $importSource !== '' ? ['import_source' => $importSource] : [];
-            if ($identity['document_number'] !== '') {
-                $reportData['document_number'] = $identity['document_number'];
-            }
-            if ($identity['reference_protocol_no'] !== '') {
-                $reportData['reference_protocol_no'] = $identity['reference_protocol_no'];
             }
 
             // Requalification and Revalidation wait for PRE approval before anyone can fill post execution details.
@@ -250,8 +230,38 @@ class DocxImportController extends Controller
                         }
                     }
                 }
+            }
+
+            $fields = $this->upgradeProtocolCoverFieldMetadata(
+                is_array($fields) ? $fields : []
+            );
+            $identity = $this->extractProtocolIdentityFromFields($fields);
+            if ($request->filled('protocol_document_no')) {
+                $identity['document_number'] = trim((string) $request->input('protocol_document_no'));
+            }
+            if ($request->filled('reference_protocol_no')) {
+                $identity['reference_protocol_no'] = trim((string) $request->input('reference_protocol_no'));
+            }
+            $fields = $this->ensureProtocolIdentityHeaderFields(
+                $fields,
+                $identity['document_number'],
+                $identity['reference_protocol_no']
+            );
+            if ($requiresPreApproval) {
                 $fields = $this->applyRequalificationPreApprovalUnlockRules($fields);
             }
+
+            $reportData = $importSource !== '' ? ['import_source' => $importSource] : [];
+            if ($identity['document_number'] !== '') {
+                $reportData['document_number'] = $identity['document_number'];
+            }
+            if ($identity['reference_protocol_no'] !== '') {
+                $reportData['reference_protocol_no'] = $identity['reference_protocol_no'];
+            }
+
+            $extractedFacility = $this->extractCoverTextValue($fields, 'facility_section');
+            $extractedVersion  = $this->extractCoverTextValue($fields, 'version');
+
             $report = Report::create([
                 'template_id'        => $template->id,
                 'templatedata'       => [],
@@ -259,9 +269,11 @@ class DocxImportController extends Controller
                 'rendered_html'      => '',
                 'attachments'        => [],
                 'facility_section'   => $request->input('facility_section')
-                    ?: ($document->facility->facility_name ?? null),
+                    ?: ($document->facility->facility_name ?? null)
+                    ?: ($extractedFacility !== '' ? $extractedFacility : null),
                 'document_no'        => $document?->id,
-                'version'            => $request->input('version'),
+                'version'            => $request->input('version')
+                    ?: ($extractedVersion !== '' ? $extractedVersion : null),
                 'equipment_name'     => $request->input('equipment_name')
                     ?: ($document->equipment->equipment_name ?? null),
                 'equipment_id'       => $request->input('equipment_id')
@@ -288,8 +300,12 @@ class DocxImportController extends Controller
             ]);
 
             // Warm preview cache with report-level defaults (equipment, cover fields) before redirect.
-            $prefilledFields = $this->applyReportPrefills($report, $fields);
-            $this->requestPreviewHtml($fileId, $pythonUrl, $prefilledFields, $report->id, $requiresPreApproval ? 'pre_approval' : 'edit');
+            try {
+                $prefilledFields = $this->applyReportPrefills($report, $fields);
+                $this->requestPreviewHtml($fileId, $pythonUrl, $prefilledFields, $report->id, $requiresPreApproval ? 'pre_approval' : 'edit');
+            } catch (\Throwable $previewEx) {
+                Log::warning('DOCX preview warming skipped: ' . $previewEx->getMessage());
+            }
 
             ProtocolAuditLogger::recordImported($report, $file->getClientOriginalName());
 
@@ -1450,7 +1466,10 @@ class DocxImportController extends Controller
             'document no'           => 'document_no',
             'document title'        => 'document_title',
             'equipment/system name' => 'equipment_name',
+            'equipment name'        => 'equipment_name',
             'equipment/system id'   => 'equipment_id',
+            'equipment id no'       => 'equipment_id',
+            'equipment id'          => 'equipment_id',
             'facility / section'    => 'facility_section',
             'facility/section'      => 'facility_section',
             'effective date'        => 'effective_date',
@@ -1468,6 +1487,11 @@ class DocxImportController extends Controller
             $label = trim(preg_replace('/[^a-z0-9]+/', ' ', $label) ?? $label);
             // Collapse duplicated "Effective Date Effective Date" labels from merged DOCX cells.
             $label = preg_replace('/\b(effective date)(?:\s+\1)+\b/', '$1', $label) ?? $label;
+            if (in_array($label, ['version', 'version no'], true)) {
+                $fields[$idx]['cover_field'] = 'version';
+                $fields[$idx]['type'] = 'protocol_cover';
+                continue;
+            }
             foreach ($labelToCover as $needle => $key) {
                 if (! str_contains($label, $needle)) {
                     continue;
@@ -2244,9 +2268,11 @@ class DocxImportController extends Controller
             return $identity['document_number'];
         }
 
-        $legacy = trim($this->fieldValueByLocation($fields, 'header_0_row_4_col_2', ''));
-        if ($legacy !== '' && ! ctype_digit($legacy)) {
-            return $legacy;
+        foreach (['header_0_row_4_col_2', 'header_0_row_5_col_2'] as $hdrLoc) {
+            $legacy = trim($this->fieldValueByLocation($fields, $hdrLoc, ''));
+            if ($legacy !== '' && ! ctype_digit($legacy)) {
+                return $legacy;
+            }
         }
 
         return '';
@@ -2339,20 +2365,20 @@ class DocxImportController extends Controller
         array $formFields,
         array $importFields
     ): array {
-        $docNo = trim((string) $request->input(
-            'protocol_document_no',
-            $formFields['protocol_document_no']
-                ?? $formFields['header_0_row_4_col_2']
-                ?? $data['document_number']
-                ?? ''
-        ));
-        $refNo = trim((string) $request->input(
-            'reference_protocol_no',
-            $formFields['reference_protocol_no']
-                ?? $formFields['header_ref_protocol']
-                ?? $data['reference_protocol_no']
-                ?? ''
-        ));
+        $docNo = trim((string) $request->input('protocol_document_no', ''));
+        if ($docNo === '') {
+            $docNo = trim((string) ($formFields['protocol_document_no'] ?? $formFields['header_0_row_4_col_2'] ?? ''));
+        }
+        if ($docNo === '' && ! $request->has('protocol_document_no') && ! array_key_exists('header_0_row_4_col_2', $formFields)) {
+            $docNo = trim((string) ($data['document_number'] ?? ''));
+        }
+        $refNo = trim((string) $request->input('reference_protocol_no', ''));
+        if ($refNo === '') {
+            $refNo = trim((string) ($formFields['reference_protocol_no'] ?? $formFields['header_ref_protocol'] ?? ''));
+        }
+        if ($refNo === '' && ! $request->has('reference_protocol_no') && ! array_key_exists('header_ref_protocol', $formFields)) {
+            $refNo = trim((string) ($data['reference_protocol_no'] ?? ''));
+        }
 
         if ($docNo === '') {
             $docNo = $this->extractCoverTextValue($importFields, 'document_no');
@@ -2395,7 +2421,10 @@ class DocxImportController extends Controller
             }
             $key = (string) ($field['cover_field'] ?? '');
             $loc = (string) ($field['location'] ?? '');
-            if ($key !== '' && $loc !== '') {
+            if ($key === '' || $loc === '') {
+                continue;
+            }
+            if (! isset($map[$key]) || ($key === 'document_no' && $loc === 'header_0_row_4_col_2')) {
                 $map[$key] = $loc;
             }
         }
@@ -4036,6 +4065,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     // 4. Passes preview mode flag so blade can render table or fallback list
     public function showFillForm(Report $report)
     {
+        @set_time_limit(300);
         $report->load('template');
         \App\Http\Controllers\NotificationController::markSeenForReport(auth()->user(), (int) $report->id);
 
@@ -4189,15 +4219,38 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $report->save();
         }
 
+        $equipmentName   = $report->equipment_name ?? '';
+        $equipmentId     = $report->equipment_id ?? '';
+        $facilitySection = $report->facility_section ?? '';
+        $documentNo      = $report->document_no ?? '';
+        $protocolDocumentNo = $this->resolveProtocolDocumentNumber($report, $fields);
+        $referenceProtocolNo = $this->resolveReferenceProtocolNo($report, $fields);
+        $fields = $this->ensureProtocolIdentityHeaderFields($fields, $protocolDocumentNo, $referenceProtocolNo);
+
+        // Upgrade any paragraph with blanks that became paragraph_content back to paragraph_blank
+        foreach ($fields as $idx => $f) {
+            if (! is_array($f)) {
+                continue;
+            }
+            $loc = (string) ($f['location'] ?? '');
+            $lbl = strtolower((string) ($f['label'] ?? ''));
+            if (str_starts_with($loc, 'para_') && str_contains($lbl, 'following test were performed')) {
+                $fields[$idx]['type'] = 'paragraph_blank';
+                $fields[$idx]['widget'] = 'text';
+            }
+        }
+
+        // Send resolved protocol cover values into Python preview so A4 letterheads display live Document No./Equipment values.
+        $previewFields = $this->applyReportPrefills($report, $fields);
         $fileId          = $report->docx_import_path;
         $docxTemplateAvailable = $this->attemptAutoRestoreDocxTemplate($report);
         $pythonUrl       = env('PYTHON_NLP_URL', 'http://127.0.0.1:8001');
         // Fetch table-layout HTML from Python /preview; empty result uses flat field list.
-        $previewHtml     = $fileId ? $this->requestPreviewHtml($fileId, $pythonUrl, $fields, $report->id, $previewMode) : '';
+        $previewHtml     = $fileId ? $this->requestPreviewHtml($fileId, $pythonUrl, $previewFields, $report->id, $previewMode) : '';
 
         if (trim($previewHtml) === '' && $docxTemplateAvailable && $fileId) {
             $this->flushDocxPreviewCache($fileId, $report->id);
-            $previewHtml = $this->requestPreviewHtml($fileId, $pythonUrl, $fields, $report->id, $previewMode);
+            $previewHtml = $this->requestPreviewHtml($fileId, $pythonUrl, $previewFields, $report->id, $previewMode);
         }
         // Replace attachment cells with download links when files were uploaded earlier.
         if (trim($previewHtml) !== '') {
@@ -4211,31 +4264,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ->values()
             ->all();
 
-        $equipmentName   = $report->equipment_name ?? '';
-        $equipmentId     = $report->equipment_id ?? '';
-        $facilitySection = $report->facility_section ?? '';
-        $documentNo      = $report->document_no ?? '';
-        $protocolDocumentNo = $this->resolveProtocolDocumentNumber($report, $fields);
-        $referenceProtocolNo = $this->resolveReferenceProtocolNo($report, $fields);
-        $fields = $this->ensureProtocolIdentityHeaderFields($fields, $protocolDocumentNo, $referenceProtocolNo);
         $documentTitleLocation = $this->findCoverFieldLocation($fields, 'document_title');
         $hasDocumentTitleField = $documentTitleLocation !== null;
         $documentTitle   = $this->resolveDocumentTitle($report, $fields);
         $effectiveDate       = $this->resolveEffectiveDate($report, $fields);
         $effectiveDateLocation = $this->findEffectiveDateFieldLocation($fields);
         $hasEffectiveDateField = $effectiveDateLocation !== null;
-        // Upgrade any paragraph with blanks that became paragraph_content back to paragraph_blank
-        foreach ($fields as $idx => $f) {
-            if (! is_array($f)) {
-                continue;
-            }
-            $loc = (string) ($f['location'] ?? '');
-            $lbl = strtolower((string) ($f['label'] ?? ''));
-            if (str_starts_with($loc, 'para_') && str_contains($lbl, 'following test were performed')) {
-                $fields[$idx]['type'] = 'paragraph_blank';
-                $fields[$idx]['widget'] = 'text';
-            }
-        }
 
         $coverFieldLocations = $this->buildCoverFieldLocationMap($fields);
         $showLegacyBladeHeader = ($coverFieldLocations['document_no'] ?? '') === 'header_0_row_4_col_2';
@@ -5059,6 +5093,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         }
 
         $formFields = $request->input('fields', []);
+        if (! is_array($formFields)) {
+            $formFields = [];
+        }
         $tableOpsRaw = $request->input('table_ops');
         $tableOps = [];
         if (is_string($tableOpsRaw)) {
@@ -5072,24 +5109,50 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if (! is_array($storedFields)) {
             $storedFields = [];
         }
+        $storedFields = $this->upgradeProtocolCoverFieldMetadata($storedFields);
 
+        if ($request->filled('equipment_name')) {
+            $report->equipment_name = trim((string) $request->input('equipment_name'));
+            $data['equipment_name'] = $report->equipment_name;
+            $formFields['equipment_name'] = $report->equipment_name;
+        }
+        if ($request->filled('equipment_id')) {
+            $report->equipment_id = trim((string) $request->input('equipment_id'));
+            $data['equipment_id'] = $report->equipment_id;
+            $formFields['equipment_id'] = $report->equipment_id;
+        }
+        if ($request->has('facility_section')) {
+            $report->facility_section = trim((string) $request->input('facility_section', ''));
+            $data['facility_section'] = $report->facility_section;
+            $formFields['facility_section'] = $report->facility_section;
+        }
+        if ($request->filled('version')) {
+            $report->version = trim((string) $request->input('version'));
+            $data['version'] = $report->version;
+        }
+        if ($request->has('document_title')) {
+            $data['document_title'] = trim((string) $request->input('document_title', ''));
+            $formFields['document_title'] = $data['document_title'];
+        }
+
+        [$data, $formFields] = $this->mergeProtocolIdentityIntoDataAndFields(
+            $request,
+            $data,
+            $formFields,
+            $storedFields
+        );
+        $storedFields = $this->ensureProtocolIdentityHeaderFields(
+            $storedFields,
+            (string) ($data['document_number'] ?? ''),
+            (string) ($data['reference_protocol_no'] ?? '')
+        );
         $report->data = $data;
+        $formFields = $this->applyProtocolCoverValues($formFields, $storedFields, $report);
         $storedFields = $this->applyRequalificationPreApproverNames($report, $storedFields);
         $effectiveDateLocation = $this->findEffectiveDateFieldLocation($storedFields);
 
-        // For Revalidation, the DOCX only contains post-approval tables (REPORT APPROVAL).
-        // Pre-approval is workflow-only and must NEVER write into any approver tables in the DOCX.
-        $revalApproverTables = [];
-        if (($report->import_source ?? '') === 'revalidation') {
-            foreach ($storedFields as $f) {
-                if (is_array($f) && (($f['type'] ?? '') === 'approver' || ($f['widget'] ?? '') === 'approver' || str_starts_with((string) ($f['approver_role'] ?? ''), 'post_'))) {
-                    if (preg_match('/^table_(\d+)_/', (string) ($f['location'] ?? ''), $m)) {
-                        $revalApproverTables[(int) $m[1]] = true;
-                    }
-                }
-            }
-        }
-
+        // Revalidation uses the same pre-approval fill as Requalification.
+        // Approver cells keep the values the user selected; they are not wiped by table.
         $fieldsToPython = [];
         foreach ($storedFields as $idx => $field) {
             if (! is_array($field)) {
@@ -5105,10 +5168,6 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
             // Effective Date is NOT yet approved during pre-approval submission; keep blank until QA signs
             if ($this->isEffectiveDateLikeField($field) && ! $this->isRevisionHistoryEffectiveDateLocation($storedFields, $loc)) {
-                $val = '';
-            }
-            // For revalidation, REPORT APPROVAL is strictly for post-approval; keep all approver tables blank during pre-approval
-            if (! empty($revalApproverTables) && preg_match('/^table_(\d+)_/', $loc, $m) && isset($revalApproverTables[(int) $m[1]])) {
                 $val = '';
             }
             $storedFields[$idx]['value'] = $val;
@@ -5130,9 +5189,6 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
             if (($effectiveDateLocation !== null && $loc === $effectiveDateLocation) || (str_contains(strtolower($loc), 'effective') && ! $this->isRevisionHistoryEffectiveDateLocation($storedFields, $loc))) {
-                $val = '';
-            }
-            if (! empty($revalApproverTables) && preg_match('/^table_(\d+)_/', $loc, $m) && isset($revalApproverTables[(int) $m[1]])) {
                 $val = '';
             }
             $fieldsToPython[] = [
@@ -5298,6 +5354,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 if (! empty($parsedFields)) {
                     $newFields = $this->normalizeImportFields($parsedFields);
                     $newFields = $this->applySourceSpecificImportFieldRules($newFields, $report->import_source);
+                    $newFields = $this->upgradeProtocolCoverFieldMetadata($newFields);
+                    $newFields = $this->ensureProtocolIdentityHeaderFields(
+                        $newFields,
+                        (string) ($data['document_number'] ?? ''),
+                        (string) ($data['reference_protocol_no'] ?? '')
+                    );
 
                     $this->mirrorDocxTemplateAfterParse($newFileId, $newFileContent, $outputFilename);
                     $data['original_docx_path'] = $fileId;
@@ -5334,6 +5396,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         $report->update([
             'data'               => $data,
+            'equipment_name'     => $report->equipment_name,
+            'equipment_id'       => $report->equipment_id,
+            'facility_section'   => $report->facility_section,
+            'version'            => $report->version,
             'stage'              => 'pre',
             'status'             => $first ? 'pre_pending' : 'pre_approved',
             'current_step_order' => $first?->step_order ?? 0,
@@ -7216,11 +7282,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         ?int $reportId = null,
         string $mode = 'edit'
     ): string {
+        @set_time_limit(300);
         $fieldsHash = md5(json_encode(array_values($fields), JSON_UNESCAPED_UNICODE));
         $cacheVer   = $this->docxPreviewCacheVersion($fileId, $reportId);
         $cacheKey   = $reportId
-            ? "docx_preview:v68:{$mode}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
-            : "docx_preview:v68:{$mode}:{$fileId}:{$cacheVer}:{$fieldsHash}";
+            ? "docx_preview:v72:{$mode}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
+            : "docx_preview:v72:{$mode}:{$fileId}:{$cacheVer}:{$fieldsHash}";
         $cached     = Cache::get($cacheKey);
 
         // Return cached HTML when fields and mode have not changed since last preview.
@@ -7775,7 +7842,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         return $hasTrailingPage && ($hasLeaders || preg_match('/\t/', $t) === 1);
     }
 
-    // Force TOC fields locked; never overwrite real cell values with column labels.
+    // Set TOC fields editable so users can change section titles and page numbers.
     private function upgradeTocFieldsLocked(array $fields): array
     {
         foreach ($fields as $idx => $field) {
@@ -7789,7 +7856,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
 
-            $fields[$idx]['locked'] = true;
+            // Keep TOC fields unlocked so users can customize page numbers and titles
+            $fields[$idx]['locked'] = false;
             $fields[$idx]['type'] = 'toc_entry';
 
             $existing = trim((string) ($field['value'] ?? ''));
@@ -8758,24 +8826,26 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         $header = <<<HTML
 <div class="docx-preview">
-<table class="docx-table header-table" style="margin-bottom:0;">
+<div class="docx-summary-header-card">
+<table class="docx-table header-table" style="margin-bottom:0;background:#ffffff;color:#0f172a;">
 <tr>
-<td rowspan="3" style="width:100px;text-align:center;vertical-align:middle;border:1px solid #000;padding:8px;">
+<td rowspan="3" style="width:100px;text-align:center;vertical-align:middle;border:1px solid #cbd5e1;padding:8px;background:#ffffff;">
 <img src="/storage/lupin.png" alt="Lupin" style="height:50px;width:auto;" onerror="this.style.display='none'">
-<div style="font-size:11px;font-weight:bold;margin-top:4px;">LUPIN</div>
+<div style="font-size:11px;font-weight:bold;margin-top:4px;color:#0f172a;">LUPIN</div>
 </td>
-<td colspan="4" style="text-align:center;font-weight:bold;font-size:15px;border:1px solid #000;padding:8px;background:#f8f9fa;">{$titleUpper}</td>
+<td colspan="4" style="text-align:center;font-weight:bold;font-size:15px;border:1px solid #cbd5e1;padding:8px;background:#f8f9fa;color:#0f172a;">{$titleUpper}</td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px;"><strong>Title:</strong> {$title}</td>
-<td style="border:1px solid #000;padding:6px;background:#F9F9F9;" data-field="header_0_row_4_col_2"><strong>Document Number:</strong> {$this->readonlyDisplay($documentNo)}</td>
-<td style="border:1px solid #000;padding:6px;background:#F9F9F9;" data-field="header_0_row_2_col_4"><strong>Equipment Name:</strong> {$this->readonlyDisplay($equipmentName)}</td>
-<td style="border:1px solid #000;padding:6px;background:#F9F9F9;" data-field="header_0_row_3_col_4"><strong>Equipment ID:</strong> {$this->readonlyDisplay($equipmentId)}</td>
+<td style="border:1px solid #cbd5e1;padding:8px;background:#ffffff;color:#0f172a;"><strong>Title:</strong> {$title}</td>
+<td style="border:1px solid #cbd5e1;padding:8px;background:#f8fafc;color:#0f172a;" data-field="header_0_row_4_col_2"><strong>Document Number:</strong> {$this->readonlyDisplay($documentNo)}</td>
+<td style="border:1px solid #cbd5e1;padding:8px;background:#f8fafc;color:#0f172a;" data-field="header_0_row_2_col_4"><strong>Equipment Name:</strong> {$this->readonlyDisplay($equipmentName)}</td>
+<td style="border:1px solid #cbd5e1;padding:8px;background:#f8fafc;color:#0f172a;" data-field="header_0_row_3_col_4"><strong>Equipment ID:</strong> {$this->readonlyDisplay($equipmentId)}</td>
 </tr>
 <tr>
-<td colspan="4" style="border:1px solid #000;padding:6px;background:#F9F9F9;" data-field="header_ref_protocol"><strong>Reference Protocol No:</strong> {$this->readonlyDisplay($refProtocol)}</td>
+<td colspan="4" style="border:1px solid #cbd5e1;padding:8px;background:#f8fafc;color:#0f172a;" data-field="header_ref_protocol"><strong>Reference Protocol No:</strong> {$this->readonlyDisplay($refProtocol)}</td>
 </tr>
 </table>
+</div>
 HTML;
 
         $inner = trim($bodyHtml);

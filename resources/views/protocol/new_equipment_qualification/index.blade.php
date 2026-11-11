@@ -818,6 +818,381 @@
     td.neq-approver-cell {
         background: transparent;
     }
+
+    /* ── Cached Python /preview A4 form styles (Requalification pattern, zero client reflow) ── */
+    #neqFillForm {
+        width: 100%;
+        margin: 0;
+        padding: 0;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper {
+        overflow-x: auto;
+        overflow-y: visible;
+        background: #525659;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 24px 16px;
+        min-height: 220px;
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    body.premium-app #neqFillForm .docx-preview {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    body.premium-app #neqFillForm .docx-a4-page {
+        width: 210mm;
+        max-width: 100%;
+        min-height: 297mm;
+        height: auto !important;
+        max-height: none !important;
+        background: #ffffff !important;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.16);
+        border-radius: 2px;
+        padding: 10mm 14mm 10mm 14mm;
+        margin-bottom: 24px;
+        position: relative;
+        box-sizing: border-box;
+        font-family: inherit;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: visible !important;
+    }
+
+    body.premium-app #neqFillForm .docx-page-body {
+        flex: 1 1 auto;
+        overflow: visible !important;
+        display: flex;
+        flex-direction: column;
+    }
+
+    body.premium-app #neqFillForm .docx-page-official-header {
+        width: 100%;
+        margin-bottom: 8px;
+        flex-shrink: 0;
+    }
+
+    body.premium-app #neqFillForm .docx-page-official-header table.header-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 0;
+        table-layout: fixed;
+        background: #ffffff;
+    }
+
+    body.premium-app #neqFillForm .docx-page-official-header table.header-table td {
+        border: 1px solid #334155 !important;
+        padding: 3px 6px !important;
+        font-size: 11px !important;
+        vertical-align: middle !important;
+        line-height: 1.25;
+        background: #ffffff !important;
+        color: #0f172a !important;
+    }
+
+    body.premium-app #neqFillForm .docx-page-official-footer {
+        width: 100%;
+        margin-top: auto;
+        padding-top: 6px;
+        border-top: 1.5px solid #64748b;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 10px;
+        font-weight: 600;
+        color: #475569;
+        flex-shrink: 0;
+    }
+
+    body.premium-app #neqFillForm .docx-page-break-indicator {
+        display: flex;
+        align-items: center;
+        width: 210mm;
+        max-width: 100%;
+        margin: 4px 0 20px 0;
+        user-select: none;
+    }
+
+    body.premium-app #neqFillForm .docx-page-break-line {
+        flex-grow: 1;
+        border-top: 2px dashed #94a3b8;
+        height: 0;
+    }
+
+    body.premium-app #neqFillForm .docx-page-break-badge {
+        background: #1e293b;
+        color: #f8fafc;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 16px;
+        border-radius: 14px;
+        margin: 0 14px;
+        letter-spacing: 0.5px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+        white-space: nowrap;
+    }
+
+    body.premium-app #neqFillForm .docx-summary-header-card {
+        width: 210mm;
+        max-width: 100%;
+        background: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 12px 14px;
+        margin: 0 auto 20px auto;
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22);
+        box-sizing: border-box;
+    }
+
+    body.premium-app #neqFillForm .docx-summary-header-card table.header-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 0;
+        background: #ffffff !important;
+        color: #0f172a !important;
+    }
+
+    body.premium-app #neqFillForm .docx-summary-header-card table.header-table td {
+        border: 1px solid #cbd5e1 !important;
+        padding: 8px 10px !important;
+        vertical-align: top !important;
+        background: #ffffff !important;
+        color: #0f172a !important;
+        font-size: 13px !important;
+        line-height: 1.4;
+    }
+
+    .docx-summary-header-card .docx-summary-field-label {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.35px;
+        text-transform: uppercase;
+        color: #475569 !important;
+        margin-bottom: 4px;
+    }
+
+    .docx-summary-header-card .docx-summary-title-value {
+        font-size: 13px;
+        font-weight: 600;
+        color: #0f172a !important;
+    }
+
+    body.premium-app #neqFillForm .docx-summary-header-card table.header-table input[type="text"].docx-input {
+        display: block !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        font-size: 13px !important;
+        font-weight: 600;
+        padding: 5px 8px !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper table.docx-table {
+        display: table !important;
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 14px;
+        font-size: 13px;
+        table-layout: auto;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper table.docx-table tr {
+        display: table-row !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper table.docx-table td,
+    body.premium-app #neqFillForm .docx-preview-wrapper table.docx-table th {
+        display: table-cell !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper td.docx-cell,
+    body.premium-app #neqFillForm .docx-preview-wrapper th.docx-cell {
+        border: 1px solid #000;
+        padding: 6px 8px;
+        vertical-align: middle;
+        min-width: 60px;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper th.docx-table-header {
+        background-color: #f1f5f9 !important;
+        color: #1e293b !important;
+        font-weight: 700 !important;
+        border: 1px solid #cbd5e1 !important;
+        padding: 8px 10px !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper td.docx-cell.editable {
+        background-color: #fffde7 !important;
+        background-image: none !important;
+        padding: 2px 4px !important;
+        border-bottom: 2px solid #4e73df !important;
+        cursor: text;
+        position: relative;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper td.docx-cell.locked {
+        background-color: #f5f5f5 !important;
+        background-image: none !important;
+        color: #444 !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper tr.neq-selected-table-row > td,
+    body.premium-app #neqFillForm .docx-preview-wrapper tr.neq-selected-table-row > th {
+        outline: 2px solid #4e73df;
+        outline-offset: -2px;
+        background-color: #eef2ff !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper input[type="text"].docx-input,
+    body.premium-app #neqFillForm .docx-preview-wrapper input[type="text"].docx-input-inline,
+    body.premium-app #neqFillForm .docx-preview-wrapper textarea.docx-input,
+    body.premium-app #neqFillForm .docx-preview-wrapper select.docx-input {
+        display: block !important;
+        width: 100% !important;
+        min-width: 60px !important;
+        min-height: 28px !important;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 4px 6px !important;
+        font-size: 13px !important;
+        line-height: 1.4 !important;
+        font-family: inherit !important;
+        color: #212529 !important;
+        background-color: #fffde7 !important;
+        background-image: none !important;
+        border: none !important;
+        border-bottom: 2px solid #4e73df !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        outline: none !important;
+        box-sizing: border-box !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper input[type="text"].docx-input-inline {
+        display: inline-block !important;
+        width: auto !important;
+        min-width: 140px !important;
+        max-width: 100% !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper input[type="date"].docx-input,
+    body.premium-app #neqFillForm .docx-preview-wrapper input[type="date"].docx-input-inline {
+        display: inline-block !important;
+        width: auto !important;
+        min-width: 140px !important;
+        min-height: 28px !important;
+        padding: 4px 6px !important;
+        font-size: 13px !important;
+        background-color: #fffde7 !important;
+        border: none !important;
+        border-bottom: 2px solid #4e73df !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        -webkit-appearance: auto !important;
+        appearance: auto !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        pointer-events: auto !important;
+        cursor: pointer !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper textarea.docx-input {
+        min-height: 54px !important;
+        resize: vertical;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper select.docx-input.approver-field,
+    body.premium-app #neqFillForm .docx-preview-wrapper select.docx-input.neq-approver-select {
+        -webkit-appearance: menulist !important;
+        appearance: menulist !important;
+        cursor: pointer !important;
+    }
+
+    body.premium-app #neqFillForm .docx-preview-wrapper .docx-para {
+        margin: 6px 0;
+        font-size: 13px;
+        line-height: 1.5;
+    }
+
+    body.premium-app #neqFillForm[data-neq-form-locked="1"] .docx-preview-wrapper input.docx-input,
+    body.premium-app #neqFillForm[data-neq-form-locked="1"] .docx-preview-wrapper input.docx-input-inline,
+    body.premium-app #neqFillForm[data-neq-form-locked="1"] .docx-preview-wrapper textarea.docx-input,
+    body.premium-app #neqFillForm[data-neq-form-locked="1"] .docx-preview-wrapper select.docx-input,
+    body.premium-app #neqFillForm[data-neq-form-locked="1"] .docx-preview-wrapper .neq-added-paragraph-input {
+        background-color: #f8fafc !important;
+        border-bottom-color: #cbd5e1 !important;
+        color: #334155 !important;
+        cursor: default !important;
+    }
+
+    body.premium-app #neqFillForm .neq-added-para-block {
+        margin: 8px 0;
+        padding: 6px 8px;
+        background: #fffbeb;
+        border: 1px dashed #f59e0b;
+        border-radius: 4px;
+    }
+
+    #neqPageNavigator {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        background: #fff;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        overflow: hidden;
+        width: 100%;
+    }
+
+    #neqPageNavigator button {
+        border: none;
+        background: #fff;
+        color: #1e293b;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+
+    #neqPageNavigator button:hover {
+        background: #f1f5f9;
+    }
+
+    #neqPageNavigator select {
+        flex: 1 1 auto;
+        border: none;
+        border-left: 1px solid #e2e8f0;
+        border-right: 1px solid #e2e8f0;
+        font-size: 11px;
+        font-weight: 600;
+        color: #334155;
+        padding: 4px 6px;
+        background: #fff;
+        min-width: 0;
+    }
+
+    #neqRowSelectionBadge {
+        font-size: 11px;
+        line-height: 1.3;
+        color: #475569;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        padding: 4px 6px;
+        text-align: center;
+    }
 </style>
 
 <div class="container-fluid px-0">
@@ -959,7 +1334,10 @@
                                     $latestEdit = $upload->editedCopies->first();
                                     $previewRecord = $latestEdit ?: $upload;
                                     $displayName = $upload->displayName();
-                                    $refDocNo = $upload->referenceDocumentNo();
+                                    $rawRefDocNo = trim((string) ($upload->reference_document_no ?? ''));
+                                    $refDocNo = ($rawRefDocNo !== '' && \App\Models\NewEquipmentQualification::isPlausibleDocumentNumber($rawRefDocNo))
+                                        ? $rawRefDocNo
+                                        : '';
                                     $workflowStatus = $upload->workflowStatus();
                                     $fullyApproved = $upload->isFullyApproved();
                                     $listStatus = $upload->listStatusKey();
@@ -1073,7 +1451,6 @@
             </div>
             <div id="previewError" class="alert alert-warning d-none mb-2"></div>
             <div class="neq-preview-shell" id="previewShell">
-                {{-- docx-preview.js renders Word content; Python may fix embedded images --}}
                 <div id="docxStyleContainer"></div>
                 <div id="docxPreviewArea" class="docx-preview-container">
                     <p class="neq-preview-placeholder mb-0">
@@ -1118,25 +1495,24 @@
     </div>
 </div>
 
-{{-- Fixed top-right dock: edit tools only --}}
+{{-- Fixed top-right dock: edit & navigation tools --}}
 <div id="neqFloatToolbar" class="neq-float-toolbar d-none" aria-label="Document edit tools">
-    <div class="neq-float-toolbar-title">Edit tools</div>
+    <div class="neq-float-toolbar-title">Document tools</div>
     <span id="neqDraftStatus" class="neq-draft-status d-none"></span>
-    <button type="button" class="btn btn-sm btn-dark" id="btnEsignStamp"
-            title="Click a cell or paragraph, then stamp your name and today's date"
+    <button type="button" class="btn btn-sm btn-dark d-none" id="btnEsignStamp"
+            title="Click a field, then stamp your name and today's date"
             style="background-color:#2c3e50;border-color:#1a252f;color:#fff;">
         <i class="fas fa-signature mr-1"></i> E-Sign
     </button>
-    <!-- <div class="neq-float-hint" id="neqFloatInsertHint">Click a paragraph or cell to select it</div> -->
     <button type="button" class="btn btn-sm btn-success btn-neq-edit" id="btnFloatEditContent" title="Unlock / lock document editing"
             style="background-color:#1cc88a;border-color:#13855c;color:#fff;">
         <i class="fas fa-edit mr-1"></i> Edit Content
     </button>
-    <button type="button" class="btn btn-sm btn-warning" id="btnAddParagraph" title="Insert paragraph after the selected line"
+    <button type="button" class="btn btn-sm btn-warning" id="btnAddParagraph" title="Add an extra note/paragraph at the selected section or end"
             style="background-color:#fd7e14;border-color:#d9480f;color:#fff;">
         <i class="fas fa-paragraph mr-1"></i> Add Paragraph
     </button>
-    {{-- Save stays off. Typing autosaves, so this button is not shown.
+    {{-- Save stays off. Typing autosaves JSON cleanly.
     <button type="button" class="btn btn-sm btn-primary" id="btnSaveAs"
             style="background-color:#4e73df;border-color:#2e59d9;color:#fff;">
         <i class="fas fa-save mr-1"></i> Save
@@ -1149,8 +1525,6 @@
 
 <script src="{{ asset('js/vendor/jszip.min.js') }}"></script>
 <script src="{{ asset('js/vendor/docx-preview.min.js') }}?v=shd1"></script>
-<!-- <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script> -->
-<!-- <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.7/dist/docx-preview.min.js"></script> -->
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const uploadForm = document.getElementById('uploadForm');
@@ -1202,6 +1576,11 @@ document.addEventListener('DOMContentLoaded', function () {
     let currentListId = null;
     let currentUploaderId = null;
     let docxTextTargets = null;
+    let neqCachedPreview = null;
+    let neqFieldOriginals = {};
+    let neqFieldLabels = {};
+    let neqTableOpsLog = [];
+    let neqSelectedRowInfo = null;
     let isEditingEnabled = false;
     let hasActivePreview = false;
     let pendingTableDeletes = [];
@@ -1244,10 +1623,24 @@ document.addEventListener('DOMContentLoaded', function () {
         currentDecisionType = null;
         hideNeqDecisionBox();
         docxTextTargets = null;
+        neqCachedPreview = null;
+        neqFieldOriginals = {};
+        neqFieldLabels = {};
+        neqTableOpsLog = [];
+        neqSelectedRowInfo = null;
         pendingTableDeletes = [];
         savedParagraphSnapshot = [];
         lastEditableFocus = null;
         lastStructureAnchor = null;
+        const pageNav = document.getElementById('neqPageNavigator');
+        if (pageNav) {
+            pageNav.classList.add('d-none');
+        }
+        const rowBadge = document.getElementById('neqRowSelectionBadge');
+        if (rowBadge) {
+            rowBadge.textContent = '';
+            rowBadge.classList.add('d-none');
+        }
         clearInsertTargetHighlight();
         setFloatToolbarVisible(false);
         document.removeEventListener('focusin', onPreviewFocusIn, true);
@@ -1883,21 +2276,33 @@ document.addEventListener('DOMContentLoaded', function () {
         return cells;
     }
 
-    async function fixPreviewImages(previewRoot, docxBlob) {
-        if (!window.JSZip || !docxBlob || !previewRoot) {
+    function headerLogoMissingOrBroken(previewRoot) {
+        if (!previewRoot) {
+            return false;
+        }
+        const logoCell = findHeaderLogoCell(previewRoot);
+        const candidates = logoCell
+            ? Array.from(logoCell.querySelectorAll('img'))
+            : Array.from(previewRoot.querySelectorAll('header img, .docx_header img'));
+        if (!candidates.length) {
+            return true;
+        }
+        return !candidates.some(function (img) {
+            return !isImageBroken(img);
+        });
+    }
+
+    async function fixPreviewImages(previewRoot, docxBlob, sharedZip) {
+        if (!previewRoot || (!sharedZip && (!window.JSZip || !docxBlob))) {
             console.warn('[NEQ Preview] fixPreviewImages skipped — missing JSZip, blob, or preview root.');
             return;
         }
 
         try {
-            const zip = await JSZip.loadAsync(docxBlob);
+            const zip = sharedZip || await JSZip.loadAsync(docxBlob);
             const imageIndex = await buildDocxImageIndex(zip);
             const placements = imageIndex.placements.slice();
             const usedPlacements = new Set();
-
-            await new Promise(function (resolve) {
-                setTimeout(resolve, 250);
-            });
 
             const images = Array.from(previewRoot.querySelectorAll('img'));
             console.info('[NEQ Preview] <img> tags in rendered HTML:', images.length);
@@ -1974,6 +2379,7 @@ document.addEventListener('DOMContentLoaded', function () {
             });
 
             if (!remainingPlacements.length) {
+                applyOfficialHeaderLogo(previewRoot);
                 console.info('[NEQ Preview] All embedded images accounted for.');
                 return;
             }
@@ -6133,20 +6539,8 @@ document.addEventListener('DOMContentLoaded', function () {
         reflowPreviewKeepingCaret(table);
     }
 
-    function reflowPreviewKeepingCaret(fromNode) {
-        const wrapper = (fromNode && fromNode.closest && fromNode.closest('.docx-wrapper'))
-            || (typeof previewArea !== 'undefined' && previewArea && previewArea.querySelector
-                ? previewArea.querySelector('.docx-wrapper')
-                : null);
-        if (!wrapper || typeof splitPreviewOntoA4Pages !== 'function') {
-            return;
-        }
-        const anchor = captureTypingAnchor();
-        const caret = captureCaretPoint();
-        splitPreviewOntoA4Pages(wrapper);
-        stampVisiblePageNumbers(wrapper);
-        restoreCaretPoint(caret);
-        restoreTypingAnchor(anchor);
+    function reflowPreviewKeepingCaret() {
+        return;
     }
 
     function onTableRowClick(event) {
@@ -7063,36 +7457,15 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function allApproversSelected() {
-        const everySelect = previewArea
+        const selects = previewArea
             ? Array.from(previewArea.querySelectorAll(
-                'select.neq-approver-select, select.neq-qa-approver-select'
-            )).filter(isRoleApprovalSelect)
+                'select.neq-approver-select[data-neq-approver-slot="1"], select.neq-qa-approver-select'
+            ))
             : [];
-        const visibleSelects = everySelect.filter(selectRowIsVisible);
-        const selects = visibleSelects.length ? visibleSelects : everySelect;
         if (selects.length) {
-            const groups = new Map();
-            selects.forEach(function (sel, index) {
-                const row = sel.closest('tr');
-                const table = row ? row.closest('table') : null;
-                const tableKey = table ? (table.getAttribute('data-neq-table') || '') : '';
-                const rowKey = row ? (row.getAttribute('data-neq-row') || '') : '';
-                const kind = sel.classList.contains('neq-qa-approver-select') ? 'qa' : 'name';
-                const key = (tableKey !== '' && rowKey !== '')
-                    ? (tableKey + ':' + rowKey + ':' + kind)
-                    : ('sel:' + index);
-                if (!groups.has(key)) {
-                    groups.set(key, []);
-                }
-                groups.get(key).push(sel);
+            return selects.every(function (sel) {
+                return approverSelectUserId(sel) > 0;
             });
-            let every = groups.size > 0;
-            groups.forEach(function (list) {
-                if (!list.some(function (sel) { return approverSelectUserId(sel) > 0; })) {
-                    every = false;
-                }
-            });
-            return every;
         }
         const saved = approvalsForCurrentList();
         return saved.length > 0 && saved.every(function (item) {
@@ -7106,24 +7479,15 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         let node = sel;
         while (node && node !== document.body) {
-            const style = window.getComputedStyle(node);
-            if (style.display === 'none' || style.visibility === 'hidden') {
+            if (node.classList && node.classList.contains('d-none')) {
+                return false;
+            }
+            if (node.style && (node.style.display === 'none' || node.style.visibility === 'hidden')) {
                 return false;
             }
             node = node.parentElement;
         }
-        const row = sel.closest('tr') || sel;
-        const box = row.getBoundingClientRect();
-        if (box.width < 2 || box.height < 2) {
-            return false;
-        }
-        const section = sel.closest('section.docx');
-        if (!section) {
-            return true;
-        }
-        const sheet = section.getBoundingClientRect();
-        // A copy clipped under the page (overflow hidden) is not a real approver row.
-        return box.bottom > sheet.top + 4 && box.top < sheet.bottom - 4;
+        return true;
     }
 
     function currentUserCanApprove() {
@@ -7243,8 +7607,8 @@ document.addEventListener('DOMContentLoaded', function () {
             btnFloatEdit.disabled = !canSave;
         }
         if (btnAddParagraph) {
-            btnAddParagraph.classList.toggle('d-none', !canSave);
-            btnAddParagraph.disabled = !canSave;
+            btnAddParagraph.classList.toggle('d-none', !canSave || !isEditingEnabled);
+            btnAddParagraph.disabled = !canSave || !isEditingEnabled;
         }
         const btnEsignStamp = document.getElementById('btnEsignStamp');
         if (btnEsignStamp) {
@@ -7290,151 +7654,148 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function collectApprovers() {
-        stampNeqTables();
         const ops = [];
+        if (!previewArea) {
+            return ops;
+        }
 
-        // Attachment-3 section Verified-by first (Main Body → Mechanical → Electrical).
-        collectSectionVerifiedApprovers().forEach(function (op) {
-            ops.push(op);
-        });
-
-        // Check-matrix "Safety By (Sign./Date)" inline approver.
-        collectSafetyByApprovers().forEach(function (op) {
-            ops.push(op);
-        });
-
-        getMappablePreviewTables().forEach(function (table) {
-            if (isTrainingPersonnelTable(table)) {
+        // Optional section Verified-by / Safety By banner dropdowns (only when chosen).
+        previewArea.querySelectorAll('select.neq-section-verified-select').forEach(function (sel) {
+            const uid = approverSelectUserId(sel);
+            if (uid <= 0) {
                 return;
             }
-            const map = getApprovalColumnMap(table);
-            if (!map || getNodeZone(table) !== 'body') {
-                return;
-            }
-            const tableIndex = Number(table.getAttribute('data-neq-table'));
-                getDirectTableRows(table).forEach(function (row) {
-                const mapLocal = map;
-                const rowPos = getDirectTableRows(table).indexOf(row);
-                const departmentRow = rowLooksLikeSignatoryDepartment(row);
-                if (!departmentRow && (isApprovalHeaderRow(row, mapLocal)
-                    || isApprovalSectionLabelRow(row, mapLocal)
-                    || (Number.isInteger(mapLocal.headerIndex) && mapLocal.headerIndex >= 0 && rowPos <= mapLocal.headerIndex))) {
-                    return;
-                }
-                const rowIndex = Number(row.getAttribute('data-neq-row'));
-                if (!departmentRow && (!Number.isInteger(rowIndex) || rowIndex < 0)) {
-                    if (row.getAttribute('data-neq-new-row') !== '1') {
-                        return;
-                    }
-                }
-                const cells = getRowCells(row);
-                const nameCell = cells[map.name];
-                const select = chosenApproverSelect(row, nameCell);
-                if (!select || !isSendForApprovalSelect(select)) {
-                    return;
-                }
-                const nameText = normalizeEditText(nameCell && (nameCell.innerText || nameCell.textContent) || '').toLowerCase();
-                if (approverSelectUserId(select) <= 0 && (
-                    isApproverNameHeaderCell(nameCell)
-                    || /^(prepared|checked|approved|reviewed|performed|compiled|complied|recorded)\s*by\b/.test(nameText)
-                )) {
-                    return;
-                }
-                const roleCell = map.role >= 0 ? cells[map.role] : null;
-                let roleText = roleCell ? nodeEditText(roleCell) : '';
-                if (/^verified\s*by\b/i.test(roleText) || isVerifiedByRowText(roleText)) {
-                    return;
-                }
-                if (!/\b(prepared|checked|approved|reviewed|performed|compiled|complied|recorded)\s*by\b/i.test(roleText)) {
-                    roleText = approvalSectionTitle(table) || roleText;
-                }
-                ops.push({
-                    user_id: approverSelectUserId(select),
-                    role: roleText,
-                    table: tableIndex,
-                    row: Number.isInteger(rowIndex) && rowIndex >= 0 ? rowIndex : getDirectTableRows(table).indexOf(row),
-                    name_col: map.name,
-                    department_col: Number.isInteger(map.department) && map.department >= 0 ? map.department : null,
-                    name_includes_designation: !!map.nameCombined,
-                    signature_col: map.signature,
-                    date_col: map.date,
-                });
+            ops.push({
+                user_id: uid,
+                role: sel.dataset.neqRole || 'Verified by',
+                table: Number(sel.dataset.neqTable || 0),
+                row: Number(sel.dataset.neqRow || 0),
+                name_col: 0,
+                department_col: null,
+                name_includes_designation: false,
+                signature_col: 0,
+                date_col: 0,
+                section_verified: true,
             });
         });
 
-        // Layout-based Validation / QA single approver (training personnel docs).
-        // Select may be hidden after stamp paint — still collect user_id from it or data attr.
-        const qaSelect = previewArea && previewArea.querySelector('select.neq-qa-approver-select');
-        const qaHost = previewArea && previewArea.querySelector('.neq-qa-approver-host[data-neq-qa-user-id]');
-        const qaUserId = qaSelect && qaSelect.value
-            ? Number(qaSelect.value)
-            : (qaHost ? Number(qaHost.getAttribute('data-neq-qa-user-id')) : 0);
-        const qaSelectVisible = qaSelect && selectRowIsVisible(qaSelect);
-        if (Number(qaUserId) > 0 && ((qaSelectVisible) || qaHost)) {
-            const target = resolveQaStampTarget(qaSelect || qaHost);
+        previewArea.querySelectorAll('select.neq-safety-by-select').forEach(function (sel) {
+            const uid = approverSelectUserId(sel);
+            if (uid <= 0) {
+                return;
+            }
             ops.push({
-                user_id: Number(qaUserId),
-                role: 'Validation / Quality Assurance',
-                table: target.hasCellTarget ? target.tableIndex : 900000,
-                row: target.hasCellTarget ? target.rowIndex : (900000 + (target.paraIndex || 0)),
-                name_col: target.hasCellTarget ? target.nameCol : 0,
+                user_id: uid,
+                role: sel.dataset.neqRole || 'Safety By',
+                table: Number(sel.dataset.neqTable || 0),
+                row: Number(sel.dataset.neqRow || 0),
+                name_col: 0,
                 department_col: null,
-                signature_col: target.hasCellTarget ? (target.signatureCol || target.nameCol) : 0,
-                date_col: target.hasCellTarget ? (target.dateCol || target.nameCol) : 0,
-                paragraph_index: Number.isInteger(target.paraIndex) && target.paraIndex >= 0
-                    ? target.paraIndex
-                    : null,
+                name_includes_designation: false,
+                signature_col: 0,
+                date_col: 0,
+                safety_by: true,
+            });
+        });
+
+        // Required signatory table approver rows.
+        previewArea.querySelectorAll('select.neq-approver-select[data-neq-approver-slot="1"]').forEach(function (sel) {
+            const uid = approverSelectUserId(sel);
+            const table = Number(sel.dataset.neqTable || 0);
+            const row = Number(sel.dataset.neqRow || 0);
+            const nameCol = Number(sel.dataset.neqNameCol || 0);
+            const deptColRaw = sel.dataset.neqDepartmentCol;
+            const deptCol = (deptColRaw !== undefined && deptColRaw !== '') ? Number(deptColRaw) : null;
+            const sigCol = Number(sel.dataset.neqSignatureCol || nameCol);
+            const dateCol = Number(sel.dataset.neqDateCol || sigCol);
+            ops.push({
+                user_id: uid > 0 ? uid : null,
+                role: sel.dataset.neqRole || '',
+                table: table,
+                row: row,
+                name_col: nameCol,
+                department_col: deptCol,
+                name_includes_designation: sel.dataset.neqNameCombined === '1',
+                signature_col: sigCol,
+                date_col: dateCol,
+            });
+        });
+
+        // Validation / Quality Assurance paragraph stamp (Attachment 01).
+        previewArea.querySelectorAll('select.neq-qa-approver-select').forEach(function (qaSel) {
+            const uid = approverSelectUserId(qaSel);
+            if (uid <= 0) {
+                return;
+            }
+            const paraTargetIdx = qaSel.dataset.neqParaTargetIndex !== undefined && qaSel.dataset.neqParaTargetIndex !== ''
+                ? Number(qaSel.dataset.neqParaTargetIndex)
+                : null;
+            ops.push({
+                user_id: uid,
+                role: 'Validation / Quality Assurance',
+                table: 900000,
+                row: 900000 + (Number.isInteger(paraTargetIdx) && paraTargetIdx >= 0 ? paraTargetIdx : 0),
+                name_col: 0,
+                department_col: null,
+                signature_col: 0,
+                date_col: 0,
+                paragraph_index: Number.isInteger(paraTargetIdx) && paraTargetIdx >= 0 ? paraTargetIdx : null,
                 qa_stamp: true,
             });
+        });
+
+        // Fallback to previously saved approvals when rendered read-only without select widgets.
+        if (!ops.length) {
+            const saved = approvalsForCurrentList();
+            if (saved.length) {
+                return saved.map(function (item) {
+                    return {
+                        user_id: item.user_id || null,
+                        role: item.role || '',
+                        table: Number(item.table || 0),
+                        row: Number(item.row || 0),
+                        name_col: item.name_col !== undefined ? item.name_col : 0,
+                        department_col: item.department_col !== undefined ? item.department_col : null,
+                        name_includes_designation: !!item.name_includes_designation,
+                        signature_col: item.signature_col !== undefined ? item.signature_col : 0,
+                        date_col: item.date_col !== undefined ? item.date_col : 0,
+                        paragraph_index: item.paragraph_index !== undefined ? item.paragraph_index : null,
+                        qa_stamp: !!item.qa_stamp,
+                        section_verified: !!item.section_verified,
+                        safety_by: !!item.safety_by,
+                    };
+                });
+            }
         }
+
         const byKey = new Map();
-        ops.forEach(function (op) {
+        ops.forEach(function (op, index) {
+            op._order = index;
             const key = String(op.table) + ':' + String(op.row) + ':' + String(op.role || '');
             const prev = byKey.get(key);
-            if (!prev || (Number(prev.user_id) <= 0 && Number(op.user_id) > 0)) {
+            if (!prev || (!prev.user_id && op.user_id)) {
                 byKey.set(key, op);
             }
         });
         const ranked = Array.from(byKey.values());
-        ranked.forEach(function (op, index) {
-            op._order = index;
-        });
         function approvalRoleRank(role) {
             const text = String(role || '').toLowerCase();
-            if (/\bprepared\s*by\b/.test(text)) {
-                return 1;
-            }
-            if (/\bchecked\s*by\b/.test(text)) {
-                return 2;
-            }
-            if (/\breviewed\s*by\b/.test(text)) {
-                return 3;
-            }
-            if (/\bapproved\s*by\b/.test(text)) {
-                return 4;
-            }
+            if (/\bprepared\s*by\b/.test(text)) return 1;
+            if (/\bchecked\s*by\b/.test(text)) return 2;
+            if (/\breviewed\s*by\b/.test(text)) return 3;
+            if (/\bapproved\s*by\b/.test(text)) return 4;
             return 0;
         }
         ranked.sort(function (a, b) {
             const rankA = approvalRoleRank(a.role);
             const rankB = approvalRoleRank(b.role);
-            if ((rankA === 0) !== (rankB === 0)) {
-                return rankA === 0 ? -1 : 1;
-            }
-            if (rankA !== rankB) {
-                return rankA - rankB;
-            }
-            if (rankA > 0 && Number(a.table) !== Number(b.table)) {
-                return Number(a.table) - Number(b.table);
-            }
-            if (rankA > 0 && Number(a.row) !== Number(b.row)) {
-                return Number(a.row) - Number(b.row);
-            }
+            if ((rankA === 0) !== (rankB === 0)) return rankA === 0 ? -1 : 1;
+            if (rankA !== rankB) return rankA - rankB;
+            if (rankA > 0 && Number(a.table) !== Number(b.table)) return Number(a.table) - Number(b.table);
+            if (rankA > 0 && Number(a.row) !== Number(b.row)) return Number(a.row) - Number(b.row);
             return a._order - b._order;
         });
-        ranked.forEach(function (op) {
-            delete op._order;
-        });
+        ranked.forEach(function (op) { delete op._order; });
         return ranked;
     }
 
@@ -7766,255 +8127,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function bindApproverDropdowns() {
-        stampNeqTables();
-        const allowSelect = currentUserCanSave();
-        getMappablePreviewTables().forEach(function (table) {
-            const map = getApprovalColumnMap(table);
-            if (!map || getNodeZone(table) !== 'body') {
-                return;
-            }
-            const tableIndex = Number(table.getAttribute('data-neq-table'));
-            getDirectTableRows(table).forEach(function (row, rowPos) {
-                const cellsProbe = Array.from(row.children).filter(function (el) {
-                    return (el.tagName === 'TD' || el.tagName === 'TH') && !isToolCell(el);
-                });
-                const roleCellText = (Number(map.role) >= 0 && cellsProbe[map.role])
-                    ? columnHeaderMatchText(cellsProbe[map.role].innerText || cellsProbe[map.role].textContent || '')
-                    : '';
-                const looksLikeRoleDataRow = rowLooksLikeSignatoryDepartment(row)
-                    || /^(prepared|checked|approved|reviewed|performed|compiled|complied|recorded)\s*by\b/.test(roleCellText)
-                    || (Number(map.role) < 0 && cellsProbe[0] && /^(prepared|checked|approved|reviewed|performed|compiled|complied|recorded)\s*by\b/.test(
-                        columnHeaderMatchText(cellsProbe[0].innerText || cellsProbe[0].textContent || '')
-                    ));
-                const isLabelOrHeader = (!looksLikeRoleDataRow && (
-                    isApprovalHeaderRow(row, map)
-                    || rowPos === map.headerIndex
-                    || isApprovalSectionLabelRow(row, map)
-                    || (Number.isInteger(map.headerIndex) && rowPos < map.headerIndex)
-                ));
-                if (isLabelOrHeader) {
-                    // Restore wiped section labels / column headers (Prepared By, Name/ Designation).
-                    const headerCells = Array.from(row.children).filter(function (el) {
-                        return (el.tagName === 'TD' || el.tagName === 'TH') && !isToolCell(el);
-                    });
-                    const headerNameCell = headerCells[map.name];
-                    if (headerNameCell && headerNameCell.querySelector('select.neq-approver-select')) {
-                        headerNameCell.innerHTML = '';
-                        const originalHeader = normalizeEditText(headerNameCell.getAttribute('data-neq-original') || '');
-                        if (rowPos === map.headerIndex || isApprovalNameColumnHeaderText(headerNameCell.getAttribute('data-neq-original') || '')) {
-                            headerNameCell.textContent = originalHeader
-                                || (Number.isInteger(map.department) && map.department >= 0 ? 'Name' : 'Name/ Designation');
-                        } else if (Number.isInteger(map.headerIndex) && rowPos < map.headerIndex) {
-                            const original = originalHeader;
-                            headerNameCell.textContent = original
-                                || (rowPos === 0 ? 'Prepared By' : '');
-                            if (!headerNameCell.textContent) {
-                                const tableText = normalizeEditText(table.innerText || '');
-                                if (/prepared\s*by/i.test(tableText)) {
-                                    headerNameCell.textContent = 'Prepared By';
-                                } else if (/checked\s*by/i.test(tableText)) {
-                                    headerNameCell.textContent = 'Checked By';
-                                } else if (/approved\s*by/i.test(tableText)) {
-                                    headerNameCell.textContent = 'Approved By';
-                                }
-                            }
-                        } else {
-                            headerNameCell.textContent = originalHeader
-                                || (Number.isInteger(map.department) && map.department >= 0 ? 'Name' : 'Name/ Designation');
-                        }
-                        headerNameCell.removeAttribute('contenteditable');
-                    }
-                    return;
-                }
-                const cells = Array.from(row.children).filter(function (el) {
-                    return (el.tagName === 'TD' || el.tagName === 'TH') && !isToolCell(el);
-                });
-                const nameCell = cells[map.name];
-                const signatureCell = cells[map.signature];
-                const dateCell = cells[map.date];
-                const departmentCell = (Number.isInteger(map.department) && map.department >= 0)
-                    ? cells[map.department]
-                    : null;
-                if (!nameCell) {
-                    return;
-                }
-                const nameHeaderText = columnHeaderMatchText(nameCell.innerText || nameCell.textContent);
-                // With a Role column, *By text lives in the role cell — Name still needs Select User.
-                if (Number(map.role) >= 0) {
-                    if (isApprovalNameColumnHeaderText(nameHeaderText)) {
-                        return;
-                    }
-                } else if (isApprovalNameColumnHeaderText(nameHeaderText)
-                    || /^(prepared|checked|approved|reviewed|performed|compiled|complied|recorded)\s*by\b/.test(nameHeaderText)) {
-                    return;
-                }
-
-                // Capture DOCX-preview text BEFORE any DOM wipe.
-                const docxStamped = cellLooksLikeDocxApprovalStamp(nameCell, signatureCell, dateCell);
-                const liveName = approvalCellLiveText(nameCell);
-                const liveSig = approvalCellLiveText(signatureCell);
-                const liveDate = approvalCellLiveText(dateCell);
-                const liveDepartment = approvalCellLiveText(departmentCell);
-
-                const rowIndex = Number(row.getAttribute('data-neq-row'));
-                const saved = findSavedApprovalFlexible(tableIndex, rowIndex, nameCell);
-
-                nameCell.classList.add('neq-approver-cell');
-                nameCell.removeAttribute('contenteditable');
-                if (departmentCell) {
-                    departmentCell.classList.add('neq-stamp-cell');
-                    departmentCell.removeAttribute('contenteditable');
-                }
-                if (signatureCell) {
-                    signatureCell.classList.add('neq-stamp-cell');
-                    signatureCell.removeAttribute('contenteditable');
-                }
-                if (dateCell && dateCell !== signatureCell) {
-                    dateCell.classList.add('neq-stamp-cell');
-                    dateCell.removeAttribute('contenteditable');
-                }
-
-                // Prefer Word stamps already in the preview (same as Download).
-                if (docxStamped) {
-                    if (signatureCell && liveSig && !signatureCell.querySelector('.neq-signature-font')
-                        && !/^\d{1,2}-\d{1,2}-\d{2,4}/.test(liveSig) && /approved|rejected/i.test(liveSig)) {
-                        const datePart = liveDate || '';
-                        paintApprovalStampCells(
-                            nameCell,
-                            signatureCell,
-                            dateCell,
-                            liveName,
-                            liveSig,
-                            datePart,
-                            departmentCell,
-                            liveDepartment
-                        );
-                    }
-                    return;
-                }
-
-                if (saved && (saved.approved_at || saved.rejected_at)) {
-                    paintApprovalStampCells(
-                        nameCell,
-                        signatureCell,
-                        dateCell,
-                        saved.name_text || liveName || '',
-                        saved.signature_text || (saved.rejected_at ? 'Rejected' : 'Approved'),
-                        saved.date_text || saved.approved_at || saved.rejected_at || '',
-                        departmentCell,
-                        saved.department_text || liveDepartment || ''
-                    );
-                    return;
-                }
-
-                // Read-only viewers: never replace Word content with Select / dashes.
-                // Still show the chosen name and designation when the file cell is empty.
-                if (!allowSelect) {
-                    if (saved && saved.user_id && !(saved.approved_at || saved.rejected_at)) {
-                        const display = normalizeEditText(saved.name_text || '');
-                        const current = normalizeEditText(liveName || '');
-                        if (display && (!current || /^--\s*select/.test(current))) {
-                            paintCenteredCellText(nameCell, display);
-                        }
-                    }
-                    return;
-                }
-
-                let select = nameCell.querySelector('select.neq-approver-select');
-                if (!select) {
-                    Array.from(nameCell.childNodes).forEach(function (child) {
-                        if ((child.tagName || '').toLowerCase() !== 'table') {
-                            nameCell.removeChild(child);
-                        }
-                    });
-                    select = document.createElement('select');
-                    select.className = 'neq-approver-select';
-                    const blank = document.createElement('option');
-                    blank.value = '';
-                    blank.textContent = '-- Select User --';
-                    select.appendChild(blank);
-                    neqApproverUsers.forEach(function (user) {
-                        const opt = document.createElement('option');
-                        opt.value = String(user.id);
-                        opt.textContent = approverNameCellText(user, true) || user.label;
-                        opt.setAttribute('data-name', approverNameCellText(user, true));
-                        opt.setAttribute('data-designation', user.designation || '');
-                        select.appendChild(opt);
-                    });
-                    nameCell.appendChild(select);
-                }
-                Array.from(select.options).forEach(function (opt) {
-                    if (!opt.value) {
-                        return;
-                    }
-                    const named = opt.getAttribute('data-name') || '';
-                    if (named) {
-                        opt.textContent = named;
-                    }
-                });
-                if (saved && saved.user_id) {
-                    select.value = String(saved.user_id);
-                    const chosen = select.options[select.selectedIndex];
-                    if (chosen && chosen.value) {
-                        const display = (saved && saved.name_text) || chosen.getAttribute('data-name') || '';
-                        if (display) {
-                            chosen.textContent = display;
-                        }
-                    }
-                }
-                if (departmentCell && !map.nameCombined) {
-                    paintApproverDepartmentFromSelect(departmentCell, select);
-                }
-                const pinnedUser = select.getAttribute('data-neq-picked-user')
-                    || (row.getAttribute('data-neq-picked-user') || '');
-                if (!(saved && saved.user_id) && pinnedUser && select.value !== pinnedUser) {
-                    select.value = pinnedUser;
-                }
-                pinApproverSelect(select);
-                if (!select.dataset.neqChangeBound) {
-                    select.dataset.neqChangeBound = '1';
-                    select.addEventListener('change', function () {
-                        const chosen = select.options[select.selectedIndex];
-                        if (chosen && chosen.value) {
-                            const display = chosen.getAttribute('data-name') || '';
-                            if (display) {
-                                chosen.textContent = display;
-                            }
-                        }
-                        pinApproverSelect(select);
-                        if (departmentCell && !map.nameCombined) {
-                            paintApproverDepartmentFromSelect(departmentCell, select);
-                        }
-                        updateApprovalActionButtons();
-                    });
-                }
-                // Only fill pending dashes when signature/date are truly empty — never wipe stamps.
-                if (signatureCell && dateCell && signatureCell === dateCell) {
-                    const live = approvalCellLiveText(signatureCell);
-                    if (!live || live === '—' || live === '-') {
-                        signatureCell.innerHTML = '<span class="neq-stamp-pending">—</span>';
-                    }
-                } else {
-                    if (signatureCell && !signatureCell.querySelector('.neq-signature-font')) {
-                        const live = approvalCellLiveText(signatureCell);
-                        if (!live || live === '—' || live === '-') {
-                            signatureCell.innerHTML = '<span class="neq-stamp-pending">—</span>';
-                        }
-                    }
-                    if (dateCell && dateCell !== signatureCell) {
-                        const live = approvalCellLiveText(dateCell);
-                        if (!live || live === '—' || live === '-') {
-                            dateCell.innerHTML = '<span class="neq-stamp-pending">—</span>';
-                        }
-                    }
-                }
-            });
-        });
+        // Handled cleanly inside hydrateCachedApprovers() when cached preview renders.
         updateApprovalActionButtons();
-        bindTrainingPersonnelEditors();
-        bindValidationQaApprover();
-        bindSectionVerifiedByApprovers();
-        bindSafetyByApprovers();
     }
 
     function isSafetyBySignDateRowText(text) {
@@ -11921,42 +12035,49 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function getFormFieldTargets() {
-        const wrapper = getPreviewContentRoot();
+        const form = document.getElementById('neqFillForm');
+        const wrapper = form || getPreviewContentRoot();
         if (!wrapper) {
             return [];
         }
 
-        return Array.from(wrapper.querySelectorAll('input, textarea, select'));
+        return Array.from(wrapper.querySelectorAll('input, textarea, select')).filter(function (node) {
+            return (node.type || '').toLowerCase() !== 'hidden';
+        });
     }
 
     function setFormFieldsEditable(isEditable) {
+        const form = document.getElementById('neqFillForm');
+        if (form) {
+            form.setAttribute('data-neq-form-locked', isEditable ? '0' : '1');
+        }
         getFormFieldTargets().forEach(function (node) {
-            if (isEditable) {
-                node.removeAttribute('disabled');
-                node.removeAttribute('readonly');
+            if (node.getAttribute('data-neq-always-locked') === '1') {
+                node.disabled = true;
+                return;
+            }
+            const tag = (node.tagName || '').toLowerCase();
+            const type = (node.type || '').toLowerCase();
+            if (tag === 'select' || type === 'checkbox' || type === 'radio' || type === 'date' || type === 'file') {
+                node.disabled = !isEditable;
+                if (isEditable) {
+                    node.removeAttribute('disabled');
+                }
             } else {
-                node.setAttribute('disabled', 'disabled');
+                node.disabled = false;
+                node.removeAttribute('disabled');
+                node.readOnly = !isEditable;
+                if (isEditable) {
+                    node.removeAttribute('readonly');
+                } else {
+                    node.setAttribute('readonly', 'readonly');
+                }
             }
         });
     }
 
     function disableEditing() {
-        const scope = getEditScopeRoot();
-        const nodes = scope
-            ? Array.from(scope.querySelectorAll('[contenteditable="true"]'))
-            : getUnlockableNodes();
-        nodes.forEach(function (node) {
-            node.removeAttribute('contenteditable');
-            node.removeEventListener('input', onMappedNodeInput);
-        });
-        stripCheckboxWidgets();
-        bindLetterheadCellClicks(false);
-        bindTableRowTools(false);
         setFormFieldsEditable(false);
-        const scopeOff = getEditScopeRoot();
-        if (scopeOff) {
-            scopeOff.removeEventListener('input', onIdentityFieldInput, true);
-        }
         previewShell.classList.remove('neq-edit-mode');
         isEditingEnabled = false;
         lastEditableFocus = null;
@@ -11964,34 +12085,7 @@ document.addEventListener('DOMContentLoaded', function () {
         clearInsertTargetHighlight();
         setFloatToolbarVisible(true);
         updateEditContentButtonState();
-        document.removeEventListener('keydown', onEditableEnterKey, true);
-        document.removeEventListener('keydown', onEditableSpaceKey, true);
-        document.removeEventListener('focusin', onPreviewFocusIn, true);
-        document.removeEventListener('mouseup', onPreviewMouseUp, true);
-        document.removeEventListener('click', onPreviewClickSelect, true);
-    }
-
-    function stripCheckboxWidgets() {
-        const scope = getEditScopeRoot();
-        if (!scope) {
-            return;
-        }
-        scope.querySelectorAll('input.neq-checkbox').forEach(function (cb) {
-            const host = cb.parentElement;
-            if (!host || host.getAttribute('data-neq-box-kept') === '1') {
-                return;
-            }
-            const checked = !!cb.checked;
-            host.querySelectorAll('input.neq-checkbox, .neq-tick-mark').forEach(function (el) {
-                el.remove();
-            });
-            syncTickMark(host, checked);
-            host.setAttribute('data-neq-checked', checked ? '1' : '0');
-            host.setAttribute('data-neq-box-kept', '1');
-        });
-        scope.querySelectorAll('[data-neq-box-kept]').forEach(function (host) {
-            host.removeAttribute('data-neq-box-kept');
-        });
+        updateApprovalActionButtons();
     }
 
     async function loadDocxTextTargets() {
@@ -12014,32 +12108,11 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function unifyMatrixDataCellEditors() {
-        const scope = getEditScopeRoot();
-        if (!scope) {
-            return;
-        }
-        stampNeqTables();
-        scope.querySelectorAll('table.neq-check-matrix td').forEach(function (cell) {
-            if (isToolCell(cell) || isInsideNestedLayoutTable(cell) || shouldKeepReadOnly(cell)) {
-                return;
-            }
-            if (cell.parentElement && isHeaderLikeRow(cell.parentElement)) {
-                return;
-            }
-            hideEmptyNestedLayoutTables(cell);
-            cell.querySelectorAll('[contenteditable="true"]').forEach(function (el) {
-                if (el !== cell) {
-                    el.removeAttribute('contenteditable');
-                    el.removeEventListener('input', onMappedNodeInput);
-                }
-            });
-            makeNodeEditable(cell);
-        });
+        return;
     }
 
     async function enableEditing() {
         try {
-            // Block identity restore while unlocking / while the user types.
             isEditingEnabled = true;
 
             if (!docxTextTargets) {
@@ -12089,13 +12162,9 @@ document.addEventListener('DOMContentLoaded', function () {
             previewError.classList.add('d-none');
             const editWrapper = previewArea ? previewArea.querySelector('.docx-wrapper') : null;
             if (editWrapper) {
-                // Tick boxes add height after the first split, which left the
-                // last SCOPE lines hanging off the sheet until a box was clicked.
                 splitPreviewOntoA4Pages(editWrapper);
                 stampVisiblePageNumbers(editWrapper);
             }
-            console.info('[NEQ Edit] contenteditable count after enable:',
-                (getEditScopeRoot() || document).querySelectorAll('[contenteditable="true"]').length);
         } catch (error) {
             clearMappedEditAttrs();
             isEditingEnabled = false;
@@ -13113,12 +13182,12 @@ document.addEventListener('DOMContentLoaded', function () {
         return rows;
     }
 
-    async function readSavedFillFromDocx(docxBlob) {
+    async function readSavedFillFromDocx(docxBlob, sharedZip) {
         const cache = { choices: {}, sentences: [] };
-        if (!window.JSZip || !docxBlob) {
+        if (!sharedZip && (!window.JSZip || !docxBlob)) {
             return cache;
         }
-        const zip = await JSZip.loadAsync(docxBlob);
+        const zip = sharedZip || await JSZip.loadAsync(docxBlob);
         const docXml = zip.file('word/document.xml');
         if (!docXml) {
             return cache;
@@ -13230,17 +13299,17 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Read identity values directly from DOCX OOXML (same source as Download).
-    async function extractIdentityValuesFromDocxBlob(docxBlob) {
+    async function extractIdentityValuesFromDocxBlob(docxBlob, sharedZip) {
         const result = {
             documentTitle: null,
             documentNo: null,
         };
-        if (!window.JSZip || !docxBlob) {
+        if (!sharedZip && (!window.JSZip || !docxBlob)) {
             return result;
         }
 
         try {
-            const zip = await JSZip.loadAsync(docxBlob);
+            const zip = sharedZip || await JSZip.loadAsync(docxBlob);
             const xmlParts = [];
             const docXml = zip.file('word/document.xml');
             if (docXml) {
@@ -15708,50 +15777,8 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    function bindPreviewPageGrowth(wrapper) {
-        if (!wrapper || wrapper.getAttribute('data-neq-page-grow') === '1') {
-            return;
-        }
-        wrapper.setAttribute('data-neq-page-grow', '1');
-        let timer = 0;
-        wrapper.addEventListener('input', function (event) {
-            // Choosing a user must not rebuild the page. That rebuild cloned the
-            // row and the dropdown snapped back to "-- Select User --".
-            if (event.target && (event.target.tagName || '').toLowerCase() === 'select') {
-                return;
-            }
-            if (event.target && event.target.closest) {
-                const typed = event.target.closest('p, li');
-                if (typed && typed.getAttribute('data-neq-new-para') !== '1' && !typed.getAttribute('data-neq-index')) {
-                    typed.setAttribute('data-neq-user-typed', '1');
-                }
-                if (typed && paragraphWasCleared(typed)) {
-                    removeClearedParagraph(typed);
-                }
-            }
-            if (event.target && event.target.classList && event.target.classList.contains('neq-checkbox')) {
-                return;
-            }
-            window.clearTimeout(timer);
-            timer = window.setTimeout(function () {
-                const anchor = captureTypingAnchor();
-                const caret = captureCaretPoint();
-                typingCaretBlock = caret ? caret.block : null;
-                try {
-                    holdBlankLineHeight(wrapper);
-                    splitPreviewOntoA4Pages(wrapper);
-                    stampVisiblePageNumbers(wrapper);
-                } finally {
-                    typingCaretBlock = null;
-                }
-                restoreCaretPoint(caret);
-                restoreTypingAnchor(anchor);
-                window.requestAnimationFrame(function () {
-                    restoreCaretPoint(caret);
-                    restoreTypingAnchor(anchor);
-                });
-            }, 280);
-        });
+    function bindPreviewPageGrowth() {
+        return;
     }
 
     function dropBodySentencesFromPageHeaders(wrapper) {
@@ -15773,8 +15800,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    function reflowA4Pages(root) {
-        const wrapper = root && root.querySelector ? root.querySelector('.docx-wrapper') : null;
+    function preparePreviewDomForA4Split(wrapper) {
         if (!wrapper) {
             return;
         }
@@ -15800,6 +15826,14 @@ document.addEventListener('DOMContentLoaded', function () {
         applyOfficialHeaderLogo(wrapper);
         holdImportedRowHeights(wrapper);
         holdBlankLineHeight(wrapper);
+    }
+
+    function reflowA4Pages(root) {
+        const wrapper = root && root.querySelector ? root.querySelector('.docx-wrapper') : null;
+        if (!wrapper) {
+            return;
+        }
+        preparePreviewDomForA4Split(wrapper);
         splitPreviewOntoA4Pages(wrapper);
         stampVisiblePageNumbers(wrapper);
         bindPreviewPageGrowth(wrapper);
@@ -15871,7 +15905,6 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         previewArea.style.visibility = 'hidden';
-        try {
         await window.docx.renderAsync(
             currentDocxBlob,
             previewArea,
@@ -15882,7 +15915,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 ignoreWidth: false,
                 ignoreHeight: false,
                 ignoreFonts: false,
-                // Paginated preview matches Word pages; edit mapping ignores headers/footers.
                 breakPages: true,
                 ignoreLastRenderedPageBreak: false,
                 experimental: true,
@@ -15899,27 +15931,14 @@ document.addEventListener('DOMContentLoaded', function () {
         fitPreviewTablesToPage(previewArea);
         disablePreviewLinkJumps(previewArea);
         reflowA4Pages(previewArea);
-
         await fixPreviewImages(previewArea, currentDocxBlob);
-        fitPreviewTablesToPage(previewArea);
-        disablePreviewLinkJumps(previewArea);
-        reflowA4Pages(previewArea);
 
-        // The saved file still has Document Title. docx-preview drops that merged
-        // header cell, so put the value back the same way View does.
         if (!opts.skipIdentityRestore) {
             try {
                 const ooxmlValues = await extractIdentityValuesFromDocxBlob(currentDocxBlob);
                 restoreMissingIdentityValues(docxTextTargets || [], ooxmlValues);
             } catch (restoreError) {
                 console.warn('[NEQ Preview] identity restore failed:', restoreError);
-            }
-            // Putting Document Title back grows the letterhead after the first
-            // split. Measure that taller table or 1.0 OBJECTIVE stays under it.
-            const restoredWrapper = previewArea.querySelector('.docx-wrapper');
-            if (restoredWrapper) {
-                splitPreviewOntoA4Pages(restoredWrapper);
-                stampVisiblePageNumbers(restoredWrapper);
             }
         }
 
@@ -15928,24 +15947,20 @@ document.addEventListener('DOMContentLoaded', function () {
             const filledWrapper = previewArea.querySelector('.docx-wrapper');
             if (filledWrapper) {
                 paintSavedFill(filledWrapper);
-                splitPreviewOntoA4Pages(filledWrapper);
-                stampVisiblePageNumbers(filledWrapper);
-                paintSavedFill(filledWrapper);
             }
         } catch (fillError) {
             console.warn('[NEQ Preview] saved fill restore failed:', fillError);
         }
 
+        const pageWrapper = previewArea.querySelector('.docx-wrapper');
+        if (pageWrapper) {
+            splitPreviewOntoA4Pages(pageWrapper);
+            stampVisiblePageNumbers(pageWrapper);
+        }
+
         hasActivePreview = !!previewArea.querySelector('.docx-wrapper');
         if (hasActivePreview) {
             showProtectedViewBanner();
-        }
-
-        if (!document.body.classList.contains('neq-doc-focus') && previewArea) {
-            previewArea.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-        } catch (renderError) {
-            throw renderError;
         }
     }
 
@@ -16109,12 +16124,917 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function escapeNeqHtml(str) {
+        return String(str == null ? '' : str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function neqFriendlyRoleFromKey(roleKey, fallbackText) {
+        const cleanFallback = normalizeEditText(fallbackText || '');
+        if (cleanFallback && !/^name(?:\s*[\/&]\s*designation)?$/i.test(cleanFallback) && !/^role$/i.test(cleanFallback)) {
+            return cleanFallback;
+        }
+        const key = String(roleKey || '').toLowerCase();
+        const map = {
+            post_prepared_by_name: 'Prepared By',
+            post_checked_by_engineering_name: 'Checked By (Engineering)',
+            post_checked_by_production_name: 'Checked By (Production)',
+            post_checked_by_quality_name: 'Checked By (Quality Assurance)',
+            post_checked_by_validation_name: 'Checked By (Validation)',
+            post_approved_by_quality_name: 'Approved By (Quality Assurance)',
+            approved_by_user_name: 'Approved By (User)',
+        };
+        if (map[key]) {
+            return map[key];
+        }
+        if (/prepared_by/.test(key)) return 'Prepared By';
+        if (/checked_by/.test(key)) return 'Checked By';
+        if (/reviewed_by/.test(key)) return 'Reviewed By';
+        if (/approved_by/.test(key)) return 'Approved By';
+        return cleanFallback || 'Approver';
+    }
+
+    function buildNeqUserSelectElement(cssClass, selectedUserId) {
+        const sel = document.createElement('select');
+        sel.className = cssClass || 'docx-input neq-approver-select';
+        const blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = '-- Select User --';
+        sel.appendChild(blank);
+        (neqApproverUsers || []).forEach(function (user) {
+            const opt = document.createElement('option');
+            opt.value = String(user.id);
+            const display = approverNameCellText(user, true) || user.label || ('User #' + user.id);
+            opt.textContent = display;
+            opt.setAttribute('data-name', display);
+            opt.setAttribute('data-designation', user.designation || '');
+            sel.appendChild(opt);
+        });
+        if (selectedUserId && Number(selectedUserId) > 0) {
+            sel.value = String(selectedUserId);
+        }
+        return sel;
+    }
+
+    function neqHeaderTableColumnsInfo(appTableIndex) {
+        const fragments = Array.from(previewArea.querySelectorAll('table[data-table-index="' + String(appTableIndex) + '"]'));
+        const info = {
+            sectionTitle: '',
+            roleCol: -1,
+            nameCol: -1,
+            departmentCol: -1,
+            signatureCol: -1,
+            dateCol: -1,
+            nameCombined: false,
+            columnCount: 0,
+        };
+        fragments.forEach(function (frag) {
+            getDirectTableRows(frag).forEach(function (r) {
+                const cells = Array.from(r.children).filter(function (el) {
+                    return el.tagName === 'TD' || el.tagName === 'TH';
+                });
+                if (!cells.length) return;
+                if (cells.length === 1 || Number(cells[0].getAttribute('colspan') || 1) >= 2) {
+                    const bText = normalizeEditText(cells[0].innerText || cells[0].textContent || '');
+                    if (!info.sectionTitle && /^(prepared|checked|approved|reviewed|performed|compiled|complied|recorded)\s*by\b/i.test(bText)) {
+                        info.sectionTitle = bText.replace(/:\s*$/, '');
+                    }
+                    return;
+                }
+                const headerTexts = cells.map(function (c) {
+                    return normalizeEditText(c.innerText || c.textContent || '').toLowerCase();
+                });
+                const hasNameOrSig = headerTexts.some(function (t) {
+                    return /\bname\b/.test(t) || /\bsign/.test(t) || /\bdate\b/.test(t);
+                });
+                if (!hasNameOrSig || info.nameCol >= 0) {
+                    return;
+                }
+                info.columnCount = Math.max(info.columnCount, cells.length);
+                headerTexts.forEach(function (t, idx) {
+                    if (info.nameCol < 0 && /\bname\b/.test(t) && !/equipment|document|system|file/.test(t)) {
+                        info.nameCol = idx;
+                        if (/designation/.test(t)) {
+                            info.nameCombined = true;
+                        }
+                    } else if (info.departmentCol < 0 && /(department|designation)/.test(t) && !/\bname\b/.test(t)) {
+                        info.departmentCol = idx;
+                    } else if (/sign/.test(t)) {
+                        if (info.signatureCol < 0) info.signatureCol = idx;
+                        if (/\bdate\b/.test(t) && info.dateCol < 0) info.dateCol = idx;
+                    } else if (/\bdate\b/.test(t) && !/effective/.test(t)) {
+                        if (info.dateCol < 0) info.dateCol = idx;
+                    } else if (/role|dept/.test(t) && info.roleCol < 0) {
+                        info.roleCol = idx;
+                    }
+                });
+                if (info.nameCol > 0 && info.roleCol < 0 && info.departmentCol !== 0) {
+                    info.roleCol = 0;
+                }
+                if (info.signatureCol >= 0 && info.dateCol < 0) {
+                    info.dateCol = info.signatureCol;
+                }
+            });
+        });
+        return info;
+    }
+
+    function syncLetterheadCellsFromSummary() {
+        if (!previewArea) return;
+        const card = previewArea.querySelector('.docx-summary-header-card');
+        if (!card) return;
+        card.querySelectorAll('input[data-letterhead-mirror]').forEach(function (inp) {
+            const key = inp.getAttribute('data-letterhead-mirror');
+            const val = String(inp.value || '').trim();
+            if (!key) return;
+            previewArea.querySelectorAll('.docx-page-official-header [data-letterhead-field="' + key + '"]').forEach(function (cell) {
+                cell.textContent = val;
+            });
+        });
+    }
+
+    function buildNeqSummaryHeaderCard(wrapper, previewFields, savedFields, refDocNo) {
+        const coverFields = (previewFields || []).filter(function (f) {
+            return f && f.location && String(f.location).indexOf('header_') === 0;
+        });
+        if (!coverFields.length) {
+            return;
+        }
+        const byType = {};
+        coverFields.forEach(function (f) {
+            const cf = String(f.cover_field || '').toLowerCase();
+            if (cf && !byType[cf]) byType[cf] = f;
+        });
+        const docField = byType.document_no || byType.reference_protocol_no || coverFields.find(function (f) {
+            return /document\s*no|protocol\s*no/i.test(String(f.label || ''));
+        });
+        const refProtoField = (byType.reference_protocol_no && docField && byType.reference_protocol_no.location !== docField.location)
+            ? byType.reference_protocol_no
+            : null;
+        const eqNameField = byType.equipment_name;
+        const eqIdField = byType.equipment_id;
+        const facilityField = byType.facility_section;
+        const titleField = byType.document_title;
+        const effDateField = byType.effective_date;
+
+        const fieldVal = function (f, fallback) {
+            if (!f || !f.location) return fallback || '';
+            if (savedFields && Object.prototype.hasOwnProperty.call(savedFields, f.location)) {
+                return String(savedFields[f.location] || '');
+            }
+            return String(f.value || fallback || '');
+        };
+
+        const docTitle = fieldVal(titleField, currentFileName || 'New Equipment Qualification');
+        const usedLocations = new Set();
+        const extraCells = [];
+        function makeCoverCell(f, title, placeholder, defaultVal) {
+            if (!f || !f.location || usedLocations.has(f.location)) return '';
+            usedLocations.add(f.location);
+            const loc = f.location;
+            const val = fieldVal(f, defaultVal || '');
+            const cf = f.cover_field || '';
+            return '<td style="width:26%;">'
+                + '<label class="docx-summary-field-label" for="neq_sum_' + escapeNeqHtml(loc) + '">' + escapeNeqHtml(title) + '</label>'
+                + '<input type="text" id="neq_sum_' + escapeNeqHtml(loc) + '" name="fields[' + escapeNeqHtml(loc) + ']" '
+                + 'class="docx-input" data-letterhead-mirror="' + escapeNeqHtml(cf) + '" '
+                + 'placeholder="' + escapeNeqHtml(placeholder || 'Enter value...') + '" value="' + escapeNeqHtml(val) + '">'
+                + '</td>';
+        }
+
+        const c1 = makeCoverCell(docField, docField ? (docField.label || 'Document Number') : 'Document Number', 'Enter document number...', refDocNo || '');
+        const c2 = makeCoverCell(eqNameField, 'Equipment Name', 'Equipment name...', '');
+        const c3 = makeCoverCell(eqIdField, 'Equipment ID', 'Equipment ID...', '');
+        [refProtoField, facilityField, effDateField].forEach(function (ef) {
+            if (ef && !usedLocations.has(ef.location)) {
+                usedLocations.add(ef.location);
+                extraCells.push(
+                    '<td><label class="docx-summary-field-label">' + escapeNeqHtml(ef.label || ef.cover_field || 'Field') + '</label>'
+                    + '<input type="text" name="fields[' + escapeNeqHtml(ef.location) + ']" class="docx-input" '
+                    + 'data-letterhead-mirror="' + escapeNeqHtml(ef.cover_field || '') + '" value="' + escapeNeqHtml(fieldVal(ef, '')) + '"></td>'
+                );
+            }
+        });
+        if (titleField && !usedLocations.has(titleField.location)) {
+            usedLocations.add(titleField.location);
+            extraCells.push(
+                '<td><label class="docx-summary-field-label">Document Title</label>'
+                + '<input type="text" name="fields[' + escapeNeqHtml(titleField.location) + ']" class="docx-input neq-summary-title-input" '
+                + 'data-letterhead-mirror="document_title" value="' + escapeNeqHtml(docTitle) + '"></td>'
+            );
+        }
+
+        const card = document.createElement('div');
+        card.className = 'docx-summary-header-card';
+        card.innerHTML = ''
+            + '<table class="docx-table header-table" style="margin-bottom:0;">'
+            + '<tr>'
+            + '<td rowspan="' + (extraCells.length ? '3' : '2') + '" style="width:96px;text-align:center;vertical-align:middle !important;background:#ffffff !important;">'
+            + '<img src="' + escapeNeqHtml(LUPIN_LOGO_URL) + '" alt="Lupin" style="height:44px;width:auto;" onerror="this.style.display=\'none\'">'
+            + '<div style="font-size:11px;font-weight:700;margin-top:4px;color:#047857;">LUPIN</div>'
+            + '</td>'
+            + '<td colspan="3" style="text-align:center;font-weight:700;font-size:15px;padding:10px !important;background:#f1f5f9 !important;color:#0f172a !important;" id="neqSummaryBannerTitle">'
+            + escapeNeqHtml(String(docTitle || 'NEW EQUIPMENT QUALIFICATION').toUpperCase())
+            + '</td>'
+            + '</tr>'
+            + '<tr>' + (c1 || '<td></td>') + (c2 || '<td></td>') + (c3 || '<td></td>') + '</tr>'
+            + (extraCells.length ? ('<tr>' + extraCells.slice(0, 3).join('') + (extraCells.length === 1 ? '<td colspan="2"></td>' : (extraCells.length === 2 ? '<td></td>' : '')) + '</tr>') : '')
+            + '</table>';
+        wrapper.appendChild(card);
+
+        card.addEventListener('input', function (event) {
+            syncLetterheadCellsFromSummary();
+            if (event.target && event.target.classList && event.target.classList.contains('neq-summary-title-input')) {
+                const banner = document.getElementById('neqSummaryBannerTitle');
+                if (banner) {
+                    banner.textContent = String(event.target.value || currentFileName || 'NEW EQUIPMENT QUALIFICATION').toUpperCase();
+                }
+            }
+        });
+    }
+
+    function createNeqClonedRowFromTemplate(templateRow, appTableIndex, valuesArray, opIndex) {
+        const clone = templateRow.cloneNode(true);
+        clone.removeAttribute('id');
+        clone.removeAttribute('data-row-index');
+        clone.classList.remove('neq-selected-table-row');
+        clone.setAttribute('data-neq-inserted-row', '1');
+        clone.setAttribute('data-neq-inserted-op-idx', String(opIndex));
+        clone.setAttribute('data-neq-table-idx', String(appTableIndex));
+        clone.querySelectorAll('th').forEach(function (th) {
+            const td = document.createElement('td');
+            Array.from(th.attributes).forEach(function (attr) {
+                td.setAttribute(attr.name, attr.value);
+            });
+            td.className = 'docx-cell editable';
+            th.parentNode.replaceChild(td, th);
+        });
+        const cells = Array.from(clone.children).filter(function (el) {
+            return el.tagName === 'TD' || el.tagName === 'TH';
+        });
+        cells.forEach(function (cell, colIdx) {
+            cell.removeAttribute('data-field');
+            cell.innerHTML = '';
+            const val = Array.isArray(valuesArray) && valuesArray[colIdx] !== undefined ? String(valuesArray[colIdx]) : '';
+            cell.className = 'docx-cell editable';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'docx-input neq-added-row-input';
+            input.placeholder = colIdx === 0 ? 'No.' : 'Enter value...';
+            input.value = val;
+            input.setAttribute('data-neq-added-col', String(colIdx));
+            input.setAttribute('data-neq-added-op-idx', String(opIndex));
+            input.addEventListener('input', function () {
+                const curIdx = Number(clone.getAttribute('data-neq-inserted-op-idx'));
+                if (neqTableOpsLog[curIdx] && Array.isArray(neqTableOpsLog[curIdx].values)) {
+                    neqTableOpsLog[curIdx].values[colIdx] = input.value;
+                }
+                scheduleNeqAutosave();
+            });
+            cell.appendChild(input);
+        });
+        return clone;
+    }
+
+    function findTargetTemplateRowInDoc(appTableIndex, rowIdx) {
+        const frags = Array.from(previewArea.querySelectorAll('table[data-table-index="' + String(appTableIndex) + '"]'));
+        for (let i = 0; i < frags.length; i++) {
+            const found = frags[i].querySelector('tr[data-row-index="' + String(rowIdx) + '"]');
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function replayNeqTableOps() {
+        if (!previewArea || !Array.isArray(neqTableOpsLog) || !neqTableOpsLog.length) {
+            return;
+        }
+        neqTableOpsLog.forEach(function (op, opIndex) {
+            if (!op || !op.op) return;
+            const appTable = Number(op.table);
+            if (!Number.isInteger(appTable) || appTable < 0) return;
+            if (op.op === 'delete') {
+                const row = findTargetTemplateRowInDoc(appTable, Number(op.row));
+                if (row && row.parentNode) {
+                    row.parentNode.removeChild(row);
+                }
+                return;
+            }
+            if (op.op === 'insert') {
+                const frags = Array.from(previewArea.querySelectorAll('table[data-table-index="' + String(appTable) + '"]'));
+                if (!frags.length) return;
+                let afterEl = findTargetTemplateRowInDoc(appTable, Number(op.after_row));
+                if (!afterEl) {
+                    const lastFrag = frags[frags.length - 1];
+                    const rows = getDirectTableRows(lastFrag);
+                    afterEl = rows.length ? rows[rows.length - 1] : null;
+                }
+                if (!afterEl || !afterEl.parentNode) return;
+                // Advance past previously replayed rows inserted after the same anchor.
+                while (afterEl.nextElementSibling && afterEl.nextElementSibling.getAttribute('data-neq-inserted-row') === '1') {
+                    afterEl = afterEl.nextElementSibling;
+                }
+                if (!Array.isArray(op.values)) {
+                    op.values = [];
+                }
+                const clone = createNeqClonedRowFromTemplate(afterEl, appTable, op.values, opIndex);
+                afterEl.parentNode.insertBefore(clone, afterEl.nextSibling);
+            }
+        });
+    }
+
+    function hydrateCachedApprovers(previewFields, headerTableCount, paraTargetMap, savedApprovers) {
+        if (!previewArea) return;
+        const allowSelect = currentUserCanSave();
+        const serverApprovals = approvalsForCurrentList();
+        const draftApproversList = Array.isArray(savedApprovers) ? savedApprovers : [];
+        const slots = new Map();
+
+        function addSlot(appTable, rowIdx, nameCol, approverRole, sigDateLoc) {
+            if (!Number.isInteger(appTable) || !Number.isInteger(rowIdx) || !Number.isInteger(nameCol)) return;
+            const k = appTable + ':' + rowIdx + ':' + nameCol;
+            if (!slots.has(k)) {
+                slots.set(k, {
+                    appTable: appTable,
+                    rowIdx: rowIdx,
+                    nameCol: nameCol,
+                    approverRole: approverRole || '',
+                    sigDateLoc: sigDateLoc || '',
+                });
+            }
+        }
+
+        (previewFields || []).forEach(function (f) {
+            if (!f || (f.type !== 'approver' && f.widget !== 'approver')) return;
+            const m = String(f.location || '').match(/^table_(\d+)_row_(\d+)_col_(\d+)$/);
+            if (m) {
+                addSlot(Number(m[1]), Number(m[2]), Number(m[3]), f.approver_role || f.label || '', f.signature_date_location || '');
+            }
+        });
+
+        previewArea.querySelectorAll('select.approver-field[data-field-location]').forEach(function (sel) {
+            const m = String(sel.getAttribute('data-field-location') || '').match(/^table_(\d+)_row_(\d+)_col_(\d+)$/);
+            if (m) {
+                addSlot(Number(m[1]), Number(m[2]), Number(m[3]), sel.getAttribute('data-approver-role') || '', sel.getAttribute('data-signature-date-location') || '');
+            }
+        });
+
+        previewArea.querySelectorAll('td.docx-approver-readonly[data-field]').forEach(function (td) {
+            const m = String(td.getAttribute('data-field') || '').match(/^table_(\d+)_row_(\d+)_col_(\d+)$/);
+            if (m) {
+                addSlot(Number(m[1]), Number(m[2]), Number(m[3]), '', '');
+            }
+        });
+
+        const tableInfoCache = new Map();
+        slots.forEach(function (slot) {
+            const rowEl = findTargetTemplateRowInDoc(slot.appTable, slot.rowIdx);
+            if (!rowEl) return;
+            const tableEl = rowEl.closest('table');
+            const neqTable = slot.appTable + Number(headerTableCount || 1);
+            if (tableEl) {
+                tableEl.setAttribute('data-neq-is-signatory', '1');
+                tableEl.setAttribute('data-neq-table', String(neqTable));
+            }
+            rowEl.setAttribute('data-neq-row', String(slot.rowIdx));
+
+            if (!tableInfoCache.has(slot.appTable)) {
+                tableInfoCache.set(slot.appTable, neqHeaderTableColumnsInfo(slot.appTable));
+            }
+            const tInfo = tableInfoCache.get(slot.appTable);
+            const cells = Array.from(rowEl.children).filter(function (el) {
+                return el.tagName === 'TD' || el.tagName === 'TH';
+            });
+            const nameCell = cells[slot.nameCol] || null;
+            if (!nameCell) return;
+
+            let sigCol = tInfo.signatureCol >= 0 ? tInfo.signatureCol : -1;
+            let dateCol = tInfo.dateCol >= 0 ? tInfo.dateCol : -1;
+            const sigLocMatch = String(slot.sigDateLoc || '').match(/^table_\d+_row_\d+_col_(\d+)$/);
+            if (sigLocMatch) {
+                const parsedSigDateCol = Number(sigLocMatch[1]);
+                if (sigCol < 0 && dateCol < 0) {
+                    sigCol = parsedSigDateCol;
+                    dateCol = parsedSigDateCol;
+                } else if (dateCol < 0) {
+                    dateCol = parsedSigDateCol;
+                }
+            }
+            if (sigCol < 0) {
+                sigCol = (slot.nameCol + 1 < cells.length) ? (slot.nameCol + 1) : slot.nameCol;
+            }
+            if (dateCol < 0) {
+                dateCol = (sigCol + 1 < cells.length && tInfo.dateCol !== tInfo.signatureCol) ? (sigCol + 1) : sigCol;
+            }
+            sigCol = Math.min(sigCol, cells.length - 1);
+            dateCol = Math.min(dateCol, cells.length - 1);
+
+            let deptCol = (tInfo.departmentCol >= 0 && tInfo.departmentCol !== slot.nameCol && tInfo.departmentCol < cells.length)
+                ? tInfo.departmentCol
+                : null;
+            if (tInfo.nameCombined) deptCol = null;
+
+            const roleCell = (tInfo.roleCol >= 0 && tInfo.roleCol !== slot.nameCol && cells[tInfo.roleCol]) ? cells[tInfo.roleCol] : null;
+            const roleCellText = roleCell ? normalizeEditText(roleCell.innerText || roleCell.textContent || '') : '';
+            const roleLabel = neqFriendlyRoleFromKey(slot.approverRole, roleCellText || tInfo.sectionTitle);
+
+            const sigCell = cells[sigCol] && cells[sigCol] !== nameCell ? cells[sigCol] : null;
+            const dateCell = cells[dateCol] && cells[dateCol] !== nameCell ? cells[dateCol] : null;
+            const deptCell = (deptCol !== null && cells[deptCol] && cells[deptCol] !== nameCell) ? cells[deptCol] : null;
+
+            const savedStep = serverApprovals.find(function (a) {
+                return Number(a.table) === neqTable && Number(a.row) === slot.rowIdx;
+            }) || findSavedApprovalFlexible(neqTable, slot.rowIdx, nameCell);
+            const draftEntry = draftApproversList.find(function (a) {
+                return Number(a.table) === neqTable && Number(a.row) === slot.rowIdx;
+            });
+            const preselectedUserId = (savedStep && savedStep.user_id)
+                ? Number(savedStep.user_id)
+                : ((draftEntry && draftEntry.user_id) ? Number(draftEntry.user_id) : 0);
+
+            if (savedStep && (savedStep.approved_at || savedStep.rejected_at)) {
+                nameCell.innerHTML = '';
+                if (sigCell) sigCell.innerHTML = '';
+                if (dateCell && dateCell !== sigCell) dateCell.innerHTML = '';
+                paintApprovalStampCells(
+                    nameCell,
+                    sigCell,
+                    dateCell,
+                    savedStep.name_text || '',
+                    savedStep.signature_text || (savedStep.rejected_at ? 'Rejected' : 'Approved'),
+                    savedStep.date_text || savedStep.approved_at || savedStep.rejected_at || '',
+                    deptCell,
+                    savedStep.department_text || ''
+                );
+                nameCell.classList.add('neq-approver-cell');
+                return;
+            }
+
+            if (sigCell) {
+                sigCell.innerHTML = '<span class="neq-stamp-pending">—</span>';
+                sigCell.className = 'docx-cell neq-stamp-cell';
+            }
+            if (dateCell && dateCell !== sigCell) {
+                dateCell.innerHTML = '<span class="neq-stamp-pending">—</span>';
+                dateCell.className = 'docx-cell neq-stamp-cell';
+            }
+            if (deptCell) {
+                deptCell.className = 'docx-cell neq-stamp-cell';
+            }
+
+            if (!allowSelect) {
+                nameCell.className = 'docx-cell locked neq-approver-cell';
+                const assignedLabel = (savedStep && savedStep.name_text)
+                    || (preselectedUserId > 0 ? ((neqApproverUsers.find(function (u) { return Number(u.id) === preselectedUserId; }) || {}).label || '') : '');
+                nameCell.innerHTML = '';
+                nameCell.textContent = assignedLabel || 'Pending selection';
+                if (deptCell && preselectedUserId > 0) {
+                    const u = neqApproverUsers.find(function (item) { return Number(item.id) === preselectedUserId; });
+                    if (u && u.designation) deptCell.textContent = u.designation;
+                }
+                return;
+            }
+
+            nameCell.innerHTML = '';
+            nameCell.className = 'docx-cell editable neq-approver-cell';
+            const sel = buildNeqUserSelectElement('docx-input neq-approver-select', preselectedUserId);
+            sel.setAttribute('data-neq-approver-slot', '1');
+            sel.dataset.neqTable = String(neqTable);
+            sel.dataset.neqRow = String(slot.rowIdx);
+            sel.dataset.neqRole = roleLabel;
+            sel.dataset.neqNameCol = String(slot.nameCol);
+            sel.dataset.neqDepartmentCol = deptCol !== null ? String(deptCol) : '';
+            sel.dataset.neqNameCombined = (tInfo.nameCombined || deptCol === null) ? '1' : '0';
+            sel.dataset.neqSignatureCol = String(sigCol);
+            sel.dataset.neqDateCol = String(dateCol);
+            nameCell.appendChild(sel);
+
+            if (deptCell) {
+                paintApproverDepartmentFromSelect(deptCell, sel);
+            }
+            sel.addEventListener('change', function () {
+                if (deptCell) {
+                    paintApproverDepartmentFromSelect(deptCell, sel);
+                }
+                updateApprovalActionButtons();
+                scheduleNeqAutosave();
+            });
+        });
+
+        // Handle Attachment 01 "Validation /Quality Assurance:" paragraph selector.
+        const qaParaField = (previewFields || []).find(function (f) {
+            return f && /^para_\d+$/.test(String(f.location || '')) && /validation\s*\/?\s*quality\s*assurance/i.test(String(f.label || ''));
+        });
+        if (qaParaField) {
+            const pMatch = String(qaParaField.location).match(/^para_(\d+)$/);
+            const pIdx = pMatch ? Number(pMatch[1]) : null;
+            const targetParaIdx = (pIdx !== null && paraTargetMap && paraTargetMap[String(pIdx)] !== undefined)
+                ? Number(paraTargetMap[String(pIdx)])
+                : pIdx;
+            const qaInput = previewArea.querySelector('input[name="fields[' + qaParaField.location + ']"]');
+            const savedQa = serverApprovals.find(function (a) {
+                return Number(a.table) >= 900000 || /validation\s*\/?\s*quality\s*assurance/i.test(String(a.role || ''));
+            });
+            const draftQa = draftApproversList.find(function (a) {
+                return !!a.qa_stamp || Number(a.table) >= 900000;
+            });
+            const qaUid = (savedQa && savedQa.user_id) ? Number(savedQa.user_id) : ((draftQa && draftQa.user_id) ? Number(draftQa.user_id) : 0);
+            if (qaInput && qaInput.parentNode) {
+                if (savedQa && (savedQa.approved_at || savedQa.rejected_at)) {
+                    const span = document.createElement('span');
+                    span.className = 'neq-qa-stamp-line font-weight-bold text-success';
+                    span.textContent = ' ' + [savedQa.name_text, savedQa.signature_text || 'Approved', savedQa.date_text].filter(Boolean).join(' / ');
+                    qaInput.parentNode.replaceChild(span, qaInput);
+                } else if (allowSelect) {
+                    const qaSel = buildNeqUserSelectElement('docx-input docx-input-inline neq-approver-select neq-qa-approver-select', qaUid);
+                    qaSel.dataset.neqParaTargetIndex = targetParaIdx !== null ? String(targetParaIdx) : '';
+                    qaInput.parentNode.replaceChild(qaSel, qaInput);
+                    qaSel.addEventListener('change', function () {
+                        updateApprovalActionButtons();
+                        scheduleNeqAutosave();
+                    });
+                } else {
+                    const span = document.createElement('span');
+                    span.className = 'text-muted';
+                    span.textContent = (savedQa && savedQa.name_text) ? (' ' + savedQa.name_text) : ' —';
+                    qaInput.parentNode.replaceChild(span, qaInput);
+                }
+            }
+        }
+    }
+
+    function captureInitialOriginalsAndLabels(previewFields, savedEditsPayload) {
+        const form = document.getElementById('neqFillForm');
+        if (!form) return;
+        const fieldMetaMap = {};
+        (previewFields || []).forEach(function (f) {
+            if (f && f.location) {
+                fieldMetaMap[String(f.location)] = f;
+            }
+        });
+        const existingOriginals = (savedEditsPayload && typeof savedEditsPayload.field_originals === 'object' && savedEditsPayload.field_originals)
+            ? savedEditsPayload.field_originals
+            : {};
+        const existingLabels = (savedEditsPayload && typeof savedEditsPayload.field_labels === 'object' && savedEditsPayload.field_labels)
+            ? savedEditsPayload.field_labels
+            : {};
+
+        neqFieldOriginals = {};
+        neqFieldLabels = {};
+        form.querySelectorAll('input[name^="fields["], textarea[name^="fields["], select[name^="fields["]').forEach(function (el) {
+            const m = String(el.getAttribute('name') || '').match(/^fields\[([^\]]+)\]$/);
+            if (!m) return;
+            const loc = m[1];
+            const meta = fieldMetaMap[loc] || null;
+            if (Object.prototype.hasOwnProperty.call(existingOriginals, loc)) {
+                neqFieldOriginals[loc] = String(existingOriginals[loc] == null ? '' : existingOriginals[loc]);
+            } else if (meta && Object.prototype.hasOwnProperty.call(meta, 'value')) {
+                neqFieldOriginals[loc] = String(meta.value == null ? '' : meta.value);
+            } else if ((el.type || '').toLowerCase() === 'checkbox') {
+                neqFieldOriginals[loc] = el.checked ? '1' : '0';
+            } else if ((el.type || '').toLowerCase() === 'radio') {
+                if (!Object.prototype.hasOwnProperty.call(neqFieldOriginals, loc)) {
+                    neqFieldOriginals[loc] = '';
+                }
+                if (el.checked) {
+                    neqFieldOriginals[loc] = String(el.value || '');
+                }
+            } else {
+                neqFieldOriginals[loc] = String(el.value || '');
+            }
+            if (existingLabels[loc]) {
+                neqFieldLabels[loc] = String(existingLabels[loc]);
+            } else if (meta && meta.label) {
+                neqFieldLabels[loc] = String(meta.label);
+            } else if (el.getAttribute('placeholder')) {
+                neqFieldLabels[loc] = String(el.getAttribute('placeholder'));
+            }
+        });
+    }
+
+    function hydrateSavedFillFields(savedEditsPayload) {
+        const form = document.getElementById('neqFillForm');
+        if (!form || !savedEditsPayload) return;
+        const fields = (savedEditsPayload.fields && typeof savedEditsPayload.fields === 'object') ? savedEditsPayload.fields : {};
+        Object.keys(fields).forEach(function (loc) {
+            const val = fields[loc] == null ? '' : String(fields[loc]);
+            const matches = form.querySelectorAll('[name="fields[' + CSS.escape(loc) + ']"]');
+            matches.forEach(function (el) {
+                const type = (el.type || '').toLowerCase();
+                if (type === 'checkbox') {
+                    el.checked = (val === '1' || val.toLowerCase() === 'true' || val.toLowerCase() === 'yes' || val.toLowerCase() === 'on');
+                } else if (type === 'radio') {
+                    el.checked = (String(el.value || '').toLowerCase() === val.toLowerCase());
+                } else {
+                    el.value = val;
+                }
+            });
+        });
+
+        const addedParas = Array.isArray(savedEditsPayload.added_paragraphs) ? savedEditsPayload.added_paragraphs : [];
+        addedParas.forEach(function (item) {
+            const txt = typeof item === 'string' ? item : String((item && item.text) || '');
+            if (txt.trim() !== '') {
+                appendNeqAddedParagraphBlock(txt, false);
+            }
+        });
+
+        syncLetterheadCellsFromSummary();
+        const titleInp = form.querySelector('.neq-summary-title-input');
+        const banner = document.getElementById('neqSummaryBannerTitle');
+        if (titleInp && banner && titleInp.value.trim() !== '') {
+            banner.textContent = titleInp.value.trim().toUpperCase();
+        }
+    }
+
+    function appendNeqAddedParagraphBlock(initialText, shouldFocus) {
+        if (!previewArea) return null;
+        const pages = previewArea.querySelectorAll('.docx-a4-page .docx-page-body');
+        const targetBody = pages.length ? pages[pages.length - 1] : (previewArea.querySelector('.docx-preview') || previewArea);
+        if (!targetBody) return null;
+
+        const block = document.createElement('div');
+        block.className = 'neq-added-para-block';
+        const label = document.createElement('div');
+        label.className = 'small font-weight-bold text-warning mb-1';
+        label.innerHTML = '<i class="fas fa-paragraph mr-1"></i> Added Paragraph';
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'btn btn-xs btn-link text-danger float-right p-0';
+        removeBtn.innerHTML = '&times; Remove';
+        removeBtn.addEventListener('click', function () {
+            if (!isEditingEnabled) return;
+            block.remove();
+            scheduleNeqAutosave();
+        });
+        label.appendChild(removeBtn);
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'docx-input neq-added-paragraph-input';
+        textarea.rows = 2;
+        textarea.placeholder = 'Enter additional paragraph / note...';
+        textarea.value = String(initialText || '');
+        textarea.addEventListener('input', function () {
+            scheduleNeqAutosave();
+        });
+        block.appendChild(label);
+        block.appendChild(textarea);
+        targetBody.appendChild(block);
+
+        if (shouldFocus) {
+            textarea.focus();
+            block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        return block;
+    }
+
+    function buildNeqPageNavigator() {
+        const nav = document.getElementById('neqPageNavigator');
+        const sel = document.getElementById('neqPageJumpSelect');
+        if (!nav || !sel || !previewArea) return;
+        const pages = Array.from(previewArea.querySelectorAll('.docx-a4-page'));
+        sel.innerHTML = '';
+        if (!pages.length) {
+            nav.classList.add('d-none');
+            return;
+        }
+        pages.forEach(function (pg, idx) {
+            pg.setAttribute('data-neq-page-num', String(idx + 1));
+            const opt = document.createElement('option');
+            opt.value = String(idx + 1);
+            opt.textContent = 'Page ' + (idx + 1) + ' of ' + pages.length;
+            sel.appendChild(opt);
+        });
+        nav.classList.remove('d-none');
+    }
+
+    function jumpToNeqPage(pageNumber) {
+        if (!previewArea) return;
+        const pages = Array.from(previewArea.querySelectorAll('.docx-a4-page'));
+        if (!pages.length) return;
+        const clamped = Math.max(1, Math.min(pages.length, Number(pageNumber) || 1));
+        const target = pages[clamped - 1];
+        const sel = document.getElementById('neqPageJumpSelect');
+        if (sel) sel.value = String(clamped);
+        if (target && typeof target.scrollIntoView === 'function') {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    function isNeqDataTableEligible(table) {
+        if (!table) return false;
+        if (table.classList.contains('header-table')) return false;
+        if (table.getAttribute('data-neq-is-signatory') === '1') return false;
+        if (table.closest('.docx-page-official-header, .docx-page-official-footer, .docx-summary-header-card')) return false;
+        const idx = table.getAttribute('data-table-index');
+        return idx !== null && idx !== '' && /^\d+$/.test(idx);
+    }
+
+    function selectNeqTableRowForTools(row) {
+        if (!previewArea) return;
+        previewArea.querySelectorAll('tr.neq-selected-table-row').forEach(function (tr) {
+            tr.classList.remove('neq-selected-table-row');
+        });
+        const badge = document.getElementById('neqRowSelectionBadge');
+        if (!row) {
+            neqSelectedRowInfo = null;
+            if (badge) badge.classList.add('d-none');
+            return;
+        }
+        const table = row.closest('table');
+        if (!isNeqDataTableEligible(table)) {
+            neqSelectedRowInfo = null;
+            if (badge) badge.classList.add('d-none');
+            return;
+        }
+        row.classList.add('neq-selected-table-row');
+        const appTable = Number(table.getAttribute('data-table-index'));
+        const isInserted = row.getAttribute('data-neq-inserted-row') === '1';
+        const opIndex = isInserted ? Number(row.getAttribute('data-neq-inserted-op-idx')) : null;
+        const rowIndex = row.hasAttribute('data-row-index') ? Number(row.getAttribute('data-row-index')) : null;
+        neqSelectedRowInfo = {
+            tableEl: table,
+            appTableIndex: appTable,
+            rowEl: row,
+            rowIndex: rowIndex,
+            isInserted: isInserted,
+            opIndex: opIndex,
+        };
+        if (badge) {
+            const label = isInserted ? 'Added Row' : ('Row #' + (Number(rowIndex || 0) + 1));
+            badge.textContent = label + ' selected';
+            badge.classList.remove('d-none');
+        }
+    }
+
+    function bindNeqTableRowControls() {
+        if (!previewArea) return;
+        previewArea.querySelectorAll('table.docx-table').forEach(function (table) {
+            if (!isNeqDataTableEligible(table)) return;
+            table.addEventListener('click', function (event) {
+                const tr = event.target && event.target.closest ? event.target.closest('tr') : null;
+                if (tr && tr.closest('table') === table) {
+                    selectNeqTableRowForTools(tr);
+                }
+            });
+        });
+    }
+
+    function addNeqTableRow() {
+        if (!hasActivePreview || !isEditingEnabled || !currentUserCanSave()) return;
+        let info = neqSelectedRowInfo;
+        if (!info || !info.rowEl || !info.rowEl.isConnected) {
+            const firstEligible = previewArea.querySelector('table.docx-table[data-table-index]:not(.header-table):not([data-neq-is-signatory="1"])');
+            if (!firstEligible) {
+                previewError.textContent = 'Click inside a data table row first, then click Add Row.';
+                previewError.classList.remove('alert-success', 'd-none');
+                previewError.classList.add('alert-warning');
+                return;
+            }
+            const rows = getDirectTableRows(firstEligible);
+            const fallbackRow = rows.length ? rows[rows.length - 1] : null;
+            if (!fallbackRow) return;
+            selectNeqTableRowForTools(fallbackRow);
+            info = neqSelectedRowInfo;
+        }
+
+        const appTable = info.appTableIndex;
+        const rowEl = info.rowEl;
+        const cellCount = Array.from(rowEl.children).filter(function (el) {
+            return el.tagName === 'TD' || el.tagName === 'TH';
+        }).length;
+
+        let afterRow = Number.isInteger(info.rowIndex) ? info.rowIndex : null;
+        if (afterRow === null) {
+            // If inserting after another inserted row, walk back to its parent original row index.
+            let scan = rowEl.previousElementSibling;
+            while (scan && !scan.hasAttribute('data-row-index')) {
+                scan = scan.previousElementSibling;
+            }
+            afterRow = scan && scan.hasAttribute('data-row-index') ? Number(scan.getAttribute('data-row-index')) : 0;
+        }
+
+        const values = new Array(cellCount).fill('');
+        const opIdx = neqTableOpsLog.length;
+        neqTableOpsLog.push({
+            op: 'insert',
+            table: appTable,
+            after_row: afterRow,
+            values: values,
+        });
+
+        const clone = createNeqClonedRowFromTemplate(rowEl, appTable, values, opIdx);
+        rowEl.parentNode.insertBefore(clone, rowEl.nextSibling);
+        selectNeqTableRowForTools(clone);
+        const firstInput = clone.querySelector('input, textarea');
+        if (firstInput) firstInput.focus();
+        scheduleNeqAutosave();
+    }
+
+    function deleteNeqTableRow() {
+        if (!hasActivePreview || !isEditingEnabled || !currentUserCanSave()) return;
+        const info = neqSelectedRowInfo;
+        if (!info || !info.rowEl || !info.rowEl.isConnected) {
+            previewError.textContent = 'Click a table row first, then click Delete Row.';
+            previewError.classList.remove('alert-success', 'd-none');
+            previewError.classList.add('alert-warning');
+            return;
+        }
+        const rowEl = info.rowEl;
+        const tableEl = info.tableEl;
+        const allRows = getDirectTableRows(tableEl);
+        if (allRows.length <= 2 && rowEl === allRows[0]) {
+            previewError.textContent = 'The table header row cannot be deleted.';
+            previewError.classList.remove('alert-success', 'd-none');
+            previewError.classList.add('alert-warning');
+            return;
+        }
+        const hasTh = !!rowEl.querySelector('th.docx-table-header');
+        if (hasTh) {
+            previewError.textContent = 'The table header row cannot be deleted.';
+            previewError.classList.remove('alert-success', 'd-none');
+            previewError.classList.add('alert-warning');
+            return;
+        }
+
+        if (info.isInserted && Number.isInteger(info.opIndex)) {
+            neqTableOpsLog.splice(info.opIndex, 1);
+            rowEl.remove();
+            // Re-index remaining inserted row op indices after splice.
+            previewArea.querySelectorAll('tr[data-neq-inserted-row="1"]').forEach(function (tr) {
+                const cur = Number(tr.getAttribute('data-neq-inserted-op-idx'));
+                if (cur > info.opIndex) {
+                    const updated = cur - 1;
+                    tr.setAttribute('data-neq-inserted-op-idx', String(updated));
+                    tr.querySelectorAll('[data-neq-added-op-idx]').forEach(function (inp) {
+                        inp.setAttribute('data-neq-added-op-idx', String(updated));
+                    });
+                }
+            });
+        } else if (Number.isInteger(info.rowIndex)) {
+            neqTableOpsLog.push({
+                op: 'delete',
+                table: info.appTableIndex,
+                row: info.rowIndex,
+            });
+            rowEl.remove();
+        }
+        selectNeqTableRowForTools(null);
+        scheduleNeqAutosave();
+    }
+
+    function collectFillFormPayload() {
+        const form = document.getElementById('neqFillForm');
+        const fields = {};
+        if (form) {
+            const radioNames = new Set();
+            form.querySelectorAll('input[name^="fields["], textarea[name^="fields["], select[name^="fields["]').forEach(function (el) {
+                const m = String(el.getAttribute('name') || '').match(/^fields\[([^\]]+)\]$/);
+                if (!m) return;
+                const loc = m[1];
+                const type = (el.type || '').toLowerCase();
+                if (type === 'checkbox') {
+                    fields[loc] = el.checked ? '1' : '0';
+                } else if (type === 'radio') {
+                    radioNames.add(loc);
+                    if (el.checked) {
+                        fields[loc] = String(el.value || '');
+                    } else if (!Object.prototype.hasOwnProperty.call(fields, loc)) {
+                        fields[loc] = '';
+                    }
+                } else {
+                    fields[loc] = String(el.value == null ? '' : el.value);
+                }
+            });
+        }
+        const addedParagraphs = [];
+        if (form) {
+            form.querySelectorAll('.neq-added-paragraph-input').forEach(function (ta) {
+                const txt = String(ta.value || '').trim();
+                if (txt !== '') {
+                    addedParagraphs.push(txt);
+                }
+            });
+        }
+        return {
+            fields: fields,
+            field_originals: neqFieldOriginals,
+            field_labels: neqFieldLabels,
+            table_ops: neqTableOpsLog,
+            added_paragraphs: addedParagraphs,
+            approvers: collectApprovers(),
+        };
+    }
+
     async function renderPreview(fileUrl, fileName, recordId, saveUrl, previewHtmlUrl, triggerButton, textTargetsUrl, downloadUrl, previewOptions) {
         if (!previewArea) {
             return;
         }
 
-        // Reset content first, then force full-page overlay (JS hides list/sidebar).
         resetPreviewState();
         enterDocumentFocusMode();
         hidePreviewMessages();
@@ -16136,7 +17056,6 @@ document.addEventListener('DOMContentLoaded', function () {
             currentUploaderId = triggerButton.dataset.uploaderId || currentUploaderId;
         }
         updateDownloadLinks(downloadUrl || null);
-        docxTextTargets = null;
 
         document.querySelectorAll('.js-preview-btn').forEach(function (btn) {
             btn.classList.remove('active');
@@ -16146,6 +17065,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         const opts = previewOptions || {};
+        docxTextTargets = null;
 
         try {
             await renderClientPreview(fileUrl, {
@@ -16153,55 +17073,25 @@ document.addEventListener('DOMContentLoaded', function () {
                 skipIdentityRestore: !!opts.skipIdentityRestore,
             });
 
-            if (previewHtmlUrl) {
-                try {
-                    await applyPythonImagePlacements(withCacheBust(previewHtmlUrl, opts.cacheBust || Date.now()));
-                } catch (pythonError) {
-                    console.warn('[NEQ Preview] Python image resolution failed:', pythonError);
-                }
-            }
-
             if (currentTextTargetsUrl) {
                 try {
                     await loadDocxTextTargets();
-                    // Fill-only restore (never clears). Skip after Save and while editing.
-                    if (!isEditingEnabled && !opts.skipIdentityRestore) {
-                        const ooxmlValues = await extractIdentityValuesFromDocxBlob(currentDocxBlob);
-                        restoreMissingIdentityValues(docxTextTargets || [], ooxmlValues);
-                    }
                     mapDomNodesToDocxTargets(docxTextTargets || []);
                 } catch (mapError) {
                     console.warn('[NEQ Edit Map] preload failed:', mapError);
                 }
-            } else if (currentDocxBlob && !isEditingEnabled && !opts.skipIdentityRestore) {
-                try {
-                    const ooxmlValues = await extractIdentityValuesFromDocxBlob(currentDocxBlob);
-                    restoreMissingIdentityValues([], ooxmlValues);
-                } catch (restoreError) {
-                    console.warn('[NEQ Preview] OOXML restore failed:', restoreError);
-                }
             }
 
-            // Re-assert overlay after async render (prevents list flashing back).
             enterDocumentFocusMode();
             if (hasActivePreview) {
                 setFloatToolbarVisible(true);
             }
-            // Always bind approval UI: preserve Word stamps on View; selects only when editable.
             try {
                 stampNeqTables();
                 bindApproverDropdowns();
             } catch (approverBindError) {
                 console.warn('[NEQ Approvers] bind failed:', approverBindError);
             }
-            // The user list makes the approval row taller. Split again so a
-            // row that no longer fits moves to the next page in the locked view.
-            const approvalWrapper = previewArea.querySelector('.docx-wrapper');
-            if (approvalWrapper) {
-                splitPreviewOntoA4Pages(approvalWrapper);
-                stampVisiblePageNumbers(approvalWrapper);
-            }
-            fitPreviewTablesToPage(previewArea);
         } catch (error) {
             previewError.textContent = error.message || 'Failed to render document preview.';
             previewError.classList.remove('alert-success');
@@ -16211,7 +17101,6 @@ document.addEventListener('DOMContentLoaded', function () {
         } finally {
             if (previewArea) {
                 previewArea.style.visibility = '';
-                stampVisiblePageNumbers(previewArea.querySelector('.docx-wrapper') || previewArea);
             }
             previewLoading.classList.add('d-none');
             updateApprovalActionButtons();
@@ -17582,91 +18471,65 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function insertStructureBlock(asBullet) {
-        if (!isEditingEnabled) {
+        if (!hasActivePreview || !isEditingEnabled || !currentUserCanSave()) {
             return;
         }
+        hidePreviewMessages();
         const host = resolveStructureHost();
-        if (!host || !previewShell.contains(host)) {
-            previewError.textContent = 'Click a paragraph or cell first (blue highlight), then use Add Paragraph.';
+        if (!host) {
+            previewError.textContent = 'Click the line where the new paragraph should go, then click Add Paragraph.';
             previewError.classList.remove('alert-success');
             previewError.classList.add('alert-warning');
             previewError.classList.remove('d-none');
             return;
         }
-        hidePreviewMessages();
 
-        const afterIndex = resolveAfterIndex(host);
-        const block = document.createElement('p');
-        block.setAttribute('contenteditable', 'true');
-        block.setAttribute('spellcheck', 'false');
-        block.setAttribute('data-neq-new-para', '1');
-        block.setAttribute('data-neq-list', asBullet ? '1' : '0');
-        block.setAttribute('data-neq-original', '');
-        block.setAttribute('data-neq-zone', host.getAttribute('data-neq-zone') || 'body');
+        const line = host.closest
+            ? (host.closest('p, li, h1, h2, h3, h4, h5, h6') || host)
+            : host;
+        const para = document.createElement(asBullet ? 'li' : 'p');
+        para.setAttribute('contenteditable', 'true');
+        para.setAttribute('spellcheck', 'false');
+        para.setAttribute('data-neq-new-para', '1');
+        para.setAttribute('data-neq-user-typed', '1');
+        para.setAttribute('data-neq-user-edited', '1');
+        if (asBullet) {
+            para.setAttribute('data-neq-list', '1');
+        }
+        const afterIndex = resolveAfterIndex(line);
         if (afterIndex !== null && afterIndex !== '') {
-            block.setAttribute('data-neq-after-index', String(afterIndex));
+            para.setAttribute('data-neq-after-index', String(afterIndex));
         }
-        const hostText = normalizeEditText(host.innerText || host.textContent || '');
-        if (hostText) {
-            block.setAttribute('data-neq-after-text', hostText.slice(0, 500));
+        const afterText = (line.innerText || line.textContent || '').replace(/\s+/g, ' ').trim();
+        if (afterText) {
+            para.setAttribute('data-neq-after-text', afterText.slice(0, 180));
         }
-        block.textContent = asBullet ? 'â€¢ ' : '';
-        block.style.marginTop = '6px';
-        block.style.marginBottom = '6px';
-        block.style.paddingTop = '2px';
-        block.style.paddingBottom = '2px';
-        block.style.whiteSpace = 'pre-wrap';
-        const indentHost = (host.closest && host.closest('p, li, h1, h2, h3, h4, h5, h6')) || host;
-        if (indentHost && window.getComputedStyle) {
-            const hostStyle = window.getComputedStyle(indentHost);
-            block.style.marginLeft = hostStyle.marginLeft;
-            block.style.marginRight = hostStyle.marginRight;
-            block.style.paddingLeft = hostStyle.paddingLeft;
-            block.style.paddingRight = hostStyle.paddingRight;
-            block.style.textIndent = hostStyle.textIndent;
-            block.style.textAlign = hostStyle.textAlign;
+        if (asBullet) {
+            para.textContent = '\u2022 ';
         }
 
-        const hostTag = (host.tagName || '').toLowerCase();
-        // Insert AFTER the selected paragraph/list item. Only append inside empty-ish cells.
-        if (hostTag === 'td' || hostTag === 'th') {
-            const innerBlock = host.querySelector('p, li, h1, h2, h3, h4, h5, h6');
-            if (innerBlock && host.contains(innerBlock)) {
-                if (innerBlock.nextSibling) {
-                    host.insertBefore(block, innerBlock.nextSibling);
-                } else {
-                    host.appendChild(block);
-                }
-            } else {
-                host.appendChild(block);
-            }
-        } else if (host.parentNode) {
-            if (host.nextSibling) {
-                host.parentNode.insertBefore(block, host.nextSibling);
-            } else {
-                host.parentNode.appendChild(block);
-            }
+        const cell = line.closest ? line.closest('td, th') : null;
+        const lineIsCell = (line.tagName || '').toLowerCase() === 'td' || (line.tagName || '').toLowerCase() === 'th';
+        if (lineIsCell) {
+            line.appendChild(para);
+        } else if (line.parentNode) {
+            line.parentNode.insertBefore(para, line.nextSibling);
+        } else if (cell) {
+            cell.appendChild(para);
         } else {
             return;
         }
 
-        setInsertTarget(block);
-        lastEditableFocus = block;
-        block.focus();
-        const range = document.createRange();
-        range.selectNodeContents(block);
-        range.collapse(false);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-        const wrapper = previewArea ? previewArea.querySelector('.docx-wrapper') : null;
-        if (wrapper) {
-            splitPreviewOntoA4Pages(wrapper);
-            stampVisiblePageNumbers(wrapper);
+        if (typeof onMappedNodeInput === 'function') {
+            para.addEventListener('input', onMappedNodeInput);
         }
-        if (typeof block.scrollIntoView === 'function') {
-            block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setInsertTarget(para);
+        try {
+            para.focus();
+        } catch (e) {
+            // The new line is already in the page.
         }
+        scheduleNeqAutosave();
     }
 
     function collectStructureOps() {
@@ -17870,7 +18733,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 button.dataset.previewHtmlUrl,
                 button,
                 button.dataset.textTargetsUrl,
-                button.dataset.downloadUrl
+                button.dataset.downloadUrl,
+                { cacheBust: button.dataset.neqVersion || null }
             );
         });
     }
@@ -18035,7 +18899,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!row) {
             return document.querySelector('.js-preview-btn.active');
         }
-        applyWorkflowPayload(row, payload);
+        const isAutosaveOnly = !!payload.autosave && payload.docx_written === false;
+        if (!isAutosaveOnly) {
+            applyWorkflowPayload(row, payload);
+        }
         const lastSaved = row.querySelector('.js-neq-last-saved');
         if (lastSaved && payload.saved_at) {
             lastSaved.textContent = 'Last saved ' + payload.saved_at;
@@ -18050,13 +18917,16 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
         const button = row.querySelector('.js-preview-btn');
-        if (button) {
+        if (button && !isAutosaveOnly) {
             button.dataset.id = String(payload.record_id || button.dataset.id);
             button.dataset.name = payload.display_name || payload.filename || button.dataset.name;
             button.dataset.fileUrl = payload.file_url || button.dataset.fileUrl;
             button.dataset.previewHtmlUrl = payload.preview_html_url || button.dataset.previewHtmlUrl;
             button.dataset.textTargetsUrl = payload.text_targets_url || button.dataset.textTargetsUrl;
             button.dataset.saveUrl = payload.save_url || button.dataset.saveUrl;
+            if (payload.file_url || payload.saved_at || payload.approval_status) {
+                button.dataset.neqVersion = String(Date.now());
+            }
             if (payload.edited_download_url || payload.download_url) {
                 button.dataset.downloadUrl = payload.edited_download_url || payload.download_url;
             }
@@ -18076,8 +18946,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (payload.list_id && payload.approvals) {
             neqApprovals[String(payload.list_id)] = payload.approvals;
         }
-        updateApprovalActionButtons();
-        filterUploadRows(false);
+        if (!isAutosaveOnly) {
+            updateApprovalActionButtons();
+            filterUploadRows(false);
+        }
         return button;
     }
 
@@ -18185,157 +19057,49 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    function syncSavedCellOriginals(scope) {
+        if (!scope || !scope.querySelectorAll) {
+            return;
+        }
+        scope.querySelectorAll('[data-neq-user-edited="1"]').forEach(function (node) {
+            const text = nodeEditText(node);
+            if (node.hasAttribute('data-neq-original')) {
+                node.setAttribute('data-neq-original', text);
+            }
+            const cell = (node.closest && node.closest('td, th')) || null;
+            if (cell && cell !== node && cell.hasAttribute('data-neq-original')) {
+                cell.setAttribute('data-neq-original', nodeEditText(cell));
+            }
+            node.removeAttribute('data-neq-user-edited');
+        });
+        scope.querySelectorAll('[data-neq-checkbox-dirty="1"]').forEach(function (node) {
+            const checked = node.getAttribute('data-neq-checked') === '1' ? '1' : '0';
+            node.setAttribute('data-neq-checked-original', checked);
+            node.removeAttribute('data-neq-checkbox-dirty');
+        });
+    }
+
     async function saveEditedDocument(esignPassword, options) {
         options = options || {};
         const autosave = !!options.autosave;
         if (neqDraftSaving) {
             neqSaveQueued = (!autosave || neqSaveQueued === 'manual') ? 'manual' : 'auto';
-            return;
+            return false;
         }
-        if (!hasActivePreview || !isEditingEnabled || !currentSaveUrl || !currentUserCanSave()) {
-            return;
-        }
-
-        const wrapper = getPreviewContentRoot();
-        if (!wrapper) {
-            previewError.textContent = 'No editable preview content found.';
-            previewError.classList.remove('d-none');
-            return;
+        if (!hasActivePreview || !currentSaveUrl || !currentUserCanSave()) {
+            return true;
         }
 
-        const editScope = getEditScopeRoot() || wrapper;
-        sanitizeCorruptedLabelAndHeaderCells(editScope);
-        clearUnsaveableDirtyMarkers(editScope);
-
-        const edits = collectDeletedParagraphEdits(editScope)
-            .concat(collectTextEdits(wrapper))
-            .concat(collectTocPageEdits(editScope));
-        let cellEdits = collectCellEdits();
-        // Always merge Deviation/Comments rescue fills — do not rely on dirty flags alone.
-        // (Approver-only saves previously skipped this and left cell_edits empty.)
-        collectRescueCommentsDeviationEdits().forEach(function (op) {
-            const key = 'rescue:' + normalizeCompareText((op.headers || []).join('|')).toLowerCase()
-                + ':' + String(op.row) + ':' + String(op.col) + ':' + normalizeCompareText(op.text || '');
-            const dup = cellEdits.some(function (existing) {
-                return existing && existing.match_by_headers
-                    && Number(existing.row) === Number(op.row)
-                    && Number(existing.col) === Number(op.col)
-                    && normalizeCompareText((existing.headers || []).join('|'))
-                        === normalizeCompareText((op.headers || []).join('|'))
-                    && normalizeCompareText(existing.text) === normalizeCompareText(op.text);
-            });
-            if (!dup) {
-                cellEdits.push(op);
-            }
-        });
-        const tableOps = collectTableOps();
-        const checkboxOps = collectCheckboxOps();
-        const structureOps = collectStructureOps();
-        const tocLines = collectTocLines(editScope);
-        const approvers = collectApprovers();
-        let dirtyCells = countCollectableDirtyCells(editScope);
-        let contentCellEdits = cellEdits.filter(function (op) {
-            // Approver name echoes are not content fills.
-            const preview = normalizeCompareText(op && op.text);
-            return !(op && !op.match_by_label && !op.match_by_headers && preview.indexOf('super admin') !== -1);
-        });
-
-        // Dirty SOP/table cells marked but collectors returned nothing — force one more pass.
-        let forcedTextEdits = [];
-        if (dirtyCells > 0 && !contentCellEdits.length && !edits.length) {
-            const forced = collectForceDirtyCellEdits();
-            forced.cellEdits.forEach(function (op) {
-                cellEdits.push(op);
-            });
-            forcedTextEdits = forced.textEdits || [];
-            contentCellEdits = cellEdits.filter(function (op) {
-                const preview = normalizeCompareText(op && op.text);
-                return !(op && !op.match_by_label && !op.match_by_headers && preview.indexOf('super admin') !== -1);
-            });
-            console.warn('[NEQ Save As] force-collected dirty cells', {
-                dirtyCells: dirtyCells,
-                forcedCells: forced.cellEdits.length,
-                forcedIndexes: forcedTextEdits.length,
-            });
-        }
-
-        // Still dirty after force collect? Drop leftover non-fill markers and recount.
-        if (dirtyCells > 0 && !contentCellEdits.length) {
-            clearUnsaveableDirtyMarkers(editScope);
-            dirtyCells = countCollectableDirtyCells(editScope);
-        }
-
-        const allTextEdits = edits.concat(forcedTextEdits);
-        const hasMeaningfulApprovers = approvers.some(function (a) {
-            return a && Number(a.user_id) > 0;
-        });
-        if (!allTextEdits.length && !cellEdits.length && !tableOps.length && !checkboxOps.length && !structureOps.length && !hasMeaningfulApprovers) {
-            if (autosave) {
-                setNeqDraftStatus('Draft saved', 'ok');
-                return;
-            }
-            previewError.textContent = 'No text changes, row changes, checkboxes, or approver selections to save.';
-            previewError.classList.remove('alert-success');
-            previewError.classList.add('alert-warning');
-            previewError.classList.remove('d-none');
-            return;
-        }
-        if (dirtyCells > 0 && !contentCellEdits.length && !allTextEdits.length && !tableOps.length && !checkboxOps.length && !structureOps.length) {
-            // Last resort: collect every comments/deviation body cell with live text.
-            const rescue = collectRescueCommentsDeviationEdits();
-            rescue.forEach(function (op) {
-                cellEdits.push(op);
-            });
-            contentCellEdits = cellEdits.filter(function (op) {
-                const preview = normalizeCompareText(op && op.text);
-                return !(op && !op.match_by_label && !op.match_by_headers && preview.indexOf('super admin') !== -1);
-            });
-            if (!contentCellEdits.length && !hasMeaningfulApprovers) {
-                console.warn('[NEQ Save As] user-edited cells present but none collected', {
-                    dirtyCells: dirtyCells,
-                    cellEdits: cellEdits,
-                });
-                if (autosave) {
-                    setNeqDraftStatus('Could not save the typed text yet.', 'error');
-                    return;
-                }
-                previewError.textContent = 'Your typed values could not be collected for save. Click inside each filled cell once, then Save again.';
-                previewError.classList.remove('alert-success');
-                previewError.classList.add('alert-warning');
-                previewError.classList.remove('d-none');
-                return;
-            }
-            // Header-only dirty markers with nothing collectable — clear and continue if
-            // there is still something else to save (approvers / empty payload already handled).
-            if (!contentCellEdits.length) {
-                clearUnsaveableDirtyMarkers(editScope);
-                dirtyCells = 0;
-            }
-        }
-
+        const fillPayload = collectFillFormPayload();
         neqDraftSaving = true;
         if (autosave) {
             setNeqDraftStatus('Saving…', 'saving');
         } else {
-            disableEditing();
             if (btnSaveAs) {
                 btnSaveAs.disabled = true;
             }
             hidePreviewMessages();
         }
-
-        console.log('[NEQ Save As] payload preview', {
-            saveUrl: currentSaveUrl,
-            editCount: allTextEdits.length,
-            cellEditCount: cellEdits.length,
-            labelEdits: cellEdits.filter(function (o) { return o && o.match_by_label; }).length,
-            headerEdits: cellEdits.filter(function (o) { return o && o.match_by_headers; }).length,
-            checkboxOps: checkboxOps,
-            structureOps: structureOps,
-            tableOps: tableOps,
-            cellEdits: cellEdits,
-            edits: allTextEdits,
-        });
 
         try {
             const response = await fetch(currentSaveUrl, {
@@ -18346,34 +19110,16 @@ document.addEventListener('DOMContentLoaded', function () {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    edits: allTextEdits,
-                    cell_edits: cellEdits,
-                    table_ops: tableOps,
-                    checkbox_ops: checkboxOps,
-                    structure_ops: structureOps,
-                    toc_lines: tocLines,
-                    approvers: approvers,
+                body: JSON.stringify(Object.assign({}, fillPayload, {
                     autosave: autosave ? 1 : 0,
                     password: autosave ? '' : (esignPassword || ''),
-                }),
+                })),
             });
 
             const payload = await parseJsonResponse(response);
             if (!response.ok || !payload.success) {
-                throw new Error(payload.message || 'Failed to save edited document.');
+                throw new Error(payload.message || 'Failed to save draft.');
             }
-
-            console.info('[NEQ Save As] apply stats', payload.stats || {});
-            const applied = Number((payload.stats && payload.stats.applied) || payload.applied_count || 0);
-            if (!autosave && applied < 1 && (edits.length || contentCellEdits.length || tableOps.length || checkboxOps.length || structureOps.length)) {
-                previewError.textContent = 'Save finished but no cell values were written into the Word file. Please fill the cells again and Save.';
-                previewError.classList.remove('alert-success');
-                previewError.classList.add('alert-warning');
-                previewError.classList.remove('d-none');
-            }
-
-            pendingTableDeletes = [];
 
             if (payload.approve_url) {
                 currentApproveUrl = payload.approve_url;
@@ -18387,59 +19133,46 @@ document.addEventListener('DOMContentLoaded', function () {
             if (payload.reject_url) {
                 currentRejectUrl = payload.reject_url;
             }
+            if (payload.save_url) {
+                currentSaveUrl = payload.save_url;
+            }
+            if (payload.record_id) {
+                currentRecordId = payload.record_id;
+            }
             if (payload.list_id && payload.approvals) {
                 neqApprovals[String(payload.list_id)] = payload.approvals;
                 currentListId = payload.list_id;
             }
 
-            const savedButton = updateImportedDocumentRow(payload);
-            const activeButton = savedButton || document.querySelector('.js-preview-btn.active');
-            if (payload.save_url) {
-                currentSaveUrl = payload.save_url;
-            }
-            if (payload.save_url || (!tableOps.length && !structureOps.length)) {
-                markAutosavedStructure(payload.stats || {});
-            }
-
             if (autosave) {
-                if (payload.edited_download_url || payload.download_url) {
-                    updateDownloadLinks(payload.edited_download_url || payload.download_url);
+                if (payload.list_id) {
+                    updateImportedDocumentRow({
+                        list_id: payload.list_id,
+                        reference_document_no: Object.prototype.hasOwnProperty.call(payload, 'reference_document_no')
+                            ? payload.reference_document_no
+                            : undefined,
+                        autosave: true,
+                        docx_written: false,
+                        saved_at: payload.saved_at,
+                    });
                 }
-                rememberSavedBodyText(editScope);
                 setNeqDraftStatus('Draft saved' + (payload.saved_at ? (' ' + payload.saved_at) : ''), 'ok');
-                return;
+                return true;
             }
 
-            if (payload.file_url && payload.save_url && payload.preview_html_url) {
-                await renderPreview(
-                    payload.file_url,
-                    payload.filename || currentFileName,
-                    payload.record_id || currentRecordId,
-                    payload.save_url,
-                    payload.preview_html_url,
-                    activeButton || null,
-                    payload.text_targets_url || null,
-                    payload.edited_download_url || payload.download_url || null,
-                    { cacheBust: Date.now() }
-                );
-                if (currentUserCanSave()) {
-                    await enableEditing();
-                }
-            } else {
-                updateDownloadLinks(payload.download_url || null);
-            }
-
-            showSaveSuccess(payload.message || 'Saved as draft. You can keep editing, or Send for Approval when all approvers are selected.');
+            updateImportedDocumentRow(payload);
+            setNeqDraftStatus('Saved' + (payload.saved_at ? (' ' + payload.saved_at) : ''), 'ok');
+            showSaveSuccess(payload.message || 'Draft saved. You can keep editing, or Send for Approval when all approvers are selected.');
+            return true;
         } catch (error) {
             if (autosave) {
                 setNeqDraftStatus((error && error.message) || 'Draft save failed.', 'error');
             } else {
-                previewError.textContent = error.message || 'Failed to save edited document.';
-                previewError.classList.remove('alert-success');
+                previewError.textContent = (error && error.message) || 'Failed to save draft.';
+                previewError.classList.remove('alert-success', 'd-none');
                 previewError.classList.add('alert-warning');
-                previewError.classList.remove('d-none');
-                await enableEditing();
             }
+            return false;
         } finally {
             neqDraftSaving = false;
             if (btnSaveAs) {
@@ -18458,51 +19191,32 @@ document.addEventListener('DOMContentLoaded', function () {
     async function waitUntilDraftSaveIdle() {
         let spins = 0;
         while (neqDraftSaving && spins < 80) {
-            await new Promise(function (resolve) { setTimeout(resolve, 200); });
+            await new Promise(function (resolve) { setTimeout(resolve, 100); });
             spins += 1;
         }
-    }
-
-    // Send for Approval does not rewrite the Word file. Flush the open page
-    // first so a refresh after send still shows every cell that was filled.
-    async function flushEditorBeforeApproval() {
-        if (neqDraftTimer) {
-            clearTimeout(neqDraftTimer);
-            neqDraftTimer = null;
-        }
-        await waitUntilDraftSaveIdle();
-        if (!isEditingEnabled || !currentSaveUrl || !currentUserCanSave()) {
-            return true;
-        }
-        await saveEditedDocument('', { autosave: true });
-        await waitUntilDraftSaveIdle();
-        const status = document.getElementById('neqDraftStatus');
-        if (status && status.classList.contains('is-error')) {
-            return false;
-        }
-        return true;
     }
 
     async function sendDocumentForApproval(esignPassword) {
         if (!hasActivePreview || !currentSendForApprovalUrl || !currentUserCanSendForApproval()) {
             previewError.textContent = 'Select all approvers before sending for approval.';
-            previewError.classList.remove('alert-success');
+            previewError.classList.remove('alert-success', 'd-none');
             previewError.classList.add('alert-warning');
-            previewError.classList.remove('d-none');
             return;
         }
 
-        const approvers = collectApprovers();
+        if (neqDraftTimer) {
+            clearTimeout(neqDraftTimer);
+            neqDraftTimer = null;
+        }
+        await waitUntilDraftSaveIdle();
+
+        const fillPayload = collectFillFormPayload();
         if (btnSendForApproval) {
             btnSendForApproval.disabled = true;
         }
         hidePreviewMessages();
 
         try {
-            const flushed = await flushEditorBeforeApproval();
-            if (!flushed) {
-                throw new Error('The filled values could not be saved, so the document was not sent for approval.');
-            }
             const response = await fetch(currentSendForApprovalUrl, {
                 method: 'POST',
                 credentials: 'same-origin',
@@ -18511,10 +19225,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    approvers: approvers,
+                body: JSON.stringify(Object.assign({}, fillPayload, {
                     password: esignPassword || '',
-                }),
+                })),
             });
 
             const payload = await parseJsonResponse(response);
@@ -18545,10 +19258,9 @@ document.addEventListener('DOMContentLoaded', function () {
             updateApprovalActionButtons();
             showSaveSuccess(payload.message || 'Sent for approval. Editing is locked until Send Back.');
         } catch (error) {
-            previewError.textContent = error.message || 'Failed to send for approval.';
-            previewError.classList.remove('alert-success');
+            previewError.textContent = (error && error.message) || 'Failed to send for approval.';
+            previewError.classList.remove('alert-success', 'd-none');
             previewError.classList.add('alert-warning');
-            previewError.classList.remove('d-none');
         } finally {
             updateApprovalActionButtons();
         }
@@ -18668,106 +19380,37 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    let lastEsignCell = null;
-
-    function rememberEsignCell(fromNode) {
-        if (!fromNode || !fromNode.closest || !previewShell || !previewShell.contains(fromNode)) {
-            return;
-        }
-        const cell = fromNode.closest('td, th');
-        if (!cell || isToolCell(cell) || cell.closest('header, footer, .docx_header, .docx_footer')) {
-            return;
-        }
-        lastEsignCell = cell;
-    }
-
-    function esignHostFromClick() {
-        // The cell just clicked wins. An empty Sign and Date box often leaves
-        // the caret in the column heading, and E-Sign then refuses that heading.
-        if (lastEsignCell && previewShell.contains(lastEsignCell)) {
-            return lastEsignCell;
-        }
-        const sel = window.getSelection && window.getSelection();
-        let node = sel && sel.anchorNode ? sel.anchorNode : null;
-        if (node && node.nodeType === Node.TEXT_NODE) {
-            node = node.parentElement;
-        }
-        const fromSel = node && node.closest ? node.closest('td, th, p, li, h1, h2, h3, h4, h5, h6') : null;
-        if (fromSel && previewShell.contains(fromSel) && !isToolCell(fromSel)) {
-            return fromSel;
-        }
-        const focus = getFocusedEditableNode();
-        if (focus && previewShell.contains(focus)) {
-            return (focus.closest && focus.closest('td, th')) || focus;
-        }
-        return null;
-    }
-
-    function writeEsignLines(host, lines) {
-        const cell = host.closest ? host.closest('td, th') : null;
-        let leaf = cell && typeof resolveDataMatrixEditableCell === 'function'
-            ? (resolveDataMatrixEditableCell(cell) || cell)
-            : host;
-        let target = leaf.querySelector
-            ? (leaf.querySelector('[contenteditable="true"]') || leaf.querySelector('p, li, h1, h2, h3, h4, h5, h6') || leaf)
-            : leaf;
-        if (target.querySelector && target.querySelector('table')) {
-            const paragraph = leaf.querySelector ? leaf.querySelector('p') : null;
-            if (paragraph && !(paragraph.querySelector && paragraph.querySelector('table'))) {
-                target = paragraph;
+    let lastFocusedFillField = null;
+    if (previewShell) {
+        previewShell.addEventListener('focusin', function (event) {
+            const t = event.target;
+            if (t && t.matches && t.matches('input.docx-input, textarea.docx-input, textarea.neq-added-paragraph-input')
+                && !t.classList.contains('neq-summary-readonly') && !t.readOnly && !t.disabled) {
+                lastFocusedFillField = t;
             }
-        }
-        while (target.firstChild) {
-            target.removeChild(target.firstChild);
-        }
-        lines.forEach(function (line, index) {
-            if (index) {
-                target.appendChild(document.createElement('br'));
-            }
-            target.appendChild(document.createTextNode(line));
         });
-        if (target.getAttribute && target.getAttribute('contenteditable') !== 'true') {
-            target.setAttribute('contenteditable', 'true');
-        }
-        markIdentityUserEdit(target);
-        if (leaf && leaf !== target) {
-            markIdentityUserEdit(leaf);
-        }
-        if (cell && cell !== leaf && cell !== target) {
-            markIdentityUserEdit(cell);
-        }
-        try {
-            target.dispatchEvent(new Event('input', { bubbles: true }));
-        } catch (e) {
-            /* older browsers */
-        }
     }
 
     function stampEsignOnSelection() {
         if (!isEditingEnabled) {
             previewError.textContent = 'Turn on Edit Content before using E-Sign.';
-            previewError.classList.remove('alert-success');
+            previewError.classList.remove('alert-success', 'd-none');
             previewError.classList.add('alert-warning');
-            previewError.classList.remove('d-none');
             return;
         }
-        const host = esignHostFromClick();
-        if (!host || !previewShell.contains(host)) {
-            previewError.textContent = 'Click a cell or paragraph first, then click E-Sign.';
-            previewError.classList.remove('alert-success');
-            previewError.classList.add('alert-warning');
-            previewError.classList.remove('d-none');
-            return;
+        const form = document.getElementById('neqFillForm');
+        const active = document.activeElement;
+        let target = null;
+        if (form && active && form.contains(active) && active.matches && active.matches('input.docx-input, textarea.docx-input, textarea.neq-added-paragraph-input')
+            && !active.classList.contains('neq-summary-readonly') && !active.readOnly && !active.disabled) {
+            target = active;
+        } else if (lastFocusedFillField && lastFocusedFillField.isConnected && !lastFocusedFillField.readOnly && !lastFocusedFillField.disabled) {
+            target = lastFocusedFillField;
         }
-        const cell = host.closest ? host.closest('td, th') : null;
-        const titleRow = cell && cell.parentElement && rowTextsAreColumnTitles(getRowCells(cell.parentElement).map(function (item) {
-            return columnHeaderMatchText(item.innerText || item.textContent || '');
-        }));
-        if (isInsideOfficialLogoCell(host) || isToolCell(host) || titleRow) {
-            previewError.textContent = 'This place cannot be signed. Click the value cell where the signature should go.';
-            previewError.classList.remove('alert-success');
+        if (!target) {
+            previewError.textContent = 'Click inside a fillable text field first, then click E-Sign.';
+            previewError.classList.remove('alert-success', 'd-none');
             previewError.classList.add('alert-warning');
-            previewError.classList.remove('d-none');
             return;
         }
         const now = new Date();
@@ -18777,24 +19420,20 @@ document.addEventListener('DOMContentLoaded', function () {
         hours = hours % 12 || 12;
         const when = pad(now.getDate()) + '-' + pad(now.getMonth() + 1) + '-' + now.getFullYear()
             + ' ' + pad(hours) + ':' + pad(now.getMinutes()) + ' ' + ampm;
-        const live = normalizeEditText((cell && (cellLiveText(cell) || cell.innerText)) || (host.innerText || host.textContent || ''));
-        const original = normalizeEditText((cell && cellOriginalText(cell)) || ((host.getAttribute && host.getAttribute('data-neq-original')) || ''));
-        const verifiedLabel = /^verified\s*by\s*sign\s*and\s*date\b/i.test(live)
-            || /^verified\s*by\s*sign\s*and\s*date\b/i.test(original);
-        // Name on the first line, full date on the next. The year stays together.
-        const lines = verifiedLabel
-            ? ['Verified by sign and date : ' + neqCurrentUserName + ' ' + when]
-            : [neqCurrentUserName, when];
-        writeEsignLines(host, lines);
+        target.value = neqCurrentUserName + ' ' + when;
+        try {
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (e) {
+            /* older browsers */
+        }
         previewError.textContent = 'Signed as ' + neqCurrentUserName + '.';
         if (neqDraftTimer) {
             clearTimeout(neqDraftTimer);
             neqDraftTimer = null;
         }
         saveEditedDocument('', { autosave: true });
-        previewError.classList.remove('alert-warning');
+        previewError.classList.remove('alert-warning', 'd-none');
         previewError.classList.add('alert-success');
-        previewError.classList.remove('d-none');
     }
 
     const btnEsignStamp = document.getElementById('btnEsignStamp');
@@ -18812,7 +19451,7 @@ document.addEventListener('DOMContentLoaded', function () {
             event.preventDefault();
         });
         btnSaveAs.addEventListener('click', function () {
-            if (!hasActivePreview || !isEditingEnabled || !currentSaveUrl) {
+            if (!hasActivePreview || !currentSaveUrl || !currentUserCanSave()) {
                 return;
             }
 
@@ -18821,6 +19460,27 @@ document.addEventListener('DOMContentLoaded', function () {
                 neqDraftTimer = null;
             }
             saveEditedDocument('', { autosave: false });
+        });
+    }
+
+    const btnNeqPrevPage = document.getElementById('btnNeqPrevPage');
+    const btnNeqNextPage = document.getElementById('btnNeqNextPage');
+    const neqPageJumpSelect = document.getElementById('neqPageJumpSelect');
+    if (btnNeqPrevPage) {
+        btnNeqPrevPage.addEventListener('click', function () {
+            const cur = neqPageJumpSelect ? Number(neqPageJumpSelect.value || 1) : 1;
+            jumpToNeqPage(cur - 1);
+        });
+    }
+    if (btnNeqNextPage) {
+        btnNeqNextPage.addEventListener('click', function () {
+            const cur = neqPageJumpSelect ? Number(neqPageJumpSelect.value || 1) : 1;
+            jumpToNeqPage(cur + 1);
+        });
+    }
+    if (neqPageJumpSelect) {
+        neqPageJumpSelect.addEventListener('change', function () {
+            jumpToNeqPage(this.value);
         });
     }
 

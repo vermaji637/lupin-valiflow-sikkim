@@ -116,13 +116,306 @@
 body.premium-app #docxFillForm .docx-preview-wrapper {
     overflow-x: auto;
     overflow-y: visible;
-    background: #fff;
-    border: 1px solid #dee2e6;
+    background: #525659;
+    border: 1px solid #334155;
     border-radius: 8px;
-    padding: 24px;
+    padding: 28px 16px;
     min-height: 200px;
     position: relative;
     z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.docx-preview {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Realistic Strict A4 Page Sheet (210mm x 297mm) */
+.docx-a4-page {
+    width: 210mm;
+    max-width: 100%;
+    min-height: 297mm;
+    max-height: 297mm;
+    height: 297mm;
+    background: #ffffff !important;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.16);
+    border-radius: 2px;
+    padding: 10mm 14mm 10mm 14mm;
+    margin-bottom: 24px;
+    position: relative;
+    box-sizing: border-box;
+    font-family: inherit;
+    break-after: page;
+    page-break-after: always;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden; /* Page height NEVER expands */
+}
+
+.docx-page-body {
+    flex: 1 1 auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.docx-page-body > * {
+    flex-shrink: 0;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.docx-para,
+.docx-para-edit-wrapper,
+.docx-para-content {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.docx-page-official-header {
+    width: 100%;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-page-official-header table.header-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0;
+    table-layout: fixed;
+    background: #ffffff;
+}
+
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-page-official-header table.header-table td {
+    border: 1px solid #334155 !important;
+    padding: 3px 6px !important;
+    font-size: 11px !important;
+    vertical-align: middle !important;
+    line-height: 1.25;
+    background: #ffffff !important;
+    color: #0f172a !important;
+}
+
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-summary-header-card {
+    width: 210mm;
+    max-width: 100%;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin: 0 auto 20px auto;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22);
+    box-sizing: border-box;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-summary-header-card table.header-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 0;
+    background: #ffffff !important;
+    color: #0f172a !important;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-summary-header-card table.header-table td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 8px 10px !important;
+    vertical-align: top !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 13px !important;
+    line-height: 1.4;
+}
+.docx-summary-header-card .docx-summary-field-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    color: #475569 !important;
+    margin-bottom: 4px;
+}
+.docx-summary-header-card .docx-summary-title-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a !important;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-summary-header-card table.header-table input[type="text"].docx-input {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 13px !important;
+    font-weight: 600;
+    padding: 5px 8px !important;
+}
+
+.docx-page-official-footer {
+    width: 100%;
+    margin-top: auto;
+    padding-top: 6px;
+    border-top: 1.5px solid #64748b;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: #475569;
+    flex-shrink: 0;
+}
+
+/* Page Break Divider between A4 Sheets */
+.docx-page-break-indicator {
+    display: flex;
+    align-items: center;
+    width: 210mm;
+    max-width: 100%;
+    margin: 4px 0 20px 0;
+    user-select: none;
+}
+
+.docx-page-break-line {
+    flex-grow: 1;
+    border-top: 2px dashed #94a3b8;
+    height: 0;
+}
+
+.docx-page-break-badge {
+    background: #1e293b;
+    color: #f8fafc;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 16px;
+    border-radius: 14px;
+    margin: 0 14px;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    white-space: nowrap;
+}
+
+/* Floating Page Navigator */
+#docxPageNavigator {
+    pointer-events: auto;
+    background: #ffffff;
+    border: 1px solid #c5d0e6;
+    border-radius: 8px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
+    overflow: hidden;
+}
+#docxPageNavigator .btn-group {
+    display: flex;
+    align-items: center;
+}
+#docxPageNavigator .btn {
+    border: none;
+    background: #ffffff;
+    color: #1e293b;
+    padding: 7px 12px;
+    font-size: 12px;
+    transition: background 0.15s ease-in-out;
+}
+#docxPageNavigator .btn:hover {
+    background: #f1f5f9;
+}
+#docxPageNavigator select {
+    border: none;
+    border-left: 1px solid #e2e8f0;
+    border-right: 1px solid #e2e8f0;
+    font-size: 12px;
+    font-weight: 600;
+    color: #334155;
+    padding: 4px 8px;
+    background: #ffffff;
+    cursor: pointer;
+    outline: none;
+}
+
+/* Table of Contents inputs */
+.docx-toc-title-input {
+    background: #fffde7 !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 4px !important;
+    padding: 2px 8px !important;
+    font-weight: 500 !important;
+    font-size: 13px !important;
+    color: #1e293b !important;
+    height: 28px !important;
+    transition: all 0.15s ease-in-out;
+}
+.docx-toc-title-input:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
+    outline: none !important;
+    background: #ffffff !important;
+}
+.docx-toc-page-input {
+    background: #fffde7 !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 4px !important;
+    font-weight: 700 !important;
+    font-size: 12px !important;
+    color: #1e293b !important;
+    height: 28px !important;
+    text-align: center !important;
+    transition: all 0.15s ease-in-out;
+}
+.docx-toc-page-input:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
+    outline: none !important;
+    background: #ffffff !important;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-line {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-line input.docx-toc-title-input {
+    display: inline-block !important;
+    width: auto !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 28px !important;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-line input.docx-toc-page-input {
+    display: inline-block !important;
+    width: 52px !important;
+    min-width: 52px !important;
+    max-width: 52px !important;
+    flex: 0 0 52px !important;
+    height: 28px !important;
+}
+
+@media print {
+    body.premium-app #docxFillForm .docx-preview-wrapper {
+        background: transparent !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+    .docx-a4-page {
+        box-shadow: none !important;
+        margin: 0 !important;
+        padding: 12mm !important;
+        width: 100% !important;
+        min-height: auto !important;
+        page-break-after: always !important;
+        break-after: page !important;
+    }
+    .no-print,
+    .docx-page-break-indicator,
+    .docx-page-header-info,
+    #docxFloatingActionsContainer,
+    #docxPageNavigator {
+        display: none !important;
+    }
 }
 
 /* ── Table layout (must stay display:table for inputs to render in cells) ── */
@@ -177,6 +470,37 @@ body.premium-app #docxFillForm .docx-preview-wrapper td.docx-cell.locked {
     background-color: #f5f5f5 !important;
     background-image: none !important;
     color: #444 !important;
+}
+
+/* Data tables stay inside the A4 sheet. Long text wraps and the row grows. */
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) {
+    table-layout: fixed;
+    width: 100%;
+    max-width: 100%;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) td,
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) th {
+    min-width: 0 !important;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    height: auto;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) input,
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) textarea,
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) select {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-input,
+body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-para-content {
+    field-sizing: content;
+    overflow: hidden;
+    resize: vertical;
+    white-space: pre-wrap;
 }
 
 /*
@@ -450,6 +774,20 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
             <span id="docxEsignStatus" class="badge badge-light text-secondary px-3 py-2" style="display:none;"></span>
         </div>
     @endif
+
+    <div id="docxPageNavigator" class="docx-page-navigator no-print" aria-label="Page Navigation">
+        <div class="btn-group shadow" role="group">
+            <button type="button" class="btn btn-light" id="btnDocxPrevPage" title="Previous Page">
+                <i class="fas fa-chevron-up"></i>
+            </button>
+            <select id="docxSelectPageJump" class="custom-select custom-select-sm border-0" style="width: 135px; font-weight: 600; font-size: 12px; cursor: pointer;" title="Jump to page">
+                <option value="1">Page 1</option>
+            </select>
+            <button type="button" class="btn btn-light" id="btnDocxNextPage" title="Next Page">
+                <i class="fas fa-chevron-down"></i>
+            </button>
+        </div>
+    </div>
 </div>
 <div class="container-fluid py-4">
     <div class="row justify-content-center">
@@ -745,45 +1083,50 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                             @endphp
                             <div class="docx-preview-wrapper mb-4">
                                 @if(!empty($showLegacyBladeHeader))
-                                {{-- IOQ protocol only: extra blade header (not in Python preview) --}}
-                                <table class="docx-table header-table" style="margin-bottom:0;">
-                                    <tr>
-                                        <td rowspan="3" style="width:100px; text-align:center; vertical-align:middle; border:1px solid #000; padding:8px;">
-                                            <img src="{{ asset('storage/lupin.png') }}" alt="Lupin" style="height:50px; width:auto;" onerror="this.style.display='none'">
-                                            <div style="font-size:11px; font-weight:bold; margin-top:4px;">LUPIN</div>
-                                        </td>
-                                        <td colspan="4" style="text-align:center; font-weight:bold; font-size:15px; border:1px solid #000; padding:8px; background:#f8f9fa;">
-                                            {{ strtoupper($templateName) }}
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td style="border:1px solid #000; padding:6px;">
-                                            <strong>Title:</strong> {{ $templateName }}
-                                        </td>
-                                        <td style="border:1px solid #000; padding:6px;">
-                                            <strong>Document Number:</strong>
-                                            <input type="text" name="fields[header_0_row_4_col_2]" id="header_doc_number" class="docx-input"
-                                                   value="{{ old('fields.header_0_row_4_col_2', $protocolDocumentNo ?? $documentNo) }}">
-                                        </td>
-                                        <td style="border:1px solid #000; padding:6px;">
-                                            <strong>Equipment Name:</strong>
-                                            <input type="text" name="fields[header_0_row_2_col_4]" id="header_equipment_name" class="docx-input"
-                                                   value="{{ old('fields.header_0_row_2_col_4', $equipmentName) }}">
-                                        </td>
-                                        <td style="border:1px solid #000; padding:6px;">
-                                            <strong>Equipment ID:</strong>
-                                            <input type="text" name="fields[header_0_row_3_col_4]" id="header_equipment_id" class="docx-input"
-                                                   value="{{ old('fields.header_0_row_3_col_4', $equipmentId) }}">
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td colspan="4" style="border:1px solid #000; padding:6px;">
-                                            <strong>Reference Protocol No:</strong>
-                                            <input type="text" name="fields[header_ref_protocol]" id="header_ref_protocol" class="docx-input"
-                                                   value="{{ old('fields.header_ref_protocol', $referenceProtocolNo ?? '') }}">
-                                        </td>
-                                    </tr>
-                                </table>
+                                {{-- Protocol Identity Summary Bar (crisp readable header synced to A4 letterheads) --}}
+                                <div class="docx-summary-header-card">
+                                    <table class="docx-table header-table" style="margin-bottom:0;">
+                                        <tr>
+                                            <td rowspan="3" style="width:96px; text-align:center; vertical-align:middle !important; background:#ffffff !important;">
+                                                <img src="{{ asset('storage/lupin.png') }}" alt="Lupin" style="height:46px; width:auto;" onerror="this.style.display='none'">
+                                                <div style="font-size:11px; font-weight:700; margin-top:4px; color:#047857;">LUPIN</div>
+                                            </td>
+                                            <td colspan="4" id="header_summary_banner" style="text-align:center; font-weight:700; font-size:15px; padding:10px !important; background:#f1f5f9 !important; color:#0f172a !important;">
+                                                {{ strtoupper($templateName) }}
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td style="width:22%; background:#f8fafc !important;">
+                                                <span class="docx-summary-field-label">Title</span>
+                                                <span class="docx-summary-title-value" id="header_summary_title">{{ $templateName }}</span>
+                                            </td>
+                                            <td style="width:26%;">
+                                                <label class="docx-summary-field-label" for="header_doc_number">Document Number</label>
+                                                <input type="text" name="fields[header_0_row_4_col_2]" id="header_doc_number" class="docx-input"
+                                                       placeholder="Enter document number..."
+                                                       value="{{ old('fields.header_0_row_4_col_2', $protocolDocumentNo ?? $documentNo) }}">
+                                            </td>
+                                            <td style="width:26%;">
+                                                <label class="docx-summary-field-label" for="header_equipment_name">Equipment Name</label>
+                                                <input type="text" name="fields[header_0_row_2_col_4]" id="header_equipment_name" class="docx-input"
+                                                       value="{{ old('fields.header_0_row_2_col_4', $equipmentName) }}">
+                                            </td>
+                                            <td style="width:26%;">
+                                                <label class="docx-summary-field-label" for="header_equipment_id">Equipment ID</label>
+                                                <input type="text" name="fields[header_0_row_3_col_4]" id="header_equipment_id" class="docx-input"
+                                                       value="{{ old('fields.header_0_row_3_col_4', $equipmentId) }}">
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td colspan="4">
+                                                <label class="docx-summary-field-label" for="header_ref_protocol">Reference Protocol No</label>
+                                                <input type="text" name="fields[header_ref_protocol]" id="header_ref_protocol" class="docx-input"
+                                                       placeholder="Enter reference protocol number..."
+                                                       value="{{ old('fields.header_ref_protocol', $referenceProtocolNo ?? '') }}">
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </div>
                                 @endif
 
                                 {!! $previewHtml !!}
@@ -995,6 +1338,588 @@ document.addEventListener('DOMContentLoaded', function () {
     let selectedRow = null;
     let selectedTable = null;
 
+    function createNewA4Page(sourcePage, tIdx, sourceTable) {
+        const newPage = document.createElement('div');
+        newPage.className = 'docx-a4-page';
+
+        const sourceHeader = sourcePage.querySelector('.docx-page-official-header');
+        if (sourceHeader) {
+            newPage.appendChild(sourceHeader.cloneNode(true));
+        }
+
+        const newBody = document.createElement('div');
+        newBody.className = 'docx-page-body';
+
+        const newTable = document.createElement('table');
+        newTable.className = sourceTable.className;
+        newTable.setAttribute('data-table-index', tIdx);
+
+        const thRow = sourceTable.querySelector('tr:first-child');
+        if (thRow && thRow.querySelector('th')) {
+            const clonedTh = thRow.cloneNode(true);
+            clonedTh.classList.remove('docx-selected-row');
+            clonedTh.querySelectorAll('[name]').forEach(function (el) { el.removeAttribute('name'); });
+            newTable.appendChild(clonedTh);
+        }
+        newBody.appendChild(newTable);
+        newPage.appendChild(newBody);
+
+        const sourceFooter = sourcePage.querySelector('.docx-page-official-footer');
+        if (sourceFooter) {
+            newPage.appendChild(sourceFooter.cloneNode(true));
+        }
+
+        return newPage;
+    }
+
+    function createPageBreakIndicator() {
+        const div = document.createElement('div');
+        div.className = 'docx-page-break-indicator no-print';
+        div.innerHTML = '<div class="docx-page-break-line"></div><div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page Break</div><div class="docx-page-break-line"></div>';
+        return div;
+    }
+
+    function updateAllPageNumbers() {
+        const allPages = Array.from(document.querySelectorAll('.docx-a4-page'));
+        const total = allPages.length;
+
+        allPages.forEach(function (page, idx) {
+            const pNum = idx + 1;
+            page.setAttribute('data-page-number', String(pNum));
+            page.id = 'docxPage' + pNum;
+
+            // Update Header page numbers
+            const headerTbl = page.querySelector('.docx-page-official-header');
+            if (headerTbl) {
+                headerTbl.querySelectorAll('.current-page-num').forEach(function (el) {
+                    el.textContent = String(pNum);
+                });
+                headerTbl.querySelectorAll('.total-pages-count').forEach(function (el) {
+                    el.textContent = String(total);
+                });
+                headerTbl.querySelectorAll('td').forEach(function (td) {
+                    if (/page\s*\d+\s*of\s*\d+/i.test(td.textContent)) {
+                        td.innerHTML = 'Page <span class="current-page-num">' + pNum + '</span> of <span class="total-pages-count">' + total + '</span>';
+                    }
+                });
+            }
+
+            // Update Footer page numbers
+            const footerEl = page.querySelector('.docx-page-official-footer');
+            if (footerEl) {
+                const pageSpan = footerEl.querySelector('.docx-footer-page');
+                if (pageSpan) {
+                    pageSpan.innerHTML = 'Page <span class="current-page-num">' + pNum + '</span> of <span class="total-pages-count">' + total + '</span>';
+                }
+            }
+        });
+
+        // Update Dividers
+        const dividers = Array.from(document.querySelectorAll('.docx-page-break-indicator'));
+        dividers.forEach(function (div, idx) {
+            const badge = div.querySelector('.docx-page-break-badge');
+            if (badge) {
+                badge.innerHTML = '<i class="fas fa-file-alt mr-1"></i> Page ' + (idx + 2);
+            }
+        });
+
+        // Update Page Jump selector
+        const selectJump = document.getElementById('docxSelectPageJump');
+        if (selectJump) {
+            const curr = selectJump.value || '1';
+            selectJump.innerHTML = '';
+            for (let i = 1; i <= total; i++) {
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = 'Page ' + i + ' of ' + total;
+                selectJump.appendChild(opt);
+            }
+            selectJump.value = parseInt(curr, 10) <= total ? curr : '1';
+        }
+    }
+
+    function placeRowAtStart(table, row) {
+        const first = table.rows[0];
+        if (first && first.querySelector('th')) first.after(row);
+        else if (first) table.insertBefore(row, first);
+        else table.appendChild(row);
+    }
+
+    function reflowPageOverflow(page) {
+        if (!page) return;
+        const pageBody = page.querySelector('.docx-page-body');
+        if (!pageBody) return;
+
+        let safety = 0;
+        while ((pageIsOverfull(pageBody) || pageBody.scrollHeight > pageBody.clientHeight + 8) && safety < 50) {
+            safety++;
+            const last = pageBody.lastElementChild;
+            if (!last) break;
+
+            if (last.matches('table.docx-table') && !last.classList.contains('header-table') && last.rows.length > 1) {
+                const lastRow = last.rows[last.rows.length - 1];
+                if (lastRow.offsetHeight + 12 >= pageBody.clientHeight && last.rows.length <= 2 && pageBody.childElementCount === 1) {
+                    break;
+                }
+                const before = lastRow.previousElementSibling;
+                placeRowAtStart(continuationTable(page, last), lastRow);
+                if (last.contains(lastRow) || (before && before.nextElementSibling === lastRow)) break;
+                continue;
+            }
+
+            if (pageBody.childElementCount === 1) break;
+            const nextPage = followingA4Page(page) || createContinuationPage(page);
+            const nextBody = nextPage.querySelector('.docx-page-body');
+            nextBody.insertBefore(last, nextBody.firstChild);
+        }
+
+        updateAllPageNumbers();
+
+        // Recursively check next page
+        let nextP = page.nextElementSibling;
+        while (nextP && !nextP.classList.contains('docx-a4-page')) {
+            nextP = nextP.nextElementSibling;
+        }
+        if (nextP && nextP.querySelector('.docx-page-body') && nextP.querySelector('.docx-page-body').scrollHeight > nextP.querySelector('.docx-page-body').clientHeight + 4) {
+            reflowPageOverflow(nextP);
+        }
+    }
+
+    function reflowPageUnderflow(page) {
+        if (!page) return;
+        const pageBody = page.querySelector('.docx-page-body');
+        if (!pageBody) return;
+
+        let nextPage = page.nextElementSibling;
+        while (nextPage && !nextPage.classList.contains('docx-a4-page')) {
+            nextPage = nextPage.nextElementSibling;
+        }
+        if (!nextPage) return;
+
+        const currentTables = pageBody.querySelectorAll('table.docx-table:not(.header-table)');
+        if (!currentTables.length) return;
+        const currentTable = currentTables[currentTables.length - 1];
+        const tIdx = currentTable.getAttribute('data-table-index') || '';
+
+        const nextTable = nextPage.querySelector('table.docx-table[data-table-index="' + tIdx + '"]');
+        if (!nextTable) return;
+
+        while (true) {
+            const nextRows = Array.from(nextTable.querySelectorAll('tr'));
+            if (nextRows.length <= 1) break;
+            const firstDataRow = nextRows[1];
+
+            currentTable.appendChild(firstDataRow);
+            if (pageBody.scrollHeight > pageBody.clientHeight + 4) {
+                if (nextTable.querySelectorAll('tr').length > 1) {
+                    nextTable.insertBefore(firstDataRow, nextTable.querySelectorAll('tr')[1]);
+                } else {
+                    nextTable.appendChild(firstDataRow);
+                }
+                break;
+            }
+        }
+
+        const remainingRows = Array.from(nextTable.querySelectorAll('tr'));
+        const nextBody = nextPage.querySelector('.docx-page-body');
+        if (remainingRows.length <= 1 && nextBody && nextBody.querySelectorAll('table, p').length <= 1) {
+            let prev = nextPage.previousElementSibling;
+            if (prev && prev.classList.contains('docx-page-break-indicator')) {
+                prev.remove();
+            }
+            nextPage.remove();
+        }
+
+        updateAllPageNumbers();
+    }
+
+    window.updateAllPageNumbers = updateAllPageNumbers;
+    window.reflowPageOverflow = reflowPageOverflow;
+    window.reflowPageUnderflow = reflowPageUnderflow;
+
+    function followingA4Page(page) {
+        let next = page ? page.nextElementSibling : null;
+        while (next && !next.classList.contains('docx-a4-page')) {
+            next = next.nextElementSibling;
+        }
+        return next;
+    }
+
+    function createContinuationPage(sourcePage) {
+        const newPage = document.createElement('div');
+        newPage.className = 'docx-a4-page';
+
+        const sourceHeader = sourcePage.querySelector('.docx-page-official-header');
+        if (sourceHeader) {
+            const header = sourceHeader.cloneNode(true);
+            header.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+            newPage.appendChild(header);
+        }
+
+        const newBody = document.createElement('div');
+        newBody.className = 'docx-page-body';
+        newPage.appendChild(newBody);
+
+        const sourceFooter = sourcePage.querySelector('.docx-page-official-footer');
+        if (sourceFooter) {
+            const footer = sourceFooter.cloneNode(true);
+            footer.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+            newPage.appendChild(footer);
+        }
+
+        const divider = createPageBreakIndicator();
+        sourcePage.after(divider);
+        divider.after(newPage);
+        return newPage;
+    }
+
+    function continuationTable(page, sourceTable) {
+        const nextPage = followingA4Page(page) || createContinuationPage(page);
+        const body = nextPage.querySelector('.docx-page-body');
+        const tIdx = sourceTable.getAttribute('data-table-index') || '';
+        const first = body.firstElementChild;
+        if (
+            first
+            && first.matches('table.docx-table')
+            && (first.getAttribute('data-table-index') || '') === tIdx
+        ) {
+            return first;
+        }
+
+        const table = document.createElement('table');
+        table.className = sourceTable.className;
+        if (tIdx !== '') table.setAttribute('data-table-index', tIdx);
+        const header = sourceTable.rows[0];
+        if (header && header.querySelector('th')) {
+            const clonedHeader = header.cloneNode(true);
+            clonedHeader.classList.remove('docx-selected-row');
+            clonedHeader.querySelectorAll('input, textarea, select').forEach(function (el) {
+                el.removeAttribute('name');
+            });
+            table.appendChild(clonedHeader);
+        }
+        body.insertBefore(table, body.firstChild);
+        return table;
+    }
+
+    function continuationTocCard(page) {
+        const nextPage = followingA4Page(page) || createContinuationPage(page);
+        const body = nextPage.querySelector('.docx-page-body');
+        const first = body.firstElementChild;
+        if (first && first.classList.contains('docx-toc-card') && first.getAttribute('data-toc-cont') === '1') {
+            return first;
+        }
+        const card = document.createElement('div');
+        card.className = 'docx-toc-card';
+        card.setAttribute('data-toc-cont', '1');
+        body.insertBefore(card, body.firstChild);
+        return card;
+    }
+
+    function spillOneBlock(page) {
+        const body = page.querySelector('.docx-page-body');
+        if (!body) return false;
+        const last = body.lastElementChild;
+        if (!last) return false;
+
+        if (last.classList.contains('docx-toc-card')) {
+            const lines = last.querySelectorAll(':scope > .docx-toc-line');
+            if (lines.length > 1) {
+                const line = lines[lines.length - 1];
+                const card = continuationTocCard(page);
+                const firstLine = card.querySelector('.docx-toc-line');
+                if (firstLine) card.insertBefore(line, firstLine);
+                else card.appendChild(line);
+                return true;
+            }
+        }
+
+        if (last.matches('table.docx-table') && !last.classList.contains('header-table') && last.rows.length > 1) {
+            const row = last.rows[last.rows.length - 1];
+            if (row.offsetHeight + 12 >= body.clientHeight && last.rows.length <= 2 && body.childElementCount === 1) {
+                return false;
+            }
+            const table = continuationTable(page, last);
+            const header = table.rows[0];
+            if (header && header !== row) header.after(row);
+            else table.appendChild(row);
+            return true;
+        }
+
+        if (last.matches('table.docx-table') && last.rows.length <= 1) {
+            const tIdx = last.getAttribute('data-table-index') || '';
+            const next = followingA4Page(page);
+            const moved = next
+                ? next.querySelector('table.docx-table[data-table-index="' + tIdx + '"]')
+                : null;
+            const named = last.querySelector('[name]');
+            if (!named && moved && moved.rows.length > 1) {
+                last.remove();
+                return true;
+            }
+            if (body.children.length === 1) return false;
+        }
+
+        const overflowPx = body.scrollHeight - body.clientHeight;
+        if (last.offsetHeight > Math.max(overflowPx, 0) + 48 && body.childElementCount > 1) {
+            return false;
+        }
+
+        const nextPage = followingA4Page(page) || createContinuationPage(page);
+        const nextBody = nextPage.querySelector('.docx-page-body');
+        nextBody.insertBefore(last, nextBody.firstChild);
+        return true;
+    }
+
+    function contentOverflows(pageBody) {
+        if (!pageBody) return false;
+        return pageEdge(pageBody) > pageBody.getBoundingClientRect().bottom + 6;
+    }
+
+    function pageEdge(pageBody) {
+        const last = pageBody.lastElementChild;
+        if (!last) return pageBody.getBoundingClientRect().top;
+        if (last.matches && last.matches('table.docx-table') && last.rows && last.rows.length) {
+            return last.rows[last.rows.length - 1].getBoundingClientRect().bottom;
+        }
+        if (last.classList && last.classList.contains('docx-toc-card')) {
+            const lines = last.querySelectorAll('.docx-toc-line');
+            if (lines.length) return lines[lines.length - 1].getBoundingClientRect().bottom;
+        }
+        return last.getBoundingClientRect().bottom;
+    }
+
+    function pageFreeSpace(pageBody) {
+        if (!pageBody) return 0;
+        return pageBody.getBoundingClientRect().bottom - 8 - pageEdge(pageBody);
+    }
+
+    function pageIsOverfull(pageBody) {
+        if (!pageBody) return false;
+        return pageEdge(pageBody) > pageBody.getBoundingClientRect().bottom - 2;
+    }
+
+    function rowLabel(row) {
+        return Array.from(row.cells || []).map(function (cell) {
+            return (cell.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        }).join('|');
+    }
+
+    function dropEmptySheet(page) {
+        const body = page.querySelector('.docx-page-body');
+        if (!body) return false;
+        Array.from(body.children).forEach(function (el) {
+            if (el.matches && el.matches('table.docx-table') && el.rows.length <= 1 && !el.querySelector('[name]')) {
+                el.remove();
+            }
+            if (el.classList && el.classList.contains('docx-toc-card') && !el.querySelector('.docx-toc-line')) {
+                el.remove();
+            }
+        });
+        if (body.children.length) return false;
+        const prev = page.previousElementSibling;
+        if (prev && prev.classList.contains('docx-page-break-indicator')) prev.remove();
+        page.remove();
+        return true;
+    }
+
+    function pullBlockBack(body, nextBody, el) {
+        const marker = el.nextSibling;
+        body.appendChild(el);
+        if (pageIsOverfull(body)) {
+            if (marker) nextBody.insertBefore(el, marker);
+            else nextBody.appendChild(el);
+            return false;
+        }
+        return true;
+    }
+
+    function pullTableRowBack(body, sourceTable) {
+        const head = sourceTable.rows[0] && sourceTable.rows[0].querySelector('th') ? sourceTable.rows[0] : null;
+        const row = head ? sourceTable.rows[1] : sourceTable.rows[0];
+        if (!row) {
+            if (!sourceTable.querySelector('[name]')) sourceTable.remove();
+            return true;
+        }
+        const last = body.lastElementChild;
+        const same = last && last.matches && last.matches('table.docx-table')
+            && (last.getAttribute('data-table-index') || '') === (sourceTable.getAttribute('data-table-index') || '');
+        if (same && rowLabel(row) && last.rows[0] && rowLabel(row) === rowLabel(last.rows[0])) {
+            row.remove();
+            return true;
+        }
+        if (!same && sourceTable.offsetHeight + 6 < pageFreeSpace(body)) {
+            return pullBlockBack(body, sourceTable.parentNode, sourceTable);
+        }
+        let target = same ? last : null;
+        let created = false;
+        if (!target) {
+            target = document.createElement('table');
+            target.className = sourceTable.className;
+            const tIdx = sourceTable.getAttribute('data-table-index') || '';
+            if (tIdx) target.setAttribute('data-table-index', tIdx);
+            if (head) {
+                const clone = head.cloneNode(true);
+                clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+                clone.querySelectorAll('[name]').forEach(function (el) { el.removeAttribute('name'); });
+                target.appendChild(clone);
+            }
+            body.appendChild(target);
+            created = true;
+        }
+        const marker = row.nextSibling;
+        target.appendChild(row);
+        if (pageIsOverfull(body)) {
+            if (marker) sourceTable.insertBefore(row, marker);
+            else sourceTable.appendChild(row);
+            if (created) target.remove();
+            return false;
+        }
+        const leftoverHead = sourceTable.rows.length === 1 && sourceTable.rows[0].querySelector('th') && !sourceTable.querySelector('[name]');
+        if (!sourceTable.rows.length || leftoverHead) sourceTable.remove();
+        return true;
+    }
+
+    function pullOneBack(page) {
+        const body = page.querySelector('.docx-page-body');
+        const next = followingA4Page(page);
+        if (!body || !next || pageFreeSpace(body) < 28) return false;
+        const nextBody = next.querySelector('.docx-page-body');
+        const first = nextBody && nextBody.firstElementChild;
+        if (!first) return false;
+        if (first.matches('table.docx-table') && !first.classList.contains('header-table')) {
+            return pullTableRowBack(body, first);
+        }
+        if (first.classList.contains('docx-toc-card')) {
+            const line = first.querySelector('.docx-toc-line');
+            const last = body.lastElementChild;
+            if (line && last && last.classList.contains('docx-toc-card') && first.offsetHeight + 6 >= pageFreeSpace(body)) {
+                const marker = line.nextSibling;
+                last.appendChild(line);
+                if (pageIsOverfull(body)) {
+                    if (marker) first.insertBefore(line, marker);
+                    else first.appendChild(line);
+                    return false;
+                }
+                if (!first.querySelector('.docx-toc-line')) first.remove();
+                return true;
+            }
+        }
+        return pullBlockBack(body, nextBody, first);
+    }
+
+    function fillPageGaps() {
+        let page = document.querySelector('.docx-preview .docx-a4-page');
+        let pulls = 0;
+        while (page && pulls < 700) {
+            const next = followingA4Page(page);
+            if (!next) break;
+            if (pageFreeSpace(page.querySelector('.docx-page-body')) < 28 || !pullOneBack(page)) {
+                page = next;
+                continue;
+            }
+            pulls++;
+            dropEmptySheet(next);
+        }
+    }
+
+    function paginateDocxPreview() {
+        document.querySelectorAll('.docx-preview textarea').forEach(function (el) {
+            el.style.height = 'auto';
+            el.style.height = el.scrollHeight + 'px';
+        });
+        const first = document.querySelector('.docx-preview .docx-a4-page');
+        if (!first) return;
+        const firstBody = first.querySelector('.docx-page-body');
+        if (!firstBody || firstBody.clientHeight < 80) return;
+
+        fillPageGaps();
+
+        let page = document.querySelector('.docx-preview .docx-a4-page');
+        let moves = 0;
+        while (page && moves < 250) {
+            const pageBody = page.querySelector('.docx-page-body');
+            if (!contentOverflows(pageBody)) {
+                page = followingA4Page(page);
+                continue;
+            }
+            const before = pageBody.scrollHeight;
+            const beforeLast = pageBody.lastElementChild;
+            const beforeRow = beforeLast && beforeLast.rows ? beforeLast.rows[beforeLast.rows.length - 1] : null;
+            if (!spillOneBlock(page)) {
+                page = followingA4Page(page);
+                continue;
+            }
+            moves++;
+            const rowStillHere = beforeRow && pageBody.contains(beforeRow);
+            if (contentOverflows(pageBody) && rowStillHere && pageBody.scrollHeight >= before) {
+                page = followingA4Page(page);
+            }
+        }
+
+        document.querySelectorAll('.docx-preview .docx-a4-page').forEach(function (sheet) {
+            const sheetBody = sheet.querySelector('.docx-page-body');
+            const tail = sheetBody && sheetBody.lastElementChild;
+            if (!tail || !tail.matches('table.docx-table') || tail.rows.length > 1) return;
+            const tIdx = tail.getAttribute('data-table-index') || '';
+            const next = followingA4Page(sheet);
+            const moved = next
+                ? next.querySelector('.docx-page-body table.docx-table[data-table-index="' + tIdx + '"]')
+                : null;
+            if (moved && moved.rows.length > 1 && !tail.querySelector('[name]')) tail.remove();
+        });
+        updateAllPageNumbers();
+    }
+
+    window.paginateDocxPreview = paginateDocxPreview;
+
+    function unlockDeviationColumns() {
+        document.querySelectorAll('.docx-preview table.docx-table').forEach(function (table) {
+            const header = table.rows[0];
+            if (!header) return;
+            const headers = Array.from(header.cells).map(function (cell) {
+                return (cell.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            });
+            const devIdx = headers.findIndex(function (text) { return text.indexOf('deviation') !== -1; });
+            if (devIdx < 0 || headers.every(function (text) { return text.indexOf('corrective') === -1; })) return;
+            Array.from(table.rows).forEach(function (row, rowIndex) {
+                if (rowIndex === 0) return;
+                const cell = row.cells[devIdx];
+                if (!cell || cell.querySelector('textarea, input.docx-input')) return;
+                const loc = cell.getAttribute('data-field')
+                    || ('table_' + (table.getAttribute('data-table-index') || '0') + '_row_' + rowIndex + '_col_' + devIdx);
+                const current = (cell.textContent || '').replace(/\s+/g, ' ').trim();
+                const value = (current === '—' || current === '-' || current === '–') ? '' : current;
+                cell.classList.add('editable');
+                cell.classList.remove('readonly', 'locked');
+                cell.innerHTML = '<textarea name="fields[' + loc + ']" class="docx-input" rows="2" placeholder="Enter deviation...">'
+                    + value.replace(/[&<>]/g, function (ch) {
+                        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch];
+                    })
+                    + '</textarea>';
+            });
+        });
+    }
+
+    let paginateFrame = null;
+    function scheduleDocxPaginate() {
+        if (paginateFrame) cancelAnimationFrame(paginateFrame);
+        paginateFrame = requestAnimationFrame(function () {
+            unlockDeviationColumns();
+            paginateDocxPreview();
+        });
+    }
+    window.scheduleDocxPaginate = scheduleDocxPaginate;
+
+    document.addEventListener('input', function (event) {
+        const el = event.target;
+        if (!el || !el.matches || !el.matches('.docx-preview textarea')) return;
+        el.style.height = 'auto';
+        el.style.height = el.scrollHeight + 'px';
+        const page = el.closest('.docx-a4-page');
+        if (page) reflowPageOverflow(page);
+    });
+
     if (isPreApprovalMode) {
         const rowInfo = document.getElementById('selectedRowInfo');
         const btnAddRow = document.getElementById('btnDocxAddRow');
@@ -1019,7 +1944,6 @@ document.addEventListener('DOMContentLoaded', function () {
             if (rowInfo) {
                 const tIdx = selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable);
                 const rIdx = selectedRow.getAttribute('data-row-index') || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow);
-                // rowInfo.innerHTML = '<span class="text-primary font-weight-bold">Selected Table ' + (parseInt(tIdx) + 1) + ', Row ' + (parseInt(rIdx) + 1) + '</span> — Ready to Add or Delete.';
             }
         });
 
@@ -1039,43 +1963,50 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 let templateRow = selectedRow;
-                if (Array.from(selectedTable.querySelectorAll('tr')).indexOf(templateRow) === 0) {
-                    const allRows = selectedTable.querySelectorAll('tr');
-                    if (allRows.length > 1) {
-                        templateRow = allRows[1];
-                    }
+                if (templateRow.querySelector('th')) {
+                    const nextData = templateRow.nextElementSibling;
+                    if (nextData) templateRow = nextData;
                 }
 
                 const newRow = templateRow.cloneNode(true);
                 newRow.classList.remove('docx-selected-row');
                 newRow.setAttribute('data-is-added-row', '1');
+                newRow.removeAttribute('data-row-index');
 
-                // Clear input values in cloned row
-                newRow.querySelectorAll('input[type="text"], textarea').forEach(function (inp) {
-                    inp.value = '';
-                    inp.name = 'fields[new_row_' + Math.random().toString(36).substring(2, 9) + ']';
+                newRow.querySelectorAll('input, textarea').forEach(function (inp) {
+                    const token = 'new_row_' + Math.random().toString(36).substring(2, 9);
+                    if (inp.type === 'radio' || inp.type === 'checkbox') {
+                        inp.checked = false;
+                    } else if (inp.type !== 'file') {
+                        inp.value = '';
+                    } else {
+                        inp.value = '';
+                    }
+                    if (inp.type !== 'file') {
+                        inp.name = 'fields[' + token + ']';
+                    }
                     inp.removeAttribute('readonly');
                     inp.disabled = false;
-                });
-                newRow.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(function (chk) {
-                    chk.checked = false;
                 });
                 newRow.querySelectorAll('select').forEach(function (sel) {
                     sel.selectedIndex = 0;
                     sel.disabled = false;
+                    sel.name = 'fields[new_row_' + Math.random().toString(36).substring(2, 9) + ']';
+                });
+                newRow.querySelectorAll('.docx-attachment-link, .docx-saved-file').forEach(function (el) {
+                    el.remove();
                 });
                 newRow.querySelectorAll('.locked').forEach(function (el) {
                     el.classList.remove('locked');
                     el.classList.add('editable');
                 });
                 newRow.querySelectorAll('td').forEach(function (td) {
-                    if (!td.querySelector('input, textarea, select')) {
-                        td.innerHTML = '<input type="text" class="docx-input" value="">';
-                        td.classList.add('editable');
-                    }
+                    if (td.querySelector('input, textarea, select')) return;
+                    td.textContent = '';
+                    td.innerHTML = '<input type="text" class="docx-input" name="fields[new_row_' + Math.random().toString(36).substring(2, 9) + ']" value="">';
+                    td.classList.add('editable');
                 });
 
-                // Insert after currently selected row
                 selectedRow.after(newRow);
 
                 const tIdx = parseInt(selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable));
@@ -1101,6 +2032,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 syncTableOpsInput();
 
+                reflowPageOverflow(selectedRow.closest('.docx-a4-page'));
+                const addedPage = newRow.closest('.docx-a4-page');
+                if (addedPage && addedPage !== selectedRow.closest('.docx-a4-page')) {
+                    reflowPageOverflow(addedPage);
+                }
+                newRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+
                 if (rowInfo) {
                     rowInfo.innerHTML = '<span class="text-success font-weight-bold">Row Added!</span> Type text into the new cells.';
                 }
@@ -1116,7 +2054,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     alert('Please click on a row inside a table first to select it.');
                     return;
                 }
-                if (Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow) === 0) {
+                if (selectedRow.querySelector('th')) {
                     alert('Cannot delete the table header row.');
                     return;
                 }
@@ -1124,7 +2062,17 @@ document.addEventListener('DOMContentLoaded', function () {
                     alert('Cannot delete a section banner row.');
                     return;
                 }
-                if (selectedTable.querySelectorAll('tr').length <= 2) {
+                const sameIndex = selectedTable.getAttribute('data-table-index');
+                const siblingTables = sameIndex === null
+                    ? [selectedTable]
+                    : Array.from(document.querySelectorAll('table.docx-table[data-table-index="' + sameIndex + '"]'));
+                let dataRowCount = 0;
+                siblingTables.forEach(function (table) {
+                    Array.from(table.rows).forEach(function (row) {
+                        if (!row.querySelector('th')) dataRowCount++;
+                    });
+                });
+                if (dataRowCount <= 1) {
                     alert('Cannot delete the last remaining data row of this table.');
                     return;
                 }
@@ -1132,6 +2080,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (!confirm('Are you sure you want to delete this row?')) {
                     return;
                 }
+
+                const parentPage = selectedRow.closest('.docx-a4-page');
 
                 if (selectedRow.getAttribute('data-is-added-row') === '1') {
                     tableOps = tableOps.filter(function (op) {
@@ -1157,6 +2107,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 selectedRow = null;
                 selectedTable = null;
                 syncTableOpsInput();
+
+                if (parentPage) {
+                    let guard = 0;
+                    while (pageFreeSpace(parentPage.querySelector('.docx-page-body')) >= 28 && pullOneBack(parentPage) && guard < 40) {
+                        guard++;
+                    }
+                    const nextSheet = followingA4Page(parentPage);
+                    if (nextSheet) dropEmptySheet(nextSheet);
+                    updateAllPageNumbers();
+                }
+
                 if (rowInfo) {
                     rowInfo.textContent = 'Row deleted. Click any cell to select another row.';
                 }
@@ -1657,6 +2618,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 const labelEdit = fileInput.closest('td')?.querySelector('input.docx-attachment-label-edit');
                 if (hidden) hidden.value = name;
                 if (labelEdit) labelEdit.value = name;
+                const cell = fileInput.closest('td');
+                if (cell && !cell.querySelector('a.docx-attachment-link')) {
+                    const link = document.createElement('a');
+                    link.className = 'docx-attachment-link';
+                    link.href = '#';
+                    link.textContent = name;
+                    cell.insertBefore(link, cell.firstChild);
+                } else if (cell) {
+                    const link = cell.querySelector('a.docx-attachment-link');
+                    if (link) link.textContent = name;
+                }
+                if (typeof window.scheduleDocxPaginate === 'function') window.scheduleDocxPaginate();
             });
         });
     };
@@ -1670,7 +2643,7 @@ document.addEventListener('DOMContentLoaded', function () {
     bindAttachmentFields();
 
     if (form && btnSubmit) {
-        form.addEventListener('submit', function () {
+        const preparePreSubmitFields = function () {
             if (window.syncDocxTableOps) {
                 window.syncDocxTableOps();
             }
@@ -1683,6 +2656,11 @@ document.addEventListener('DOMContentLoaded', function () {
                     sel.removeAttribute('required');
                     sel.required = false;
                 });
+            }
+        };
+
+        const applySubmittingUi = function () {
+            if (form.querySelector('input[name="requal_pre_submit"]')) {
                 if (btnText) btnText.innerText = 'Sending for pre-approval...';
                 const icon = btnSubmit.querySelector('i');
                 if (icon) icon.className = 'spinner-border spinner-border-sm mr-1';
@@ -1695,6 +2673,19 @@ document.addEventListener('DOMContentLoaded', function () {
             if (btnText) btnText.innerText = 'Filling Document, please wait...';
             const icon = btnSubmit.querySelector('i');
             if (icon) icon.className = 'spinner-border spinner-border-sm mr-1';
+        };
+
+        form.addEventListener('submit', function () {
+            preparePreSubmitFields();
+            // Do not lock #btnSubmit before #esignModal confirms; esign:confirmed locks it right before POST.
+            if (!form.classList.contains('esign-required')) {
+                applySubmittingUi();
+            }
+        });
+
+        form.addEventListener('esign:confirmed', function () {
+            preparePreSubmitFields();
+            applySubmittingUi();
         });
     }
 
@@ -1846,61 +2837,120 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    const syncMappingToHeader = function (mappingId, headerId, fieldName) {
-        if (!fieldName) return;
-        const mapping = document.getElementById(mappingId);
-        const header  = document.getElementById(headerId);
-        const hidden  = document.querySelector('[name="fields[' + fieldName + ']"]');
-        if (!mapping) return;
-        const apply = function () {
-            if (header) header.value = mapping.value;
-            if (hidden) hidden.value = mapping.value;
-        };
-        mapping.addEventListener('input', apply);
-        apply();
-    };
-    const syncMappingToHidden = function (mappingId, hiddenId) {
-        const mapping = document.getElementById(mappingId);
-        const hidden  = document.getElementById(hiddenId);
-        if (!mapping || !hidden) return;
-        const apply = function () { hidden.value = mapping.value; };
-        mapping.addEventListener('input', apply);
-        apply();
-    };
-    const syncMappingToField = function (mappingId, fieldName) {
-        const mapping = document.getElementById(mappingId);
-        const hidden  = document.querySelector('[name="fields[' + fieldName + ']"]');
-        if (!mapping || !fieldName) return;
-        const apply = function () {
-            if (hidden) hidden.value = mapping.value;
-        };
-        mapping.addEventListener('input', apply);
-        apply();
+    const syncLetterheadCells = function (letterheadKey, value) {
+        if (!letterheadKey) return;
+        const text = value == null ? '' : String(value).trim();
+        document
+            .querySelectorAll('.docx-page-official-header td[data-letterhead-field="' + letterheadKey + '"]')
+            .forEach(function (td) {
+                td.textContent = text;
+            });
     };
 
-    {{-- if (coverLocations.facility_section) {
-        syncMappingToField('fill_facility_section', coverLocations.facility_section);
-    } --}}
-    if (coverLocations.equipment_name) {
-        syncMappingToField('fill_equipment_name', coverLocations.equipment_name);
-        syncMappingToHeader('fill_equipment_name', 'header_equipment_name', coverLocations.equipment_name);
+    const syncMappingToHeader = function (mappingId, headerId, fieldNames, letterheadKey) {
+        const mapping = mappingId ? document.getElementById(mappingId) : null;
+        const header  = headerId ? document.getElementById(headerId) : null;
+        const targets = [];
+        (Array.isArray(fieldNames) ? fieldNames : [fieldNames]).forEach(function (fname) {
+            if (!fname) return;
+            document.querySelectorAll('[name="fields[' + fname + ']"]').forEach(function (el) {
+                if (el !== header && !targets.includes(el)) {
+                    targets.push(el);
+                }
+            });
+        });
+
+        // Recover initial value from header or cover field if mapping input loaded blank
+        const firstFilledTarget = targets.find(function (t) { return (t.value || '').trim() !== ''; });
+        const initial = (mapping && mapping.value.trim() !== '')
+            ? mapping.value
+            : ((header && header.value.trim() !== '') ? header.value : (firstFilledTarget ? firstFilledTarget.value : ''));
+
+        if (initial !== '') {
+            if (mapping && mapping.value !== initial) mapping.value = initial;
+            if (header && header.value !== initial) header.value = initial;
+        }
+
+        const propagate = function (val, sourceEl) {
+            if (mapping && sourceEl !== mapping) mapping.value = val;
+            if (header && sourceEl !== header) header.value = val;
+            targets.forEach(function (el) {
+                if (el !== sourceEl) el.value = val;
+            });
+            syncLetterheadCells(letterheadKey, val);
+        };
+
+        if (mapping) {
+            const onMapping = function () { propagate(mapping.value, mapping); };
+            mapping.addEventListener('input', onMapping);
+            mapping.addEventListener('change', onMapping);
+        }
+        if (header) {
+            const onHeader = function () { propagate(header.value, header); };
+            header.addEventListener('input', onHeader);
+            header.addEventListener('change', onHeader);
+        }
+        targets.forEach(function (el) {
+            const onTarget = function () { propagate(el.value, el); };
+            el.addEventListener('input', onTarget);
+            el.addEventListener('change', onTarget);
+        });
+
+        propagate(mapping ? mapping.value : (header ? header.value : initial), null);
+    };
+
+    syncMappingToHeader(
+        'fill_equipment_name',
+        'header_equipment_name',
+        ['header_0_row_2_col_4', coverLocations.equipment_name],
+        'equipment_name'
+    );
+    syncMappingToHeader(
+        'fill_equipment_id',
+        'header_equipment_id',
+        ['header_0_row_3_col_4', coverLocations.equipment_id],
+        'equipment_id'
+    );
+    syncMappingToHeader(
+        'fill_protocol_document_no',
+        'header_doc_number',
+        ['header_0_row_4_col_2', coverLocations.document_no],
+        'document_no'
+    );
+    syncMappingToHeader(
+        'fill_reference_protocol_no',
+        'header_ref_protocol',
+        ['header_ref_protocol', coverLocations.reference_protocol_no],
+        'reference_protocol_no'
+    );
+
+    const headerFacilityHidden = document.getElementById('header_facility_hidden');
+    if (headerFacilityHidden && headerFacilityHidden.value.trim() !== '') {
+        syncLetterheadCells('facility_section', headerFacilityHidden.value);
     }
-    if (coverLocations.equipment_id) {
-        syncMappingToField('fill_equipment_id', coverLocations.equipment_id);
-        syncMappingToHeader('fill_equipment_id', 'header_equipment_id', coverLocations.equipment_id);
+    const headerVersionHidden = document.getElementById('header_version_hidden');
+    if (headerVersionHidden && headerVersionHidden.value.trim() !== '') {
+        syncLetterheadCells('version', headerVersionHidden.value);
     }
-    syncMappingToHeader('fill_protocol_document_no', 'header_doc_number', 'header_0_row_4_col_2');
-    syncMappingToField('fill_protocol_document_no', coverLocations.document_no || 'header_0_row_4_col_2');
-    syncMappingToHeader('fill_reference_protocol_no', 'header_ref_protocol', 'header_ref_protocol');
-    syncMappingToField('fill_reference_protocol_no', coverLocations.reference_protocol_no || 'header_ref_protocol');
+
     const documentTitleLocation = @json($documentTitleLocation ?? null);
     const fillDocumentTitle = document.getElementById('fill_document_title');
-    if (documentTitleLocation && fillDocumentTitle) {
-        const previewTitle = document.querySelector('[name="fields[' + documentTitleLocation + ']"]');
+    if (fillDocumentTitle) {
+        const previewTitle = documentTitleLocation
+            ? document.querySelector('[name="fields[' + documentTitleLocation + ']"]')
+            : null;
+        const summaryTitleEl = document.getElementById('header_summary_title');
+        const summaryBannerEl = document.getElementById('header_summary_banner');
+        const defaultSummaryTitle = summaryTitleEl ? summaryTitleEl.textContent : '';
         const applyDocumentTitle = function () {
-            if (previewTitle) previewTitle.value = fillDocumentTitle.value;
+            const titleVal = fillDocumentTitle.value;
+            if (previewTitle) previewTitle.value = titleVal;
+            const effectiveTitle = titleVal.trim() !== '' ? titleVal.trim() : defaultSummaryTitle;
+            if (summaryTitleEl && effectiveTitle) summaryTitleEl.textContent = effectiveTitle;
+            if (summaryBannerEl && effectiveTitle) summaryBannerEl.textContent = effectiveTitle.toUpperCase();
         };
         fillDocumentTitle.addEventListener('input', applyDocumentTitle);
+        fillDocumentTitle.addEventListener('change', applyDocumentTitle);
         if (!fillDocumentTitle.value && previewTitle && previewTitle.value) {
             fillDocumentTitle.value = previewTitle.value;
         }
@@ -2028,6 +3078,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (hidden) hidden.value = info.name || hidden.value;
         const fileInput = cell.querySelector('input[type="file"]');
         if (fileInput) fileInput.value = '';
+        if (typeof window.scheduleDocxPaginate === 'function') window.scheduleDocxPaginate();
     };
 
     const saveDraftNow = function (opts) {
@@ -2137,6 +3188,14 @@ document.addEventListener('DOMContentLoaded', function () {
             scheduleDraftSave();
         });
         form.addEventListener('submit', function () {
+            if (draftTimer) {
+                clearTimeout(draftTimer);
+            }
+            if (!form.classList.contains('esign-required')) {
+                finalSubmitting = true;
+            }
+        });
+        form.addEventListener('esign:confirmed', function () {
             finalSubmitting = true;
             if (draftTimer) {
                 clearTimeout(draftTimer);
@@ -2441,6 +3500,107 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     })();
     @endif
+
+    /* ── DOCX A4 Page Navigator ── */
+    (function () {
+        const navEl = document.getElementById('docxPageNavigator');
+        if (!navEl) return;
+
+        const selectJump = document.getElementById('docxSelectPageJump');
+        const btnPrev = document.getElementById('btnDocxPrevPage');
+        const btnNext = document.getElementById('btnDocxNextPage');
+        if (typeof window.scheduleDocxPaginate === 'function') {
+            window.scheduleDocxPaginate();
+        } else if (typeof window.paginateDocxPreview === 'function') {
+            window.paginateDocxPreview();
+        }
+        const pageList = function () {
+            return Array.from(document.querySelectorAll('.docx-a4-page'));
+        };
+        const pages = pageList();
+
+        if (!pages.length) {
+            navEl.style.display = 'none';
+            return;
+        }
+
+        const totalPages = pages.length;
+        if (selectJump) {
+            selectJump.innerHTML = '';
+            pages.forEach(function (page, idx) {
+                const pageNum = idx + 1;
+                const opt = document.createElement('option');
+                opt.value = String(pageNum);
+                opt.textContent = 'Page ' + pageNum + ' of ' + totalPages;
+                selectJump.appendChild(opt);
+            });
+
+            selectJump.addEventListener('change', function () {
+                const targetNum = parseInt(selectJump.value, 10);
+                const targetPage = document.getElementById('docxPage' + targetNum) || pages[targetNum - 1];
+                if (targetPage) {
+                    targetPage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        }
+
+        const getCurrentPageIndex = function () {
+            const pagesNow = pageList();
+            const scrollPos = window.scrollY + 180;
+            let currentIdx = 0;
+            for (let i = 0; i < pagesNow.length; i++) {
+                const top = pagesNow[i].getBoundingClientRect().top + window.scrollY;
+                if (top <= scrollPos) {
+                    currentIdx = i;
+                } else {
+                    break;
+                }
+            }
+            return currentIdx;
+        };
+
+        if (btnPrev) {
+            btnPrev.addEventListener('click', function () {
+                const pagesNow = pageList();
+                const curr = getCurrentPageIndex();
+                if (curr > 0) {
+                    pagesNow[curr - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        }
+
+        if (btnNext) {
+            btnNext.addEventListener('click', function () {
+                const pagesNow = pageList();
+                const curr = getCurrentPageIndex();
+                if (curr < pagesNow.length - 1) {
+                    pagesNow[curr + 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        }
+
+        let scrollTimer = null;
+        window.addEventListener('scroll', function () {
+            if (scrollTimer) clearTimeout(scrollTimer);
+            scrollTimer = setTimeout(function () {
+                const curr = getCurrentPageIndex();
+                if (selectJump && selectJump.value !== String(curr + 1)) {
+                    selectJump.value = String(curr + 1);
+                }
+            }, 100);
+        }, { passive: true });
+
+        setTimeout(function () {
+            if (typeof window.scheduleDocxPaginate === 'function') {
+                window.scheduleDocxPaginate();
+            } else if (typeof window.paginateDocxPreview === 'function') {
+                window.paginateDocxPreview();
+            }
+            if (typeof window.updateAllPageNumbers === 'function') {
+                window.updateAllPageNumbers();
+            }
+        }, 300);
+    })();
 });
 </script>
 @endsection

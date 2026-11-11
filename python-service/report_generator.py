@@ -928,6 +928,32 @@ def _apply_single_field(
 
     try:
         if location.startswith("toc_sdt_"):
+            m_sdt_title = re.match(r"^toc_sdt_(\d+)_title$", location)
+            if m_sdt_title:
+                sdt_idx = int(m_sdt_title.group(1))
+                W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                sdt_paras = doc._element.xpath("//w:sdt//w:p")
+                if sdt_idx < len(sdt_paras):
+                    p_el = sdt_paras[sdt_idx]
+                    t_nodes = p_el.findall(f".//{{{W_NS}}}t")
+                    if t_nodes:
+                        page_node_idx = -1
+                        for i in range(len(t_nodes) - 1, -1, -1):
+                            if re.search(r"\d+\s*$", t_nodes[i].text or ""):
+                                page_node_idx = i
+                                break
+                        if page_node_idx == 0 and len(t_nodes) == 1:
+                            m = re.search(r"\d+\s*$", t_nodes[0].text or "")
+                            pg = m.group(0) if m else ""
+                            t_nodes[0].text = f"{value}\t{pg}"
+                        else:
+                            t_nodes[0].text = str(value)
+                            for i in range(1, page_node_idx if page_node_idx > 0 else len(t_nodes)):
+                                txt = t_nodes[i].text or ""
+                                m_dots = re.search(r"([\.\u2026\u22ef\t\s]+)$", txt)
+                                t_nodes[i].text = m_dots.group(1) if m_dots else ""
+                return
+
             m_sdt = re.match(r"^toc_sdt_(\d+)$", location)
             if m_sdt:
                 sdt_idx = int(m_sdt.group(1))
@@ -943,6 +969,36 @@ def _apply_single_field(
             return
 
         elif location.startswith("table") and "_toc_" in location:
+            m_tbl_title = re.match(r"^table_(\d+)_row_(\d+)_toc_(\d+)_title$", location)
+            if m_tbl_title:
+                t_i = int(m_tbl_title.group(1))
+                r_i = int(m_tbl_title.group(2))
+                l_i = int(m_tbl_title.group(3))
+                if t_i < len(doc.tables) and r_i < len(doc.tables[t_i].rows):
+                    cell = doc.tables[t_i].rows[r_i].cells[0]
+                    paras = cell.paragraphs
+                    if l_i < len(paras):
+                        p_el = paras[l_i]._element
+                        W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        t_nodes = p_el.findall(f".//{{{W_NS}}}t")
+                        if t_nodes:
+                            page_node_idx = -1
+                            for i in range(len(t_nodes) - 1, -1, -1):
+                                if re.search(r"\d+\s*$", t_nodes[i].text or ""):
+                                    page_node_idx = i
+                                    break
+                            if page_node_idx == 0 and len(t_nodes) == 1:
+                                m = re.search(r"\d+\s*$", t_nodes[0].text or "")
+                                pg = m.group(0) if m else ""
+                                t_nodes[0].text = f"{value}\t{pg}"
+                            else:
+                                t_nodes[0].text = str(value)
+                                for i in range(1, page_node_idx if page_node_idx > 0 else len(t_nodes)):
+                                    txt = t_nodes[i].text or ""
+                                    m_dots = re.search(r"([\.\u2026\u22ef\t\s]+)$", txt)
+                                    t_nodes[i].text = m_dots.group(1) if m_dots else ""
+                return
+
             m_tbl_toc = re.match(r"^table_(\d+)_row_(\d+)_toc_(\d+)$", location)
             if m_tbl_toc:
                 t_i = int(m_tbl_toc.group(1))
@@ -1504,6 +1560,19 @@ def fill_docx(
         from neq_docx_save import _apply_table_ops
         _apply_table_ops(doc, table_ops)
 
+    # Ensure table header row repeats across pages on multi-row tables in Word
+    try:
+        from docx.oxml import OxmlElement
+        W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        for tbl in doc.tables:
+            if len(tbl.rows) > 1:
+                r0 = tbl.rows[0]._tr
+                trPr = r0.get_or_add_trPr()
+                if not trPr.findall(f".//{{{W_NS}}}tblHeader"):
+                    trPr.append(OxmlElement("w:tblHeader"))
+    except Exception:
+        pass
+
     add_footer_to_doc(doc)
     doc.save(output_path)
     # Restore original header XML so logos and images are not lost after body fill.
@@ -1725,9 +1794,12 @@ def _clamp_paragraph_inside_cell(para) -> None:
 
 
 def add_footer_to_doc(doc) -> None:
-    """Write only the annex reference line in the document footer (no toolbar note)."""
+    """Only write default annex line if the document section footer has no paragraphs."""
     for section in doc.sections:
         footer = section.footer
+        if footer and any(p.text.strip() for p in footer.paragraphs):
+            # Template already has official footer paragraphs (including Page numbering) — preserve it.
+            continue
         footer.is_linked_to_previous = False
         while footer.paragraphs:
             element = footer.paragraphs[0]._element
@@ -1769,13 +1841,13 @@ def _pin_annex_footer_inside_page(doc) -> None:
             section.bottom_margin = Pt(72)
 
 
-# Copy header*.xml parts from the template zip back into the filled output zip.
+# Copy header*.xml and footer*.xml parts from the template zip back into the filled output zip.
 def _restore_header_parts(template_path: str, output_path: str) -> None:
     with zipfile.ZipFile(template_path, "r") as tpl_zip:
         template_parts = {
             name: tpl_zip.read(name)
             for name in tpl_zip.namelist()
-            if name.startswith("word/header") and name.endswith(".xml")
+            if (name.startswith("word/header") or name.startswith("word/footer")) and name.endswith(".xml")
         }
     if not template_parts:
         return

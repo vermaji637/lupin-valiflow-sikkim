@@ -376,19 +376,172 @@
     body.premium-app #reportReadonlyBody .docx-preview-wrapper {
         overflow-x: auto;
         overflow-y: visible;
-        background: #fff;
-        border: 1px solid #dee2e6;
+        background: #525659;
+        border: 1px solid #334155;
         border-radius: 8px;
-        padding: 24px;
+        padding: 28px 16px;
         min-height: 200px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-preview {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-a4-page {
+        width: 210mm;
+        max-width: 100%;
+        min-height: 297mm;
+        max-height: 297mm;
+        height: 297mm;
+        background: #ffffff !important;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.16);
+        border-radius: 2px;
+        padding: 10mm 14mm 10mm 14mm;
+        margin-bottom: 24px;
+        position: relative;
+        box-sizing: border-box;
+        font-family: inherit;
+        break-after: page;
+        page-break-after: always;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: hidden;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-body {
+        flex: 1 1 auto;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-body > * {
+        flex-shrink: 0;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-official-header {
+        width: 100%;
+        margin-bottom: 8px;
+        flex-shrink: 0;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-official-header table.header-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 0;
+        table-layout: fixed;
+        background: #ffffff;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-official-header table.header-table td {
+        border: 1px solid #334155 !important;
+        padding: 3px 6px !important;
+        font-size: 11px !important;
+        vertical-align: middle !important;
+        line-height: 1.25;
+        background: #ffffff;
+        color: #0f172a;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-summary-header-card {
+        width: 210mm;
+        max-width: 100%;
+        background: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 12px 14px;
+        margin: 0 auto 20px auto;
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22);
+        box-sizing: border-box;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-summary-header-card table.header-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 0;
+        background: #ffffff !important;
+        color: #0f172a !important;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-summary-header-card table.header-table td {
+        border: 1px solid #cbd5e1 !important;
+        padding: 8px 10px !important;
+        color: #0f172a !important;
+        font-size: 13px !important;
+        line-height: 1.4;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-official-footer {
+        width: 100%;
+        margin-top: auto;
+        padding-top: 6px;
+        border-top: 1.5px solid #64748b;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 10px;
+        font-weight: 600;
+        color: #475569;
+        flex-shrink: 0;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-break-indicator {
+        display: flex;
+        align-items: center;
+        width: 210mm;
+        max-width: 100%;
+        margin: 4px 0 20px 0;
+        user-select: none;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-break-line {
+        flex-grow: 1;
+        border-top: 2px dashed #94a3b8;
+        height: 0;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-break-badge {
+        background: #1e293b;
+        color: #f8fafc;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 16px;
+        border-radius: 14px;
+        margin: 0 14px;
+        letter-spacing: 0.5px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+        white-space: nowrap;
+    }
+    @media print {
+        body.premium-app #reportReadonlyBody .docx-preview-wrapper {
+            background: transparent !important;
+            padding: 0 !important;
+            border: none !important;
+        }
+        body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-a4-page {
+            box-shadow: none !important;
+            margin: 0 !important;
+            padding: 12mm !important;
+            width: 100% !important;
+            min-height: auto !important;
+            page-break-after: always !important;
+            break-after: page !important;
+        }
+        .no-print,
+        .docx-page-break-indicator,
+        .docx-page-header-info {
+            display: none !important;
+        }
     }
     body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table {
         display: table !important;
         width: 100%;
+        max-width: 100%;
         border-collapse: collapse;
         margin-bottom: 16px;
         font-size: 13px;
-        table-layout: auto;
+        table-layout: fixed;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table.header-table {
+        table-layout: fixed;
+        margin-bottom: 0;
     }
     body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table tr {
         display: table-row !important;
@@ -396,6 +549,10 @@
     body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table td,
     body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table th {
         display: table-cell !important;
+        min-width: 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
     body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table.header-table {
         margin-bottom: 0;
@@ -460,6 +617,9 @@
                       var el = document.getElementById('ap-preview');
                       if (el && d.html) {
                           el.innerHTML = d.html;
+                          if (typeof window.paginateReadonlyPreview === 'function') {
+                              window.paginateReadonlyPreview();
+                          }
                       } else if (el) {
                           el.innerHTML = '<div class="alert alert-info mb-0"><i class="fas fa-file-word mr-2"></i>DOCX import report — preview unavailable. Use Download Filled DOCX above.</div>';
                       }
@@ -815,6 +975,303 @@ document.addEventListener('DOMContentLoaded', function () {
         a.style.cursor = 'pointer';
         a.setAttribute('contenteditable', 'false');
     });
+
+    function followingPage(page) {
+        let next = page ? page.nextElementSibling : null;
+        while (next && !next.classList.contains('docx-a4-page')) next = next.nextElementSibling;
+        return next;
+    }
+
+    function updatePageNumbers() {
+        const pages = Array.from(wrap.querySelectorAll('.docx-a4-page'));
+        const total = pages.length;
+        pages.forEach(function (page, idx) {
+            const num = idx + 1;
+            page.id = 'docxPage' + num;
+            page.setAttribute('data-page-number', String(num));
+            page.querySelectorAll('.current-page-num').forEach(function (el) { el.textContent = String(num); });
+            page.querySelectorAll('.total-pages-count').forEach(function (el) { el.textContent = String(total); });
+        });
+        wrap.querySelectorAll('.docx-page-break-badge').forEach(function (badge, idx) {
+            badge.textContent = 'Page ' + (idx + 2);
+        });
+    }
+
+    function continuationPage(sourcePage) {
+        const existing = followingPage(sourcePage);
+        if (existing) return existing;
+        const page = document.createElement('div');
+        page.className = 'docx-a4-page';
+        const header = sourcePage.querySelector('.docx-page-official-header');
+        if (header) {
+            const clone = header.cloneNode(true);
+            clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+            page.appendChild(clone);
+        }
+        const body = document.createElement('div');
+        body.className = 'docx-page-body';
+        page.appendChild(body);
+        const footer = sourcePage.querySelector('.docx-page-official-footer');
+        if (footer) {
+            const clone = footer.cloneNode(true);
+            clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+            page.appendChild(clone);
+        }
+        const divider = document.createElement('div');
+        divider.className = 'docx-page-break-indicator no-print';
+        divider.innerHTML = '<div class="docx-page-break-line"></div><div class="docx-page-break-badge">Page</div><div class="docx-page-break-line"></div>';
+        sourcePage.after(divider);
+        divider.after(page);
+        return page;
+    }
+
+    function continuationTable(page, sourceTable) {
+        const next = continuationPage(page);
+        const body = next.querySelector('.docx-page-body');
+        const tIdx = sourceTable.getAttribute('data-table-index') || '';
+        const first = body.firstElementChild;
+        if (first && first.matches('table.docx-table') && (first.getAttribute('data-table-index') || '') === tIdx) {
+            return first;
+        }
+        const table = document.createElement('table');
+        table.className = sourceTable.className;
+        if (tIdx !== '') table.setAttribute('data-table-index', tIdx);
+        if (sourceTable.rows[0]) {
+            const header = sourceTable.rows[0].cloneNode(true);
+            header.querySelectorAll('input, textarea, select').forEach(function (el) { el.removeAttribute('name'); });
+            table.appendChild(header);
+        }
+        body.insertBefore(table, body.firstChild);
+        return table;
+    }
+
+    function spillOne(page) {
+        const body = page.querySelector('.docx-page-body');
+        if (!body) return false;
+        const last = body.lastElementChild;
+        if (!last) return false;
+        if (last.classList.contains('docx-toc-card')) {
+            const lines = last.querySelectorAll(':scope > .docx-toc-line');
+            if (lines.length > 1) {
+                const line = lines[lines.length - 1];
+                const next = continuationPage(page);
+                const nextBody = next.querySelector('.docx-page-body');
+                let card = nextBody.firstElementChild;
+                if (!card || !card.classList.contains('docx-toc-card') || card.getAttribute('data-toc-cont') !== '1') {
+                    card = document.createElement('div');
+                    card.className = 'docx-toc-card';
+                    card.setAttribute('data-toc-cont', '1');
+                    nextBody.insertBefore(card, nextBody.firstChild);
+                }
+                const firstLine = card.querySelector('.docx-toc-line');
+                if (firstLine) card.insertBefore(line, firstLine);
+                else card.appendChild(line);
+                return true;
+            }
+        }
+        if (last.matches('table.docx-table') && !last.classList.contains('header-table') && last.rows.length > 1) {
+            const row = last.rows[last.rows.length - 1];
+            if (row.offsetHeight + 12 >= body.clientHeight && last.rows.length <= 2 && body.childElementCount === 1) return false;
+            const table = continuationTable(page, last);
+            const header = table.rows[0];
+            if (header && header !== row) header.after(row);
+            else table.appendChild(row);
+            return true;
+        }
+        if (last.matches('table.docx-table') && last.rows.length <= 1) {
+            const tIdx = last.getAttribute('data-table-index') || '';
+            const next = followingPage(page);
+            const moved = next ? next.querySelector('table.docx-table[data-table-index="' + tIdx + '"]') : null;
+            const named = last.querySelector('[name]');
+            if (!named && moved && moved.rows.length > 1) {
+                last.remove();
+                return true;
+            }
+            if (body.children.length === 1) return false;
+        }
+        const overflowPx = body.scrollHeight - body.clientHeight;
+        if (last.offsetHeight > Math.max(overflowPx, 0) + 48 && body.childElementCount > 1) {
+            return false;
+        }
+        const nextBody = continuationPage(page).querySelector('.docx-page-body');
+        nextBody.insertBefore(last, nextBody.firstChild);
+        return true;
+    }
+
+    function contentOverflows(pageBody) {
+        if (!pageBody) return false;
+        return pageEdge(pageBody) > pageBody.getBoundingClientRect().bottom + 6;
+    }
+
+    function pageEdge(pageBody) {
+        const last = pageBody.lastElementChild;
+        if (!last) return pageBody.getBoundingClientRect().top;
+        if (last.matches && last.matches('table.docx-table') && last.rows && last.rows.length) {
+            return last.rows[last.rows.length - 1].getBoundingClientRect().bottom;
+        }
+        if (last.classList && last.classList.contains('docx-toc-card')) {
+            const lines = last.querySelectorAll('.docx-toc-line');
+            if (lines.length) return lines[lines.length - 1].getBoundingClientRect().bottom;
+        }
+        return last.getBoundingClientRect().bottom;
+    }
+
+    function pageFreeSpace(pageBody) {
+        if (!pageBody) return 0;
+        return pageBody.getBoundingClientRect().bottom - 8 - pageEdge(pageBody);
+    }
+
+    function pageIsOverfull(pageBody) {
+        if (!pageBody) return false;
+        return pageEdge(pageBody) > pageBody.getBoundingClientRect().bottom - 2;
+    }
+
+    function rowLabel(row) {
+        return Array.from(row.cells || []).map(function (cell) {
+            return (cell.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        }).join('|');
+    }
+
+    function dropEmptySheet(page) {
+        const body = page.querySelector('.docx-page-body');
+        if (!body) return false;
+        Array.from(body.children).forEach(function (el) {
+            if (el.matches && el.matches('table.docx-table') && el.rows.length <= 1 && !el.querySelector('[name]')) el.remove();
+            if (el.classList && el.classList.contains('docx-toc-card') && !el.querySelector('.docx-toc-line')) el.remove();
+        });
+        if (body.children.length) return false;
+        const prev = page.previousElementSibling;
+        if (prev && prev.classList.contains('docx-page-break-indicator')) prev.remove();
+        page.remove();
+        return true;
+    }
+
+    function pullBlockBack(body, nextBody, el) {
+        const marker = el.nextSibling;
+        body.appendChild(el);
+        if (pageIsOverfull(body)) {
+            if (marker) nextBody.insertBefore(el, marker);
+            else nextBody.appendChild(el);
+            return false;
+        }
+        return true;
+    }
+
+    function pullTableRowBack(body, sourceTable) {
+        const head = sourceTable.rows[0] && sourceTable.rows[0].querySelector('th') ? sourceTable.rows[0] : null;
+        const row = head ? sourceTable.rows[1] : sourceTable.rows[0];
+        if (!row) {
+            if (!sourceTable.querySelector('[name]')) sourceTable.remove();
+            return true;
+        }
+        const last = body.lastElementChild;
+        const same = last && last.matches && last.matches('table.docx-table')
+            && (last.getAttribute('data-table-index') || '') === (sourceTable.getAttribute('data-table-index') || '');
+        if (same && rowLabel(row) && last.rows[0] && rowLabel(row) === rowLabel(last.rows[0])) {
+            row.remove();
+            return true;
+        }
+        if (!same && sourceTable.offsetHeight + 6 < pageFreeSpace(body)) {
+            return pullBlockBack(body, sourceTable.parentNode, sourceTable);
+        }
+        let target = same ? last : null;
+        let created = false;
+        if (!target) {
+            target = document.createElement('table');
+            target.className = sourceTable.className;
+            const tIdx = sourceTable.getAttribute('data-table-index') || '';
+            if (tIdx) target.setAttribute('data-table-index', tIdx);
+            if (head) {
+                const clone = head.cloneNode(true);
+                clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
+                clone.querySelectorAll('[name]').forEach(function (el) { el.removeAttribute('name'); });
+                target.appendChild(clone);
+            }
+            body.appendChild(target);
+            created = true;
+        }
+        const marker = row.nextSibling;
+        target.appendChild(row);
+        if (pageIsOverfull(body)) {
+            if (marker) sourceTable.insertBefore(row, marker);
+            else sourceTable.appendChild(row);
+            if (created) target.remove();
+            return false;
+        }
+        const leftoverHead = sourceTable.rows.length === 1 && sourceTable.rows[0].querySelector('th') && !sourceTable.querySelector('[name]');
+        if (!sourceTable.rows.length || leftoverHead) sourceTable.remove();
+        return true;
+    }
+
+    function pullOneBack(page) {
+        const body = page.querySelector('.docx-page-body');
+        const next = followingPage(page);
+        if (!body || !next || pageFreeSpace(body) < 28) return false;
+        const nextBody = next.querySelector('.docx-page-body');
+        const first = nextBody && nextBody.firstElementChild;
+        if (!first) return false;
+        if (first.matches('table.docx-table') && !first.classList.contains('header-table')) {
+            return pullTableRowBack(body, first);
+        }
+        return pullBlockBack(body, nextBody, first);
+    }
+
+    function fillPageGaps() {
+        let page = wrap.querySelector('.docx-preview .docx-a4-page');
+        let pulls = 0;
+        while (page && pulls < 700) {
+            const next = followingPage(page);
+            if (!next) break;
+            if (pageFreeSpace(page.querySelector('.docx-page-body')) < 28 || !pullOneBack(page)) {
+                page = next;
+                continue;
+            }
+            pulls++;
+            dropEmptySheet(next);
+        }
+    }
+
+    window.paginateReadonlyPreview = function () {
+        const first = wrap.querySelector('.docx-preview .docx-a4-page');
+        if (!first) return;
+        const firstBody = first.querySelector('.docx-page-body');
+        if (!firstBody || firstBody.clientHeight < 80) return;
+        fillPageGaps();
+        let page = wrap.querySelector('.docx-preview .docx-a4-page');
+        let moves = 0;
+        while (page && moves < 250) {
+            const pageBody = page.querySelector('.docx-page-body');
+            if (!contentOverflows(pageBody)) {
+                page = followingPage(page);
+                continue;
+            }
+            const before = pageBody.scrollHeight;
+            const beforeLast = pageBody.lastElementChild;
+            const beforeRow = beforeLast && beforeLast.rows ? beforeLast.rows[beforeLast.rows.length - 1] : null;
+            if (!spillOne(page)) {
+                page = followingPage(page);
+                continue;
+            }
+            moves++;
+            const rowStillHere = beforeRow && pageBody.contains(beforeRow);
+            if (contentOverflows(pageBody) && rowStillHere && pageBody.scrollHeight >= before) {
+                page = followingPage(page);
+            }
+        }
+        wrap.querySelectorAll('.docx-a4-page').forEach(function (sheet) {
+            const sheetBody = sheet.querySelector('.docx-page-body');
+            const tail = sheetBody && sheetBody.lastElementChild;
+            if (!tail || !tail.matches('table.docx-table') || tail.rows.length > 1) return;
+            const tIdx = tail.getAttribute('data-table-index') || '';
+            const next = followingPage(sheet);
+            const moved = next ? next.querySelector('table.docx-table[data-table-index="' + tIdx + '"]') : null;
+            if (moved && moved.rows.length > 1 && !tail.querySelector('[name]')) tail.remove();
+        });
+        updatePageNumbers();
+    };
+
+    window.paginateReadonlyPreview();
+    setTimeout(window.paginateReadonlyPreview, 300);
 });
 </script>
 

@@ -98,12 +98,14 @@ def _match_cover_label_cell(text: str) -> tuple[str, str] | None:
     if not ll:
         return None
     patterns = (
-        (r"document\s*no\.?", "document_no", "Document No."),
+        (r"(?:reference\s*(?:protocol|document)|ref\.?\s*protocol)", "reference_protocol_no", "Reference Protocol No."),
         (r"document\s*title", "document_title", "Document Title"),
-        (r"equipment\s*/\s*system\s*name", "equipment_name", "Equipment/System Name"),
-        (r"equipment\s*/\s*system\s*id", "equipment_id", "Equipment/System ID No."),
+        (r"(?:document|doc\.?)\s*(?:no\.?|number)\b", "document_no", "Document No."),
+        (r"equipment(?:\s*/\s*system)?\s*name\b", "equipment_name", "Equipment Name"),
+        (r"equipment(?:\s*/\s*system)?\s*i\.?d\.?(?:\s*no\.?)?\b", "equipment_id", "Equipment ID. No."),
         (r"facility\s*/\s*section", "facility_section", "Facility / Section"),
         (r"effective\s*date", "effective_date", "Effective Date"),
+        (r"^version(?:\s*no\.?)?$", "version", "Version"),
     )
     for pat, key, display in patterns:
         if re.search(pat, ll):
@@ -135,6 +137,7 @@ def _scan_cover_table_fields(
 ) -> set:
     """Find label/value pairs on protocol cover grids; return locations to skip in generic parser."""
     skip: set = set()
+    seen_value_tcs: set = set()
     for row_index, row in enumerate(table.rows):
         cells = row.cells
         for col_index, cell in enumerate(cells):
@@ -144,6 +147,9 @@ def _scan_cover_table_fields(
             key, display = matched
             value_col = col_index + 1
             while value_col < len(cells):
+                if cells[value_col]._tc is cell._tc:
+                    value_col += 1
+                    continue
                 neighbor = cells[value_col].text.strip()
                 if neighbor and _match_cover_label_cell(neighbor):
                     value_col += 1
@@ -151,6 +157,10 @@ def _scan_cover_table_fields(
                 break
             if value_col >= len(cells):
                 continue
+            val_tc = cells[value_col]._tc
+            if val_tc in seen_value_tcs:
+                continue
+            seen_value_tcs.add(val_tc)
             location = f"{location_prefix}_row_{row_index}_col_{value_col}"
             if location in seen_locations:
                 skip.add(location)
@@ -1606,11 +1616,12 @@ def _scan_header_tables(doc, fillable_fields: list) -> None:
         return
 
     section = doc.sections[0]
+    header_tables = list(section.header.tables or [])
+    if not header_tables and getattr(section, "first_page_header", None) is not None:
+        header_tables = list(section.first_page_header.tables or [])
     seen_locations: set = set()
 
-    seen_locations: set = set()
-
-    for table_index, table in enumerate(section.header.tables):
+    for table_index, table in enumerate(header_tables):
         for label_text, row_index, col_index in HEADER_FIELD_SPECS:
             if row_index >= len(table.rows):
                 continue
@@ -1629,14 +1640,18 @@ def _scan_header_tables(doc, fillable_fields: list) -> None:
             if location in seen_locations:
                 continue
             seen_locations.add(location)
-            fillable_fields.append({
+            matched_cover = _match_cover_label_cell(label_text)
+            entry = {
                 "label": label_text.strip(),
                 "value": "",
                 "locked": False,
                 "type": "header_cell",
                 "location": location,
                 "widget": infer_field_widget(label_text, "header_cell"),
-            })
+            }
+            if matched_cover:
+                entry["cover_field"] = matched_cover[0]
+            fillable_fields.append(entry)
 
         _scan_cover_table_fields(
             table,

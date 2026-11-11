@@ -40,22 +40,209 @@ class NewEquipmentQualificationDocxService
         return $this->applyEditsViaHttp($sourcePath, $edits, $tableOps, $cellEdits, $checkboxOps, $structureOps, $tocLines);
     }
 
-    // Return body text targets with DOCX indexes used to map browser edits safely
-    public function listTextTargets(string $sourcePath): array
+    /**
+     * Build the same fill HTML Requalification uses, from a DOCX path on disk.
+     *
+     * @return array{html: string, fields: array<int, array<string, mixed>>, header_table_count: int, para_target_map: array<string, int>}
+     */
+    public function buildFillPreview(string $sourcePath): array
     {
         if (! is_file($sourcePath)) {
             throw new RuntimeException('Source DOCX file not found.');
         }
 
-        try {
-            return $this->listTextTargetsViaCli($sourcePath);
-        } catch (\Throwable $cliError) {
-            Log::warning('NEQ CLI text-targets failed, falling back to HTTP', [
-                'message' => $cliError->getMessage(),
-            ]);
+        $cli = base_path('python-service/cli.py');
+        if (! is_file($cli)) {
+            throw new RuntimeException('Python preview script not found.');
         }
 
-        return $this->listTextTargetsViaHttp($sourcePath);
+        $pythonBin = $this->resolvePythonBinary();
+        $parsedRaw = $this->runPythonCli($pythonBin, $cli, ['parse', $sourcePath]);
+        $parsed = json_decode($parsedRaw, true);
+        if (! is_array($parsed) || ($parsed['status'] ?? '') !== 'success') {
+            $message = is_array($parsed) ? (string) ($parsed['message'] ?? '') : '';
+            throw new RuntimeException($message !== '' ? $message : 'Unable to parse the Word document.');
+        }
+
+        $fields = array_values(is_array($parsed['fields'] ?? null) ? $parsed['fields'] : []);
+        $fieldsFile = tempnam(sys_get_temp_dir(), 'neq_prev_');
+        if ($fieldsFile === false) {
+            throw new RuntimeException('Unable to create a temporary preview file.');
+        }
+
+        try {
+            file_put_contents($fieldsFile, json_encode($fields, JSON_UNESCAPED_UNICODE));
+            $html = $this->runPythonCli($pythonBin, $cli, ['preview', $sourcePath, $fieldsFile, 'edit']);
+        } finally {
+            if (is_file($fieldsFile)) {
+                @unlink($fieldsFile);
+            }
+        }
+
+        $start = strpos($html, '<div class="docx-preview"');
+        if ($start !== false) {
+            $html = substr($html, $start);
+        }
+        $html = trim($html);
+        if ($html === '') {
+            throw new RuntimeException('Preview HTML was empty.');
+        }
+
+        $headerIndexes = [];
+        foreach ($fields as $field) {
+            $location = (string) ($field['location'] ?? '');
+            if (preg_match('/^header_table_(\d+)/', $location, $match)) {
+                $headerIndexes[(int) $match[1]] = true;
+            }
+        }
+
+        return [
+            'html' => $html,
+            'fields' => $fields,
+            'header_table_count' => max(1, count($headerIndexes)),
+            'para_target_map' => [],
+        ];
+    }
+
+    /**
+     * @param  array<int, string>  $args
+     */
+    private function runPythonCli(string $pythonBin, string $script, array $args): string
+    {
+        $parts = [escapeshellarg($pythonBin), escapeshellarg($script)];
+        foreach ($args as $arg) {
+            $parts[] = escapeshellarg($arg);
+        }
+
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = proc_open(implode(' ', $parts), $descriptorSpec, $pipes, base_path('python-service'));
+        if (! is_resource($process)) {
+            throw new RuntimeException('Unable to start Python.');
+        }
+
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        if ($exitCode !== 0) {
+            throw new RuntimeException(trim((string) $stderr) !== '' ? trim((string) $stderr) : 'Python preview failed.');
+        }
+
+        return (string) $stdout;
+    }
+
+    // Return body text targets with DOCX indexes used to map browser edits safely
+    public function listTextTargets(string $sourcePath, ?int $recordId = null): array
+    {
+        if (! is_file($sourcePath)) {
+            throw new RuntimeException('Source DOCX file not found.');
+        }
+
+        $mtime = (int) (@filemtime($sourcePath) ?: 0);
+        $size = (int) (@filesize($sourcePath) ?: 0);
+        $cachePath = $this->targetCachePath($sourcePath, $mtime, $recordId);
+
+        if (is_file($cachePath)) {
+            $raw = @file_get_contents($cachePath);
+            if (is_string($raw) && $raw !== '') {
+                $decoded = json_decode($raw, true);
+                if (
+                    is_array($decoded)
+                    && isset($decoded['targets'])
+                    && is_array($decoded['targets'])
+                    && (string) ($decoded['source_path'] ?? '') === $sourcePath
+                    && (int) ($decoded['mtime'] ?? -1) === $mtime
+                    && (int) ($decoded['size'] ?? -1) === $size
+                ) {
+                    return array_values($decoded['targets']);
+                }
+            }
+        }
+
+        try {
+            $targets = $this->listTextTargetsViaHttp($sourcePath);
+        } catch (\Throwable $httpError) {
+            Log::warning('NEQ HTTP text-targets failed, falling back to CLI', [
+                'message' => $httpError->getMessage(),
+            ]);
+
+            $targets = $this->listTextTargetsViaCli($sourcePath);
+        }
+
+        $this->writeTargetCache($cachePath, $sourcePath, $mtime, $size, $targets);
+
+        return $targets;
+    }
+
+    public function invalidateTargetCache(?int $recordId = null, ?string $sourcePath = null): void
+    {
+        $cacheDir = storage_path('app/neq-cache');
+        if (! is_dir($cacheDir)) {
+            return;
+        }
+
+        $patterns = [];
+        if ($recordId !== null && $recordId > 0) {
+            $patterns[] = $cacheDir . DIRECTORY_SEPARATOR . $recordId . '-*-targets.json';
+        }
+        if ($sourcePath !== null && $sourcePath !== '') {
+            $patterns[] = $cacheDir . DIRECTORY_SEPARATOR . 'path-' . sha1($sourcePath) . '-*-targets.json';
+        }
+
+        foreach ($patterns as $pattern) {
+            foreach (glob($pattern) ?: [] as $file) {
+                if (is_file($file)) {
+                    @unlink($file);
+                }
+            }
+        }
+    }
+
+    private function targetCachePath(string $sourcePath, int $mtime, ?int $recordId = null): string
+    {
+        $cacheDir = storage_path('app/neq-cache');
+        $prefix = ($recordId !== null && $recordId > 0)
+            ? (string) $recordId
+            : ('path-' . sha1($sourcePath));
+
+        return $cacheDir . DIRECTORY_SEPARATOR . $prefix . '-' . $mtime . '-targets.json';
+    }
+
+    private function writeTargetCache(
+        string $cachePath,
+        string $sourcePath,
+        int $mtime,
+        int $size,
+        array $targets
+    ): void {
+        try {
+            $dir = dirname($cachePath);
+            if (! is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+            $encoded = json_encode([
+                'source_path' => $sourcePath,
+                'mtime' => $mtime,
+                'size' => $size,
+                'targets' => array_values($targets),
+            ], JSON_UNESCAPED_UNICODE);
+            if (is_string($encoded)) {
+                @file_put_contents($cachePath, $encoded, LOCK_EX);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Unable to write NEQ text-targets cache', [
+                'cache_path' => $cachePath,
+                'message' => $e->getMessage(),
+            ]);
+        }
     }
 
     // Spawn python-service/run_neq_targets.py and decode JSON target list from stdout
@@ -110,7 +297,7 @@ class NewEquipmentQualificationDocxService
     // POST source file to Python /neq/text-targets and return targets array
     private function listTextTargetsViaHttp(string $sourcePath): array
     {
-        $pythonUrl = rtrim(config('services.python_nlp.url', env('PYTHON_NLP_URL', 'http://127.0.0.1:8001')), '/');
+        $pythonUrl = rtrim((string) (config('services.python_nlp.url') ?: env('PYTHON_NLP_URL', 'http://127.0.0.1:8001')), '/');
 
         $response = Http::timeout(120)
             ->attach(

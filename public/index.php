@@ -5,6 +5,9 @@ use Illuminate\Http\Request;
 
 define('LARAVEL_START', microtime(true));
 
+// Document pages compile a large view and can exceed the default 30s limit.
+set_time_limit(120);
+
 /*
 |--------------------------------------------------------------------------
 | Check If The Application Is Under Maintenance

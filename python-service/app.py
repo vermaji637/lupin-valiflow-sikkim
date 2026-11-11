@@ -33,6 +33,7 @@ from doc_parser import (
     is_toc_entry_text,
     is_equipment_section_banner_row,
     is_repeated_column_header_row,
+    _match_cover_label_cell,
 )
 from docx.oxml.ns import qn
 from report_generator import fill_docx, _normalize_text_value
@@ -166,30 +167,87 @@ def ensure_required_dirs() -> None:
 #   1. Verifies LibreOffice (soffice.exe) is installed
 #   2. Runs --headless --convert-to docx into the source directory
 #   3. Returns the .docx path or raises if conversion fails
-def convert_doc_to_docx(doc_path: str) -> str:
-    output_dir = os.path.dirname(doc_path)
+def _converted_docx_path(doc_path: str) -> str:
+    return os.path.splitext(doc_path)[0] + ".docx"
+
+
+def _docx_ready(docx_path: str) -> bool:
+    return os.path.isfile(docx_path) and os.path.getsize(docx_path) > 0
+
+
+def _convert_doc_with_libreoffice(doc_path: str, docx_path: str) -> None:
     command = [
         LIBREOFFICE,
         "--headless",
         "--convert-to",
         "docx",
         "--outdir",
-        output_dir,
+        os.path.dirname(doc_path),
         doc_path,
     ]
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=60)
-    except FileNotFoundError as exc:
-        raise Exception(
-            "LibreOffice binary not found. Set LIBREOFFICE_BIN or install LibreOffice."
-        ) from exc
+    result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+    if not _docx_ready(docx_path):
+        detail = (result.stderr or result.stdout or "LibreOffice produced no .docx").strip()
+        raise Exception(detail)
 
-    docx_path = doc_path.replace(".doc", ".docx")
 
-    if not os.path.exists(docx_path):
-        raise Exception(f"Conversion failed: {result.stderr}")
+def _convert_doc_with_word(doc_path: str, docx_path: str) -> None:
+    """Windows fallback when LibreOffice is not installed. Saves a real .docx Word can open."""
+    if os.name != "nt":
+        raise Exception("Microsoft Word conversion is only available on Windows")
 
-    return docx_path
+    in_path = os.path.abspath(doc_path).replace("'", "''")
+    out_path = os.path.abspath(docx_path).replace("'", "''")
+    script = f"""
+$ErrorActionPreference = 'Stop'
+$word = $null
+$doc = $null
+try {{
+  $word = New-Object -ComObject Word.Application
+  $word.Visible = $false
+  $word.DisplayAlerts = 0
+  $doc = $word.Documents.Open('{in_path}', $false, $false, $false)
+  $doc.SaveAs('{out_path}', 16)
+}} finally {{
+  if ($doc -ne $null) {{ $doc.Close($false) | Out-Null }}
+  if ($word -ne $null) {{ $word.Quit() | Out-Null }}
+  [GC]::Collect()
+}}
+"""
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    if result.returncode != 0 or not _docx_ready(docx_path):
+        detail = (result.stderr or result.stdout or "Microsoft Word produced no .docx").strip()
+        raise Exception(detail)
+
+
+def convert_doc_to_docx(doc_path: str) -> str:
+    docx_path = _converted_docx_path(doc_path)
+    if _docx_ready(docx_path):
+        return docx_path
+
+    errors = []
+    for converter in (_convert_doc_with_libreoffice, _convert_doc_with_word):
+        try:
+            converter(doc_path, docx_path)
+        except FileNotFoundError:
+            errors.append(f"{converter.__name__}: program not found")
+        except subprocess.TimeoutExpired:
+            errors.append(f"{converter.__name__}: timed out")
+        except Exception as exc:
+            errors.append(f"{converter.__name__}: {exc}")
+        if _docx_ready(docx_path):
+            logger.info("Converted legacy .doc to .docx: %s", docx_path)
+            return docx_path
+
+    raise Exception(
+        "Could not convert .doc to .docx. Install LibreOffice or Microsoft Word. "
+        + " | ".join(errors)
+    )
 
 
 # ── root() ──────────────────────────────────────────
@@ -235,14 +293,15 @@ def health():
 @app.post("/parse")
 async def parse_document(file: UploadFile = File(...)):
     # Reject uploads that are not .doc or .docx.
-    if not file.filename.endswith(('.docx', '.doc')):
+    original_name = file.filename or ""
+    file_ext = os.path.splitext(original_name)[1].lower()
+    if file_ext not in (".docx", ".doc"):
         raise HTTPException(
             status_code=400,
             detail="allwed only .doc ya .docx file"
         )
 
     file_id = str(uuid.uuid4())
-    file_ext = os.path.splitext(file.filename)[1]
     save_filename = f"{file_id}{file_ext}"
     save_path = os.path.join(UPLOAD_PATH, save_filename)
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -257,8 +316,8 @@ async def parse_document(file: UploadFile = File(...)):
             detail=f"File save error: {str(e)}"
         )
 
-    if save_path.endswith(".doc"):
-        # Convert legacy .doc to .docx via LibreOffice before parsing.
+    if save_path.lower().endswith(".doc"):
+        # Convert legacy .doc to .docx (LibreOffice, then Microsoft Word) before parsing.
         try:
             save_path = convert_doc_to_docx(save_path)
         except Exception as e:
@@ -616,6 +675,334 @@ def _readonly_td(
     return (
         f'<td class="docx-cell {extra_class}" style="{style}"'
         f'{rowspan_attr}{colspan_attr}{data_attr}>{content}</td>'
+    )
+
+
+_BULLET_GLYPH_MAP = {
+    "\uf0b7": "•",
+    "\uf0d8": "➢",
+    "\uf0a7": "▪",
+    "\uf076": "❖",
+    "\uf0fc": "✓",
+    "\uf0a8": "▪",
+    "o": "◦",
+}
+
+
+def _int_to_roman(num: int, lower: bool = False) -> str:
+    """Convert a positive integer into Roman numerals."""
+    if num <= 0:
+        return str(num)
+    pairs = (
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+        (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+        (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    )
+    out = []
+    rem = num
+    for val, sym in pairs:
+        while rem >= val:
+            out.append(sym)
+            rem -= val
+    res = "".join(out)
+    return res.lower() if lower else res
+
+
+def _int_to_alpha(num: int, lower: bool = False) -> str:
+    """Convert 1-based counter to Word alphabetic list marker (a..z, aa..)."""
+    if num <= 0:
+        return str(num)
+    chars = []
+    n = num
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        chars.append(chr((97 if lower else 65) + r))
+    return "".join(reversed(chars))
+
+
+def _format_num_counter(value: int, num_fmt: str) -> str:
+    """Format a single Word numbering level value according to w:numFmt."""
+    if num_fmt == "decimalZero":
+        return f"{value:02d}"
+    if num_fmt == "lowerLetter":
+        return _int_to_alpha(value, lower=True)
+    if num_fmt == "upperLetter":
+        return _int_to_alpha(value, lower=False)
+    if num_fmt == "lowerRoman":
+        return _int_to_roman(value, lower=True)
+    if num_fmt == "upperRoman":
+        return _int_to_roman(value, lower=False)
+    if num_fmt == "ordinal":
+        return f"{value}."
+    return str(value)
+
+
+class _WordNumberingResolver:
+    """
+    Resolve Word OOXML <w:numPr> section numbers and bullets (e.g. 1.0, 2.0, 8.1, 9.1)
+    by interpreting word/numbering.xml (abstractNum, numStyleLink, lvlOverride) and styles.
+    """
+
+    def __init__(self, doc):
+        self.abstract_nums: dict[str, dict] = {}
+        self.style_link_levels: dict[str, dict[int, dict]] = {}
+        self.nums: dict[str, dict] = {}
+        self.style_numpr: dict[str, tuple[str | None, int | None]] = {}
+        self.counters: dict[str, dict[int, int]] = {}
+        self._p_cache: dict = {}
+        self._load_styles(doc)
+        self._load_numbering(doc)
+
+    @staticmethod
+    def _parse_lvl_elem(lvl_el) -> dict:
+        fmt_el = lvl_el.find(qn("w:numFmt"))
+        txt_el = lvl_el.find(qn("w:lvlText"))
+        start_el = lvl_el.find(qn("w:start"))
+        restart_el = lvl_el.find(qn("w:lvlRestart"))
+        lgl_el = lvl_el.find(qn("w:isLgl"))
+        try:
+            start_val = int(start_el.get(qn("w:val"))) if start_el is not None else 1
+        except (TypeError, ValueError):
+            start_val = 1
+        try:
+            restart_val = int(restart_el.get(qn("w:val"))) if restart_el is not None else None
+        except (TypeError, ValueError):
+            restart_val = None
+        return {
+            "fmt": fmt_el.get(qn("w:val")) if fmt_el is not None else "decimal",
+            "text": txt_el.get(qn("w:val")) if txt_el is not None else "",
+            "start": start_val,
+            "restart": restart_val,
+            "is_lgl": lgl_el is not None and lgl_el.get(qn("w:val"), "1") not in ("0", "false"),
+        }
+
+    def _load_styles(self, doc) -> None:
+        styles = getattr(doc, "styles", None)
+        if not styles:
+            return
+        by_id = {}
+        for st in styles:
+            sid = getattr(st, "style_id", None)
+            if sid:
+                by_id[sid] = st
+        for sid in by_id:
+            cur = by_id[sid]
+            visited = set()
+            nid = None
+            ilvl = None
+            while cur is not None and getattr(cur, "style_id", None) not in visited:
+                visited.add(getattr(cur, "style_id", None))
+                el = getattr(cur, "_element", None)
+                pPr = el.find(qn("w:pPr")) if el is not None else None
+                numPr = pPr.find(qn("w:numPr")) if pPr is not None else None
+                if numPr is not None:
+                    nid_el = numPr.find(qn("w:numId"))
+                    ilvl_el = numPr.find(qn("w:ilvl"))
+                    if nid is None and nid_el is not None:
+                        nid = nid_el.get(qn("w:val"))
+                    if ilvl is None and ilvl_el is not None:
+                        try:
+                            ilvl = int(ilvl_el.get(qn("w:val")))
+                        except (TypeError, ValueError):
+                            pass
+                    if nid is not None and ilvl is not None:
+                        break
+                cur = getattr(cur, "base_style", None)
+            if nid is not None or ilvl is not None:
+                self.style_numpr[sid] = (nid, ilvl)
+
+    def _load_numbering(self, doc) -> None:
+        try:
+            numbering_part = doc.part.numbering_part
+        except Exception:
+            numbering_part = None
+        if numbering_part is None:
+            return
+        root = numbering_part.numbering_definitions._numbering
+        for ab in root.findall(qn("w:abstractNum")):
+            aid = ab.get(qn("w:abstractNumId"))
+            if aid is None:
+                continue
+            levels: dict[int, dict] = {}
+            for lvl in ab.findall(qn("w:lvl")):
+                try:
+                    il = int(lvl.get(qn("w:ilvl")))
+                except (TypeError, ValueError):
+                    continue
+                levels[il] = self._parse_lvl_elem(lvl)
+            nsl = ab.find(qn("w:numStyleLink"))
+            sl = ab.find(qn("w:styleLink"))
+            num_style_link = nsl.get(qn("w:val")) if nsl is not None else None
+            style_link = sl.get(qn("w:val")) if sl is not None else None
+            if style_link and levels:
+                self.style_link_levels[style_link] = levels
+            self.abstract_nums[aid] = {
+                "levels": levels,
+                "num_style_link": num_style_link,
+            }
+
+        for info in self.abstract_nums.values():
+            if not info["levels"] and info["num_style_link"]:
+                linked = self.style_link_levels.get(info["num_style_link"])
+                if linked:
+                    info["levels"] = linked
+
+        for num in root.findall(qn("w:num")):
+            nid = num.get(qn("w:numId"))
+            abs_el = num.find(qn("w:abstractNumId"))
+            if nid is None or abs_el is None:
+                continue
+            aid = abs_el.get(qn("w:val"))
+            overrides: dict[int, dict] = {}
+            for ov in num.findall(qn("w:lvlOverride")):
+                try:
+                    il = int(ov.get(qn("w:ilvl")))
+                except (TypeError, ValueError):
+                    continue
+                st_ov = ov.find(qn("w:startOverride"))
+                lvl_ov = ov.find(qn("w:lvl"))
+                ov_dict: dict = {}
+                if st_ov is not None:
+                    try:
+                        ov_dict["start"] = int(st_ov.get(qn("w:val")))
+                    except (TypeError, ValueError):
+                        pass
+                if lvl_ov is not None:
+                    ov_dict["lvl"] = self._parse_lvl_elem(lvl_ov)
+                overrides[il] = ov_dict
+            self.nums[nid] = {"abstract_id": aid, "overrides": overrides}
+
+    def _effective_level(self, num_id: str, ilvl: int) -> dict | None:
+        num_info = self.nums.get(num_id)
+        if not num_info:
+            return None
+        abs_info = self.abstract_nums.get(num_info["abstract_id"])
+        base_levels = abs_info["levels"] if abs_info else {}
+        lvl = dict(base_levels.get(ilvl, {}))
+        ov = num_info["overrides"].get(ilvl)
+        if ov:
+            if "lvl" in ov:
+                lvl = dict(ov["lvl"])
+            if "start" in ov:
+                lvl["start"] = ov["start"]
+        return lvl or None
+
+    def _effective_numpr(self, p_element) -> tuple[str | None, int]:
+        pPr = p_element.find(qn("w:pPr"))
+        nid = None
+        ilvl = None
+        if pPr is not None:
+            numPr = pPr.find(qn("w:numPr"))
+            if numPr is not None:
+                nid_el = numPr.find(qn("w:numId"))
+                ilvl_el = numPr.find(qn("w:ilvl"))
+                if nid_el is not None:
+                    nid = nid_el.get(qn("w:val"))
+                if ilvl_el is not None:
+                    try:
+                        ilvl = int(ilvl_el.get(qn("w:val")))
+                    except (TypeError, ValueError):
+                        pass
+            if nid == "0":
+                return None, 0
+            if nid is None:
+                pStyle_el = pPr.find(qn("w:pStyle"))
+                if pStyle_el is not None:
+                    st_nid, st_ilvl = self.style_numpr.get(pStyle_el.get(qn("w:val"), ""), (None, None))
+                    nid = st_nid
+                    if ilvl is None:
+                        ilvl = st_ilvl
+        if not nid or nid == "0":
+            return None, 0
+        return nid, (0 if ilvl is None else ilvl)
+
+    def prefix_for_p(self, p_element) -> tuple[str, bool]:
+        """Advance numbering state for p_element once and cache (prefix, is_bullet)."""
+        if p_element is None or not self.nums:
+            return "", False
+        if p_element in self._p_cache:
+            return self._p_cache[p_element]
+        nid, ilvl = self._effective_numpr(p_element)
+        if not nid or nid not in self.nums:
+            self._p_cache[p_element] = ("", False)
+            return "", False
+        lvl_spec = self._effective_level(nid, ilvl)
+        if not lvl_spec:
+            self._p_cache[p_element] = ("", False)
+            return "", False
+
+        state = self.counters.setdefault(nid, {})
+        for anc in range(0, ilvl):
+            if anc not in state:
+                anc_spec = self._effective_level(nid, anc) or {}
+                state[anc] = int(anc_spec.get("start", 1))
+
+        if ilvl not in state:
+            state[ilvl] = int(lvl_spec.get("start", 1))
+        else:
+            state[ilvl] += 1
+
+        for deeper in [k for k in state if k > ilvl]:
+            deeper_spec = self._effective_level(nid, deeper) or {}
+            if deeper_spec.get("restart") != 0:
+                del state[deeper]
+
+        fmt = lvl_spec.get("fmt", "decimal")
+        lvl_text = lvl_spec.get("text", "")
+        if fmt == "none":
+            self._p_cache[p_element] = ("", False)
+            return "", False
+        if fmt == "bullet":
+            glyph = _BULLET_GLYPH_MAP.get(lvl_text, lvl_text or "•")
+            if glyph and ord(glyph[0]) >= 0xF000:
+                glyph = "•"
+            res = (glyph.strip(), True)
+            self._p_cache[p_element] = res
+            return res
+
+        if not lvl_text:
+            lvl_text = f"%{ilvl + 1}."
+
+        is_lgl = bool(lvl_spec.get("is_lgl"))
+
+        def _replace_marker(m):
+            idx = int(m.group(1)) - 1
+            spec = self._effective_level(nid, idx) or {}
+            val = state.get(idx, int(spec.get("start", 1)))
+            marker_fmt = "decimal" if is_lgl else spec.get("fmt", "decimal")
+            return _format_num_counter(val, marker_fmt)
+
+        resolved = re.sub(r"%([1-9])", _replace_marker, lvl_text).strip()
+        res = (resolved, False)
+        self._p_cache[p_element] = res
+        return res
+
+
+def _strip_duplicate_prefix(para_text: str, num_prefix: str, is_bullet: bool) -> str:
+    """Return num_prefix only when para_text does not already carry it."""
+    if not num_prefix:
+        return ""
+    trimmed = (para_text or "").lstrip()
+    if not trimmed:
+        return ""
+    if is_bullet:
+        if trimmed[0] in ("•", "-", "*", "➢", "▪", "◦", "✓"):
+            return ""
+        return num_prefix
+    if trimmed.startswith(num_prefix) or re.match(r"^\d+(?:\.\d+)+\b", trimmed):
+        return ""
+    return num_prefix
+
+
+def _num_prefix_span(num_prefix: str, is_bullet: bool, *, bold: bool = False) -> str:
+    """Format an inline HTML span for a resolved list/section prefix."""
+    if not num_prefix:
+        return ""
+    weight = "700" if (bold or not is_bullet) else "400"
+    min_w = "20px" if is_bullet else "40px"
+    return (
+        f'<span class="docx-num-prefix" style="display:inline-block; min-width:{min_w}; '
+        f'font-weight:{weight}; margin-right:6px;">{_escape_html(num_prefix)}</span>'
     )
 
 
@@ -1243,25 +1630,59 @@ def _value_repeats_colon_label(para_text: str, value: str) -> bool:
 # ── _render_paragraph() ─────────────────────────────
 # Renders one body paragraph for the fill preview.
 # para_index must match doc_parser.py enumerate(doc.paragraphs) — not a body-walk counter.
+def _render_heading_paragraph(
+    para_text: str,
+    num_prefix: str = "",
+    is_bullet: bool = False,
+) -> str | None:
+    """Render section headings (including numbered headings like 1.0, 8.5) with target metadata."""
+    if not para_text or not para_text.strip():
+        return None
+    clean_p = dedupe_colon_label(dedupe_repeated_text(para_text)).strip()
+    eff_prefix = _strip_duplicate_prefix(clean_p, num_prefix, is_bullet)
+    prefixed_clean_p = f"{eff_prefix} {clean_p}".strip() if eff_prefix else clean_p
+    clean_upper = prefixed_clean_p.upper()
+    is_num_section = bool(
+        eff_prefix
+        and not is_bullet
+        and re.match(r"^\d+(?:\.\d+)+$", eff_prefix)
+        and len(clean_p) < 120
+        and not has_paragraph_blank(para_text)
+        and not is_paragraph_yes_no_radio(para_text)
+    )
+    if (
+        is_locked_section_title(prefixed_clean_p)
+        or is_section_heading_paragraph(prefixed_clean_p)
+        or is_num_section
+        or re.match(r"^(?:\d+(?:\.\d+)*\s*)?(?:METHODOLOGY|REPORT APPROVAL)\b", clean_upper)
+    ):
+        heading_prefix = _num_prefix_span(eff_prefix, is_bullet, bold=True)
+        return (
+            f'<p class="docx-para docx-heading-target" style="font-weight:700;" '
+            f'data-heading-text="{_escape_html(clean_upper)}">{heading_prefix}{_escape_html(clean_p)}</p>'
+        )
+    return None
+
+
 def _render_paragraph(
     para_index: int,
     para_text: str,
     field: dict | None,
     field_map: dict,
     mode: str = "edit",
+    num_prefix: str = "",
+    is_bullet: bool = False,
 ) -> str:
     if not para_text or not para_text.strip():
         return ""
+    heading_html = _render_heading_paragraph(para_text, num_prefix=num_prefix, is_bullet=is_bullet)
+    if heading_html:
+        return heading_html
     para_text = dedupe_repeated_text(para_text)
     clean_p = dedupe_colon_label(para_text).strip()
-    clean_upper = clean_p.upper()
-    # 1.0 OBJECTIVE:, METHODOLOGY:, REPORT APPROVAL: headings are titles, not fill boxes.
-    if (
-        is_locked_section_title(para_text)
-        or is_section_heading_paragraph(para_text)
-        or re.match(r"^(?:\d+(?:\.\d+)*\s*)?(?:METHODOLOGY|REPORT APPROVAL)\b", clean_upper)
-    ):
-        return f'<p class="docx-para docx-heading-target" data-heading-text="{_escape_html(clean_upper)}">{_escape_html(clean_p)}</p>'
+    eff_prefix = _strip_duplicate_prefix(clean_p, num_prefix, is_bullet)
+    prefixed_clean_p = f"{eff_prefix} {clean_p}".strip() if eff_prefix else clean_p
+    prefix_html = _num_prefix_span(eff_prefix, is_bullet)
 
     if field and field.get("type") == "paragraph_content" and PARA_BLANK_RE.search(para_text):
         field["type"] = "paragraph_blank"
@@ -1271,14 +1692,27 @@ def _render_paragraph(
         if val is None or val == "":
             val = para_text
         val = dedupe_repeated_text(val)
+        val_prefix = _strip_duplicate_prefix(val, eff_prefix, is_bullet)
+        val_prefixed = f"{val_prefix} {val}".strip() if val_prefix else val
+        val_prefix_html = _num_prefix_span(val_prefix, is_bullet)
         if _is_readonly_mode(mode) or mode != "pre_approval" or _is_field_locked(field):
-            h_cls = " docx-heading-target" if (is_section_heading_paragraph(val) or is_locked_section_title(val)) else ""
-            h_attr = f' data-heading-text="{_escape_html(val.upper().strip())}"' if h_cls else ""
-            return f'<p class="docx-para{h_cls}"{h_attr}>{_escape_html(val)}</p>'
+            h_cls = " docx-heading-target" if (is_section_heading_paragraph(val_prefixed) or is_locked_section_title(val_prefixed)) else ""
+            h_attr = f' data-heading-text="{_escape_html(val_prefixed.upper().strip())}"' if h_cls else ""
+            h_style = ' style="font-weight:700;"' if h_cls else ""
+            h_pref = _num_prefix_span(val_prefix, is_bullet, bold=bool(h_cls))
+            return f'<p class="docx-para{h_cls}"{h_style}{h_attr}>{h_pref}{_escape_html(val)}</p>'
         else:
             loc = _escape_html(field.get("location", f"para_{para_index}"))
             val_esc = _escape_html(val)
             calc_rows = max(2, min(8, len(val) // 70 + 1))
+            if val_prefix_html:
+                return (
+                    f'<div class="docx-para-edit-wrapper" style="margin: 6px 0; display:flex; align-items:flex-start; gap:6px;">'
+                    f'<span class="docx-num-prefix" style="padding-top:6px; flex-shrink:0;">{val_prefix_html}</span>'
+                    f'<textarea name="fields[{loc}]" class="docx-input docx-para-content" '
+                    f'rows="{calc_rows}" style="flex:1; width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #facc15; border-bottom:2px solid #4e73df; border-radius:4px; background-color:#fffde7 !important;">{val_esc}</textarea>'
+                    f'</div>'
+                )
             return (
                 f'<div class="docx-para-edit-wrapper" style="margin: 6px 0;">'
                 f'<textarea name="fields[{loc}]" class="docx-input docx-para-content" '
@@ -1419,7 +1853,7 @@ def _render_paragraph(
 
         if para_text:
             return (
-                f'<p class="docx-para docx-para-editable">{_escape_html(para_text)} {inp}</p>'
+                f'<p class="docx-para docx-para-editable">{prefix_html}{_escape_html(para_text)} {inp}</p>'
             )
         return f'<p class="docx-para docx-para-editable">{inp}</p>'
 
@@ -1428,17 +1862,17 @@ def _render_paragraph(
         locked_val = (field.get("value") or "").strip()
         if locked_val:
             if _value_repeats_colon_label(para_text, locked_val):
-                return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
+                return f'<p class="docx-para">{prefix_html}{_escape_html(dedupe_colon_label(para_text))}</p>'
             if PARA_COLON_BLANK_RE.search(dedupe_colon_label(para_text).strip()):
                 label_part = re.sub(r":\s*$", ": ", dedupe_colon_label(para_text))
                 return (
                     f'<p class="docx-para">'
-                    f"{_escape_html(label_part)}"
+                    f"{prefix_html}{_escape_html(label_part)}"
                     f"{_render_readonly_span(locked_val, field, loc)}</p>"
                 )
-            return f'<p class="docx-para">{_render_readonly_span(locked_val, field, loc)}</p>'
+            return f'<p class="docx-para">{prefix_html}{_render_readonly_span(locked_val, field, loc)}</p>'
         if para_text:
-            return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
+            return f'<p class="docx-para">{prefix_html}{_escape_html(dedupe_colon_label(para_text))}</p>'
         return ""
 
     if para_text:
@@ -1468,19 +1902,27 @@ def _render_paragraph(
                 label_part = re.sub(r":\s*$", ": ", normalized)
                 return (
                     f'<p class="docx-para docx-para-editable">'
-                    f"{_escape_html(label_part)}{inp}</p>"
+                    f"{prefix_html}{_escape_html(label_part)}{inp}</p>"
                 )
-        if mode == "pre_approval" and not _is_readonly_mode(mode) and not is_locked_section_title(para_text) and not is_section_heading_paragraph(para_text) and len(para_text.strip()) > 5:
+        if mode == "pre_approval" and not _is_readonly_mode(mode) and not is_locked_section_title(prefixed_clean_p) and not is_section_heading_paragraph(prefixed_clean_p) and len(para_text.strip()) > 5:
             loc = f"para_{para_index}"
             val_esc = _escape_html(para_text)
             calc_rows = max(2, min(8, len(para_text) // 70 + 1))
+            if prefix_html:
+                return (
+                    f'<div class="docx-para-edit-wrapper" style="margin: 6px 0; display:flex; align-items:flex-start; gap:6px;">'
+                    f'<span class="docx-num-prefix" style="padding-top:6px; flex-shrink:0;">{prefix_html}</span>'
+                    f'<textarea name="fields[{loc}]" class="docx-input docx-para-content" '
+                    f'rows="{calc_rows}" style="flex:1; width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #facc15; border-bottom:2px solid #4e73df; border-radius:4px; background-color:#fffde7 !important;">{val_esc}</textarea>'
+                    f'</div>'
+                )
             return (
                 f'<div class="docx-para-edit-wrapper" style="margin: 6px 0;">'
                 f'<textarea name="fields[{loc}]" class="docx-input docx-para-content" '
                 f'rows="{calc_rows}" style="width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #facc15; border-bottom:2px solid #4e73df; border-radius:4px; background-color:#fffde7 !important;">{val_esc}</textarea>'
                 f'</div>'
             )
-        return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
+        return f'<p class="docx-para">{prefix_html}{_escape_html(dedupe_colon_label(para_text))}</p>'
 
     return ""
 
@@ -1620,7 +2062,24 @@ def _resolve_cell_field(
 #   1. De-duplicates merged cells in each row (skip duplicate tc ids)
 #   2. Uses len(row.cells) for 2-col detection — must match doc_parser.py
 #   3. Uses original col_index from enumerate(row.cells) for location keys
-def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str:
+def _cell_numbered_text(cell, num_resolver) -> str:
+    """Resolve cell paragraph text including Word <w:numPr> prefixes (idempotent via resolver cache)."""
+    tc = getattr(cell, "_tc", None)
+    if tc is None or num_resolver is None:
+        return cell.text.strip()
+    lines = []
+    for p_el in tc.findall(qn("w:p")):
+        p_txt = _para_text_from_element(p_el)
+        if p_txt:
+            pref, is_bul = num_resolver.prefix_for_p(p_el)
+            eff_pref = _strip_duplicate_prefix(p_txt, pref, is_bul)
+            lines.append(f"{eff_pref} {p_txt}".strip() if eff_pref else p_txt)
+        else:
+            lines.append("")
+    return "\n".join(ln for ln in lines if ln).strip() or cell.text.strip()
+
+
+def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_tracker: list = None, header_tpl: str = "", footer_tpl: str = "", num_resolver=None) -> str:
     html = [f'<table class="docx-table" data-table-index="{t_idx}">']
     readonly = _is_readonly_mode(mode)
     sl_no_col = _table_sl_no_col_index(table)
@@ -1628,24 +2087,56 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
     col_headers = get_table_column_headers(table, is_report_approval_block_table(table))
 
     for r_idx, row in enumerate(table.rows):
+        is_row_page_break = False
+        if r_idx > 0:
+            try:
+                from lxml import etree
+                xml_b = etree.tostring(row._tr)
+                if b"lastRenderedPageBreak" in xml_b or b'type="page"' in xml_b:
+                    is_row_page_break = True
+            except Exception:
+                pass
+
+        if r_idx > 0 and page_tracker is not None and (is_row_page_break or is_repeated_column_header_row(row, col_headers)):
+            page_tracker[0] += 1
+            next_p = page_tracker[0]
+            html.append("</table></div>")
+            prev_f = footer_tpl.replace("{PAGE}", str(next_p - 1)) if footer_tpl else ""
+            html.append(f"{prev_f}</div>")
+            html.append(
+                f'<div class="docx-page-break-indicator no-print" data-next-page="{next_p}">\n'
+                f'  <div class="docx-page-break-line"></div>\n'
+                f'  <div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page {next_p}</div>\n'
+                f'  <div class="docx-page-break-line"></div>\n'
+                f'</div>'
+            )
+            next_h = header_tpl.replace("{PAGE}", str(next_p)) if header_tpl else ""
+            html.append(
+                f'<div class="docx-a4-page" data-page-number="{next_p}" id="docxPage{next_p}">\n'
+                f'{next_h}\n'
+                f'<div class="docx-page-body">\n'
+                f'<table class="docx-table" data-table-index="{t_idx}">'
+            )
+
         html.append(f'<tr data-row-index="{r_idx}">')
 
         cells = row.cells
         # "Mechanical Adjustment:" / "Machine Performance:" / "Major components :" are merged title rows.
         # Col 0 is the Sr. No. column, so without this they render as the row number.
         if is_equipment_section_banner_row(row):
-            banner = dedupe_colon_label(cells[0].text.strip()) if cells else ""
+            raw_banner = _cell_numbered_text(cells[0], num_resolver) if cells else ""
+            banner = dedupe_colon_label(raw_banner)
             colspan = len(cells) or 1
             if r_idx == 0:
                 style = _inline_cell_style("font-weight:bold;background:#f1f5f9; color:#1e293b;", readonly=readonly)
                 html.append(
-                    f'<th class="docx-cell docx-table-header" colspan="{colspan}" style="{style}">'
+                    f'<th class="docx-cell docx-table-header docx-heading-target" data-heading-text="{_escape_html(banner.upper())}" colspan="{colspan}" style="{style}">'
                     f"{_escape_html(banner)}</th>"
                 )
             else:
                 style = _inline_cell_style("font-weight:bold;background:#f8fafc; color:#1e293b;", readonly=readonly)
                 html.append(
-                    f'<td class="docx-cell" colspan="{colspan}" style="{style}">'
+                    f'<td class="docx-cell docx-heading-target" data-heading-text="{_escape_html(banner.upper())}" colspan="{colspan}" style="{style}">'
                     f"{_escape_html(banner)}</td>"
                 )
             html.append("</tr>")
@@ -1685,6 +2176,11 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
             colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
 
             text = dedupe_colon_label(cell.text.strip())
+            display_text = (
+                dedupe_colon_label(_cell_numbered_text(cell, num_resolver))
+                if (r_idx > 0 and num_resolver is not None)
+                else text
+            )
             is_header = r_idx == 0 and not (is_two_col and not is_two_col_grid_table(table) and not is_two_col_header_row(cells, table.rows))
             cell_style = "font-weight:bold;" if is_header else ""
             rowspan_attr = ""
@@ -1707,28 +2203,61 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                         title_part = m_toc.group(1).strip()
                         page_part = m_toc.group(2).strip()
                         loc = f"table_{t_idx}_row_{r_idx}_toc_{l_idx}"
+                        title_loc = f"table_{t_idx}_row_{r_idx}_toc_{l_idx}_title"
                         val = page_part
+                        title_val = title_part
                         if field_map and loc in field_map:
                             stored = field_map[loc].get("value")
                             if stored is not None and str(stored).strip() != "":
                                 val = str(stored).strip()
-                        m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title_part)
+                        if field_map and title_loc in field_map:
+                            stored_title = field_map[title_loc].get("value")
+                            if stored_title is not None and str(stored_title).strip() != "":
+                                title_val = str(stored_title).strip()
+                        m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title_val)
                         sec_num = m_sec.group(1) if m_sec else ""
-                        clean_title = m_sec.group(2) if m_sec else title_part
+                        clean_title = m_sec.group(2) if m_sec else title_val
                         rendered_lines.append(
-                            f'<div class="docx-toc-line" style="display: flex; align-items: baseline; justify-content: space-between; padding: 2px 0;" data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}">'
-                            f'<span class="toc-title">{_escape_html(title_part)}</span>'
-                            f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 8px; min-width: 16px; height: 1em;"></span>'
+                            f'<div class="docx-toc-line" style="display: flex; align-items: center; justify-content: space-between; padding: 2px 0; gap: 8px;" data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}">'
+                            f'<input type="text" name="fields[{title_loc}]" class="docx-input docx-toc-title-input" value="{_escape_html(title_val)}" '
+                            f'style="flex: 1; min-width: 140px; font-weight: 500; font-size: 13px; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7;">'
+                            f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 4px; min-width: 16px; height: 1em;"></span>'
                             f'<input type="number" min="1" max="999" name="fields[{loc}]" '
                             f'class="docx-input docx-toc-page-input" '
                             f'data-toc-sec="{_escape_html(sec_num)}" '
                             f'data-toc-title="{_escape_html(clean_title)}" '
                             f'value="{_escape_html(val)}" '
-                            f'style="width: 52px; height: 24px; text-align: center; font-weight: 600; font-size: 12px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7; margin-left: 6px;">'
+                            f'style="width: 52px; height: 26px; text-align: center; font-weight: 600; font-size: 12px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7;">'
+                            f'</div>'
+                        )
+                    elif m_toc and readonly:
+                        title_part = m_toc.group(1).strip()
+                        page_part = m_toc.group(2).strip()
+                        rendered_lines.append(
+                            f'<div class="docx-toc-line" style="display: flex; align-items: baseline; justify-content: space-between; padding: 2px 0;">'
+                            f'<span class="toc-title">{_escape_html(title_part)}</span>'
+                            f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 8px; min-width: 16px; height: 1em;"></span>'
+                            f'<span class="toc-page" style="font-weight: 600; font-size: 13px;">{_escape_html(page_part)}</span>'
                             f'</div>'
                         )
                     else:
-                        rendered_lines.append(f'<div>{_escape_html(line)}</div>')
+                        if toc_table and not readonly:
+                            loc = f"table_{t_idx}_row_{r_idx}_col_{col_idx}"
+                            if len(lines) > 1:
+                                loc = f"{loc}_line_{l_idx}"
+                            cell_val = line
+                            if field_map and loc in field_map:
+                                stored = field_map[loc].get("value")
+                                if stored is not None and str(stored).strip() != "":
+                                    cell_val = str(stored).strip()
+                            rendered_lines.append(
+                                f'<input type="text" name="fields[{loc}]" class="docx-input docx-toc-title-input" '
+                                f'value="{_escape_html(cell_val)}" '
+                                f'style="width:100%; box-sizing:border-box; font-weight:500; font-size:13px; padding:2px 6px; '
+                                f'border:1px solid #cbd5e1; border-radius:4px; background:#fffde7;">'
+                            )
+                        else:
+                            rendered_lines.append(f'<div>{_escape_html(line)}</div>')
                 cell_content = "".join(rendered_lines) if rendered_lines else _escape_html(text)
                 html.append(
                     f'<td class="docx-cell" style="{style}"{rowspan_attr}{colspan_attr}>'
@@ -1803,6 +2332,43 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                 html.append(_render_radio_yes_no_cell(loc, pseudo, text, mode, colspan_attr=colspan_attr))
                 continue
 
+            header_cells = table.rows[0].cells if table.rows else []
+            header_texts = [c.text.strip().lower() for c in header_cells]
+            this_header = header_texts[col_idx] if col_idx < len(header_texts) else ""
+            if (
+                not readonly
+                and r_idx > 0
+                and "deviation" in this_header
+                and any("corrective" in h for h in header_texts)
+            ):
+                dev_loc = (
+                    field["location"]
+                    if (field and field.get("location"))
+                    else f"table_{t_idx}_row_{r_idx}_col_{col_idx}"
+                )
+                dev_val = (field.get("value") if field else "") or text
+                if str(dev_val).strip() in ("—", "-", "–"):
+                    dev_val = ""
+                widget_field = dict(field) if field else {
+                    "location": dev_loc,
+                    "label": "Deviation (if any)",
+                    "type": "table_2col",
+                }
+                widget_field["widget"] = "textarea"
+                widget_field["locked"] = False
+                inp = _render_field_input(
+                    dev_loc,
+                    widget_field,
+                    css_class="docx-input",
+                    placeholder="Enter deviation...",
+                    value=dev_val,
+                )
+                html.append(
+                    f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
+                    f"{inp}</td>"
+                )
+                continue
+
             if is_two_col and col_idx == 0:
                 col0_loc = field["location"] if (field and "location" in field) else f"table_{t_idx}_row_{r_idx}_col_0"
                 col0_val = (field.get("value") if field else "") or text
@@ -1811,6 +2377,25 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                 is_label_type = (field and field.get("type") == "table_2col_label") or (field is None)
                 field_label = (field.get("label", "") if field else "") or row_label or text
                 is_deviation = "deviation" in field_label.lower() or "deviation" in text.lower()
+                header_left = table.rows[0].cells[0].text.strip().lower() if table.rows else ""
+                header_right = table.rows[0].cells[1].text.strip().lower() if table.rows and len(table.rows[0].cells) > 1 else ""
+                deviation_grid = "deviation" in header_left and "corrective" in header_right
+                if deviation_grid and r_idx > 0 and mode == "pre_approval" and not readonly:
+                    widget_field = dict(field) if field else {"location": col0_loc, "label": "Deviation (if any)", "type": "table_2col"}
+                    widget_field["widget"] = "textarea"
+                    widget_field["locked"] = False
+                    inp = _render_field_input(
+                        col0_loc,
+                        widget_field,
+                        css_class="docx-input",
+                        placeholder="Enter deviation...",
+                        value=col0_val,
+                    )
+                    html.append(
+                        f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
+                        f"{inp}</td>"
+                    )
+                    continue
                 if not is_two_col_grid_table(table) or readonly or (field and _is_field_locked(field)) or (is_label_type and mode != "pre_approval"):
                     display = _render_readonly_span(text or col0_val, field, col0_loc)
                     html.append(_readonly_td(display, cell_style=cell_style, rowspan_attr=rowspan_attr, colspan_attr=colspan_attr, location=col0_loc))
@@ -1957,7 +2542,8 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
             elif field and _is_field_locked(field):
                 style = _inline_cell_style(cell_style, readonly=readonly)
                 locked_bg = f"background:#f5f5f5;" if readonly else ""
-                locked_val = (field.get("value") or "").strip() or text
+                raw_stored = (field.get("value") or "").strip()
+                locked_val = display_text if (not raw_stored or raw_stored == text) else raw_stored
                 if readonly:
                     display = _render_readonly_span(locked_val, field, field.get("location", ""))
                     html.append(
@@ -1971,16 +2557,18 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                         )
                     )
                 else:
+                    locked_html = "<br>".join(_escape_html(ln) for ln in locked_val.split("\n"))
                     html.append(
                         f'<td class="docx-cell locked" style="{style}{locked_bg}"{rowspan_attr}{colspan_attr}>'
-                        f"{_escape_html(locked_val)}</td>"
+                        f"{locked_html}</td>"
                     )
             elif not readonly and r_idx > 0 and not is_header:
                 if mode != "pre_approval" and text.strip() != "":
                     style = _inline_cell_style(cell_style, readonly=readonly)
+                    cell_html = "<br>".join(_escape_html(ln) for ln in display_text.split("\n"))
                     html.append(
                         f'<td class="docx-cell" style="{style}"{rowspan_attr}{colspan_attr}>'
-                        f"{_escape_html(text)}</td>"
+                        f"{cell_html}</td>"
                     )
                 else:
                     cell_loc = f"table_{t_idx}_row_{r_idx}_col_{col_idx}"
@@ -1997,15 +2585,194 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
                     )
             else:
                 style = _inline_cell_style(cell_style, readonly=readonly)
+                cell_html = "<br>".join(_escape_html(ln) for ln in display_text.split("\n"))
                 html.append(
                     f'<td class="docx-cell" style="{style}"{rowspan_attr}{colspan_attr}>'
-                    f"{_escape_html(text)}</td>"
+                    f"{cell_html}</td>"
                 )
 
         html.append("</tr>")
 
     html.append("</table>")
     return "\n".join(html)
+
+
+def _element_has_page_break(element) -> bool:
+    """Detect if an XML element contains a hard or rendered page break."""
+    try:
+        from lxml import etree
+        xml_b = etree.tostring(element)
+        return b"lastRenderedPageBreak" in xml_b or b'type="page"' in xml_b or b"<w:pageBreakBefore" in xml_b
+    except Exception:
+        return False
+
+
+def _collect_live_letterhead_values(field_map: dict | None) -> dict[str, str]:
+    """Build cover-key -> non-empty value map from live field_map for A4 letterheads."""
+    values: dict[str, str] = {}
+    if not field_map:
+        return values
+    for f in field_map.values():
+        if not isinstance(f, dict):
+            continue
+        ck = str(f.get("cover_field") or "").strip()
+        if not ck:
+            matched = _match_cover_label_cell(str(f.get("label") or ""))
+            if matched:
+                ck = matched[0]
+        val = str(f.get("value") or "").strip()
+        if ck and val and ck not in values:
+            values[ck] = val
+    return values
+
+
+def extract_header_and_footer_templates(doc, field_map: dict | None = None) -> tuple[str, str]:
+    """Extract official Header table and Footer from docx section to render on each A4 sheet."""
+    header_html = ""
+    footer_annex = "ANNEX_SKM_QA_070156 | (1.0) | SOP_SKM_QA_070136 | CLASS I"
+    live_cover_values = _collect_live_letterhead_values(field_map)
+
+    if doc.sections:
+        sec = doc.sections[0]
+        # Footer text from template
+        for p in sec.footer.paragraphs:
+            txt = p.text.strip()
+            if "ANNEX" in txt or "SOP" in txt or "CLASS" in txt:
+                footer_annex = txt
+                break
+
+        header_tables = list(sec.header.tables or [])
+        if not header_tables and getattr(sec, "first_page_header", None) is not None:
+            header_tables = list(sec.first_page_header.tables or [])
+
+        # Header table from template
+        if header_tables:
+            tbl = header_tables[0]
+            rows_html = []
+            for r_idx, row in enumerate(tbl.rows):
+                seen_tc = set()
+                cell_htmls = []
+                prev_label_key = ""
+                for c_idx, cell in enumerate(row.cells):
+                    tc_id = id(cell._tc)
+                    if tc_id in seen_tc:
+                        continue
+                    seen_tc.add(tc_id)
+
+                    colspan = 1
+                    for other in row.cells[c_idx + 1:]:
+                        if id(other._tc) == tc_id:
+                            colspan += 1
+                        else:
+                            break
+
+                    rowspan = 1
+                    for other_r in tbl.rows[r_idx + 1:]:
+                        if c_idx < len(other_r.cells) and id(other_r.cells[c_idx]._tc) == tc_id:
+                            rowspan += 1
+                        else:
+                            break
+
+                    is_covered = False
+                    for prev_r in tbl.rows[:r_idx]:
+                        if c_idx < len(prev_r.cells) and id(prev_r.cells[c_idx]._tc) == tc_id:
+                            is_covered = True
+                            break
+                    if is_covered:
+                        continue
+
+                    cs_attr = f' colspan="{colspan}"' if colspan > 1 else ""
+                    rs_attr = f' rowspan="{rowspan}"' if rowspan > 1 else ""
+                    txt = dedupe_colon_label(cell.text.strip())
+                    own_match = _match_cover_label_cell(txt)
+                    is_page_label = bool(re.search(r"^PAGE\s*NO\.?$", txt, re.IGNORECASE))
+                    is_page_value = bool(
+                        "24 of 24" in txt
+                        or re.search(r"\d+\s*of\s*\d+", txt, re.IGNORECASE)
+                        or (r_idx == 5 and c_idx == 4)
+                    )
+                    lh_attr = ""
+                    style = "border: 1px solid #334155; padding: 3px 6px; vertical-align: middle; font-size: 11px; color: #0f172a; background: #ffffff;"
+                    if r_idx == 0 and c_idx == 0:
+                        style += " width: 95px; text-align: center; background: #ffffff;"
+                        content = '<img src="/storage/lupin.png" alt="Lupin" style="max-height: 40px; width: auto;" onerror="this.outerHTML=\'<b style=\\\'font-size:13px;color:#047857;\\\'>LUPIN</b>\'">'
+                        prev_label_key = ""
+                    elif r_idx in (0, 1):
+                        style += " text-align: center; font-weight: 700; background: #f8fafc; font-size: 11px;"
+                        content = _escape_html(txt)
+                        prev_label_key = ""
+                    elif is_page_label:
+                        style += " font-weight: 600; background: #f8fafc;"
+                        content = "PAGE NO."
+                        prev_label_key = ""
+                    elif is_page_value:
+                        style += " font-weight: 700; text-align: center; background: #ffffff;"
+                        content = 'Page <span class="current-page-num">{PAGE}</span> of <span class="total-pages-count">{TOTAL}</span>'
+                        prev_label_key = ""
+                    elif own_match is not None:
+                        style += " font-weight: 600; background: #f8fafc;"
+                        content = _escape_html(txt)
+                        prev_label_key = own_match[0]
+                    elif prev_label_key:
+                        loc_key = f"header_0_row_{r_idx}_col_{c_idx}"
+                        loc_field = (field_map or {}).get(loc_key) if field_map else None
+                        live_val = ""
+                        if isinstance(loc_field, dict) and str(loc_field.get("value") or "").strip():
+                            live_val = str(loc_field.get("value") or "").strip()
+                        elif prev_label_key in live_cover_values:
+                            live_val = live_cover_values[prev_label_key]
+                        else:
+                            live_val = txt
+                        lh_attr = f' data-letterhead-field="{_escape_html(prev_label_key)}"'
+                        content = _escape_html(live_val)
+                        prev_label_key = ""
+                    elif c_idx in (1, 3):
+                        style += " font-weight: 600; background: #f8fafc;"
+                        content = _escape_html(txt)
+                        prev_label_key = ""
+                    else:
+                        content = _escape_html(txt)
+                        prev_label_key = ""
+
+                    cell_htmls.append(f'<td{rs_attr}{cs_attr}{lh_attr} style="{style}">{content}</td>')
+                rows_html.append("<tr>" + "".join(cell_htmls) + "</tr>")
+
+            header_html = (
+                '<div class="docx-page-official-header">\n'
+                '  <table class="docx-table header-table" style="width: 100%; border-collapse: collapse; margin-bottom: 0; table-layout: fixed;">\n'
+                + "\n".join(rows_html) + "\n"
+                "  </table>\n"
+                "</div>"
+            )
+
+    if not header_html:
+        header_html = (
+            '<div class="docx-page-official-header">\n'
+            '  <table class="docx-table header-table" style="width: 100%; border-collapse: collapse; margin-bottom: 0; table-layout: fixed;">\n'
+            '    <tr>\n'
+            '      <td style="width: 95px; text-align: center; vertical-align: middle; border: 1px solid #334155; padding: 4px; background: #ffffff;">\n'
+            '        <img src="/storage/lupin.png" alt="Lupin" style="max-height: 38px; width: auto;" onerror="this.outerHTML=\'<b style=\\\'color:#047857;\\\'>LUPIN</b>\x27">\n'
+            '      </td>\n'
+            '      <td style="text-align: center; font-weight: 700; font-size: 12px; border: 1px solid #334155; padding: 4px; background: #f8fafc;">\n'
+            '        LUPIN LIMITED\n'
+            '        <div style="font-size: 10px; font-weight: 600; color: #475569; margin-top: 2px;">PERIODIC REQUALIFICATION PROTOCOL AND REPORT</div>\n'
+            '      </td>\n'
+            '      <td style="width: 130px; text-align: center; font-size: 10px; font-weight: 700; border: 1px solid #334155; padding: 4px; background: #f8fafc;">\n'
+            '        PAGE NO.<br>\n'
+            '        <span style="font-weight: 600;">Page <span class="current-page-num">{PAGE}</span> of <span class="total-pages-count">{TOTAL}</span></span>\n'
+            '      </td>\n'
+            '    </tr>\n'
+            '  </table>\n'
+            '</div>'
+        )
+
+    footer_html = (
+        '<div class="docx-page-official-footer">\n'
+        f'  <span class="docx-footer-annex">{_escape_html(footer_annex)}</span>\n'
+        '  <span class="docx-footer-page">Page <span class="current-page-num">{PAGE}</span> of <span class="total-pages-count">{TOTAL}</span></span>\n'
+        '</div>'
+    )
+    return header_html, footer_html
 
 
 # ── build_fill_html() ───────────────────────────────
@@ -2015,7 +2782,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit") -> str
 # Key steps:
 #   1. Walks doc.element.body children in order (tbl / p tags)
 #   2. Renders each table via _render_table() and each paragraph inline
-#   3. Paragraph locations use enumerate(doc.paragraphs) indices (same as doc_parser.py)
+#   3. Breaks document into realistic A4 page sheets (<div class="docx-a4-page">)
 #   4. De-duplicates repeated <p> element references in the body walk
 def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str:
     """
@@ -2056,9 +2823,19 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
     for txbx_index, parent_para_index, txbx_element in iter_unique_textboxes(doc):
         textbox_by_parent_para[parent_para_index] = (txbx_index, txbx_element)
 
+    header_html_tpl, footer_html_tpl = extract_header_and_footer_templates(doc, field_map=field_map)
+    num_resolver = _WordNumberingResolver(doc)
     preview_class = "docx-preview docx-preview-readonly" if _is_readonly_mode(mode) else "docx-preview"
-    html_parts = [f'<div class="{preview_class}">']
+    page_tracker = [1]
+    h1 = header_html_tpl.replace("{PAGE}", "1")
+    html_parts = [
+        f'<div class="{preview_class}">',
+        f'<div class="docx-a4-page" data-page-number="1" id="docxPage1">',
+        f'{h1}',
+        f'<div class="docx-page-body">'
+    ]
     table_idx = 0
+    has_content_on_page = False
 
     # Walk doc.element.body in document order — render tables and paragraphs as they appear.
     for child in doc.element.body:
@@ -2067,8 +2844,18 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
         if tag == "tbl":
             if table_idx < len(doc.tables):
                 html_parts.append(
-                    _render_table(doc.tables[table_idx], table_idx, field_map, mode)
+                    _render_table(
+                        doc.tables[table_idx],
+                        table_idx,
+                        field_map,
+                        mode,
+                        page_tracker=page_tracker,
+                        header_tpl=header_html_tpl,
+                        footer_tpl=footer_html_tpl,
+                        num_resolver=num_resolver,
+                    )
                 )
+                has_content_on_page = True
             table_idx += 1
 
         elif tag == "p":
@@ -2076,26 +2863,76 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
             if para_index is None:
                 para_text = _para_text_from_element(child)
                 if para_text:
-                    html_parts.append(f'<p class="docx-para">{_escape_html(para_text)}</p>')
+                    num_prefix, is_bullet = num_resolver.prefix_for_p(child)
+                    if _element_has_page_break(child) and has_content_on_page:
+                        page_tracker[0] += 1
+                        next_p = page_tracker[0]
+                        prev_f = footer_html_tpl.replace("{PAGE}", str(next_p - 1))
+                        html_parts.append(f"</div>\n{prev_f}\n</div>")
+                        html_parts.append(
+                            f'<div class="docx-page-break-indicator no-print" data-next-page="{next_p}">\n'
+                            f'  <div class="docx-page-break-line"></div>\n'
+                            f'  <div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page {next_p}</div>\n'
+                            f'  <div class="docx-page-break-line"></div>\n'
+                            f'</div>\n'
+                        )
+                        next_h = header_html_tpl.replace("{PAGE}", str(next_p))
+                        html_parts.append(
+                            f'<div class="docx-a4-page" data-page-number="{next_p}" id="docxPage{next_p}">\n'
+                            f'{next_h}\n'
+                            f'<div class="docx-page-body">'
+                        )
+                    heading_html = _render_heading_paragraph(para_text, num_prefix=num_prefix, is_bullet=is_bullet)
+                    if heading_html:
+                        html_parts.append(heading_html)
+                    else:
+                        clean_p = dedupe_colon_label(para_text).strip()
+                        eff_pref = _strip_duplicate_prefix(clean_p, num_prefix, is_bullet)
+                        pref_span = _num_prefix_span(eff_pref, is_bullet)
+                        html_parts.append(f'<p class="docx-para">{pref_span}{_escape_html(clean_p)}</p>')
+                    has_content_on_page = True
                 continue
 
             if para_index in seen_para_indices:
                 continue
             seen_para_indices.add(para_index)
 
+            if _element_has_page_break(child) and has_content_on_page:
+                page_tracker[0] += 1
+                next_p = page_tracker[0]
+                prev_f = footer_html_tpl.replace("{PAGE}", str(next_p - 1))
+                html_parts.append(f"</div>\n{prev_f}\n</div>")
+                html_parts.append(
+                    f'<div class="docx-page-break-indicator no-print" data-next-page="{next_p}">\n'
+                    f'  <div class="docx-page-break-line"></div>\n'
+                    f'  <div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page {next_p}</div>\n'
+                    f'  <div class="docx-page-break-line"></div>\n'
+                    f'</div>\n'
+                )
+                next_h = header_html_tpl.replace("{PAGE}", str(next_p))
+                html_parts.append(
+                    f'<div class="docx-a4-page" data-page-number="{next_p}" id="docxPage{next_p}">\n'
+                    f'{next_h}\n'
+                    f'<div class="docx-page-body">'
+                )
+
             if para_index in textbox_by_parent_para:
                 heading = (
                     paragraphs[para_index].text.strip()
                     or para_text_by_index.get(para_index, "")
                 )
+                num_prefix, is_bullet = (
+                    num_resolver.prefix_for_p(child) if heading.strip() else ("", False)
+                )
                 txbx_index, txbx_element = textbox_by_parent_para[para_index]
                 if heading and has_paragraph_blank(heading):
                     field = field_map.get(f"para_{para_index}")
                     rendered = _render_paragraph(
-                        para_index, heading, field, field_map, mode
+                        para_index, heading, field, field_map, mode, num_prefix=num_prefix, is_bullet=is_bullet
                     )
                     if rendered:
                         html_parts.append(rendered)
+                        has_content_on_page = True
                 elif heading:
                     from doc_parser import _para_text_from_element as _parser_para_text
 
@@ -2105,26 +2942,60 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                         _parser_para_text(inner_paras[0]).strip() if inner_paras else ""
                     )
                     if dedupe_colon_label(heading) != dedupe_colon_label(inner_heading):
-                        html_parts.append(
-                            f'<p class="docx-para">{_escape_html(dedupe_colon_label(heading))}</p>'
-                        )
+                        heading_html = _render_heading_paragraph(heading, num_prefix=num_prefix, is_bullet=is_bullet)
+                        if heading_html:
+                            html_parts.append(heading_html)
+                        else:
+                            clean_h = dedupe_colon_label(heading)
+                            eff_pref = _strip_duplicate_prefix(clean_h, num_prefix, is_bullet)
+                            pref_span = _num_prefix_span(eff_pref, is_bullet)
+                            html_parts.append(
+                                f'<p class="docx-para">{pref_span}{_escape_html(clean_h)}</p>'
+                            )
+                        has_content_on_page = True
                 html_parts.append(
                     _render_textbox_html(txbx_index, txbx_element, field_map, mode)
                 )
+                has_content_on_page = True
                 continue
 
             para_text = para_text_by_index.get(
                 para_index, _para_text_from_element(child, exclude_textboxes=True)
             )
+            num_prefix, is_bullet = (
+                num_resolver.prefix_for_p(child) if (para_text or "").strip() else ("", False)
+            )
             field = field_map.get(f"para_{para_index}")
             if field is None:
                 blank_key = f"para_{para_index}_blank_0"
                 field = field_map.get(blank_key)
-            rendered = _render_paragraph(para_index, para_text, field, field_map, mode)
+            rendered = _render_paragraph(
+                para_index, para_text, field, field_map, mode, num_prefix=num_prefix, is_bullet=is_bullet
+            )
             if rendered:
                 html_parts.append(rendered)
+                has_content_on_page = True
 
         elif tag == "sdt":
+            if _element_has_page_break(child) and has_content_on_page:
+                page_tracker[0] += 1
+                next_p = page_tracker[0]
+                prev_f = footer_html_tpl.replace("{PAGE}", str(next_p - 1))
+                html_parts.append(f"</div>\n{prev_f}\n</div>")
+                html_parts.append(
+                    f'<div class="docx-page-break-indicator no-print" data-next-page="{next_p}">\n'
+                    f'  <div class="docx-page-break-line"></div>\n'
+                    f'  <div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page {next_p}</div>\n'
+                    f'  <div class="docx-page-break-line"></div>\n'
+                    f'</div>\n'
+                )
+                next_h = header_html_tpl.replace("{PAGE}", str(next_p))
+                html_parts.append(
+                    f'<div class="docx-a4-page" data-page-number="{next_p}" id="docxPage{next_p}">\n'
+                    f'{next_h}\n'
+                    f'<div class="docx-page-body">'
+                )
+
             # Word Structured Document Tag (Table of Contents)
             W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
             sdt_paras = child.findall(f".//{{{W_NS}}}p")
@@ -2156,18 +3027,31 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                         )
                     for toc_idx, (title, page) in enumerate(toc_entries):
                         loc = f"toc_sdt_{toc_idx}"
+                        title_loc = f"toc_sdt_{toc_idx}_title"
                         val = page
+                        title_val = title
                         if field_map and loc in field_map:
                             stored = field_map[loc].get("value")
                             if stored is not None and str(stored).strip() != "":
                                 val = str(stored).strip()
-                        m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title)
+                        if field_map and title_loc in field_map:
+                            stored_title = field_map[title_loc].get("value")
+                            if stored_title is not None and str(stored_title).strip() != "":
+                                title_val = str(stored_title).strip()
+                        m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title_val)
                         sec_num = m_sec.group(1) if m_sec else ""
-                        clean_title = m_sec.group(2) if m_sec else title
+                        clean_title = m_sec.group(2) if m_sec else title_val
                         if page:
                             if _is_readonly_mode(mode):
                                 page_html = f'<span class="toc-page" style="flex-shrink: 0; font-weight: 600; color: #1e293b;">{_escape_html(val)}</span>'
+                                title_html = f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500;">{_escape_html(title_val)}</span>'
                             else:
+                                title_html = (
+                                    f'<input type="text" name="fields[{title_loc}]" '
+                                    f'class="docx-input docx-toc-title-input" '
+                                    f'value="{_escape_html(title_val)}" '
+                                    f'style="flex: 1; min-width: 140px; font-weight: 500; font-size: 13px; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7;">'
+                                )
                                 page_html = (
                                     f'<span class="toc-page-wrap" style="flex-shrink: 0; display: inline-flex; align-items: center;">'
                                     f'<input type="number" min="1" max="999" name="fields[{loc}]" '
@@ -2179,24 +3063,29 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                                     f'</span>'
                                 )
                             html_parts.append(
-                                f'<div class="docx-toc-line" style="display: flex; align-items: baseline; justify-content: space-between; '
-                                f'padding: 4px 0; font-size: 13px; color: #334155; line-height: 1.6;" '
+                                f'<div class="docx-toc-line" style="display: flex; align-items: center; justify-content: space-between; '
+                                f'padding: 3px 0; font-size: 13px; color: #334155; line-height: 1.6; gap: 8px;" '
                                 f'data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}">'
-                                f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500;">{_escape_html(title)}</span>'
-                                f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 10px; min-width: 24px; height: 1em;"></span>'
+                                f'{title_html}'
+                                f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 4px; min-width: 20px; height: 1em;"></span>'
                                 f'{page_html}'
                                 f'</div>'
                             )
                         else:
                             html_parts.append(
                                 f'<div class="docx-toc-line" style="padding: 4px 0; font-size: 13px; color: #334155; line-height: 1.6;">'
-                                f'<span class="toc-title" style="font-weight: 500;">{_escape_html(title)}</span>'
+                                f'<span class="toc-title" style="font-weight: 500;">{_escape_html(title_val)}</span>'
                                 f'</div>'
                             )
                     html_parts.append('</div>')
+                    has_content_on_page = True
 
-    html_parts.append("</div>")
-    return "\n".join(html_parts)
+    last_f = footer_html_tpl.replace("{PAGE}", str(page_tracker[0]))
+    html_parts.append(f"</div>\n{last_f}\n</div>")  # close .docx-page-body and .docx-a4-page
+    html_parts.append("</div>")  # close .docx-preview
+    full_html = "\n".join(html_parts)
+    full_html = full_html.replace("{TOTAL}", str(page_tracker[0]))
+    return full_html
 
 
 # ── docx_image_map() ──────────────────────────────

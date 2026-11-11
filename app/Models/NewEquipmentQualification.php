@@ -17,10 +17,16 @@ class NewEquipmentQualification extends Model
         'source_id',         // file this edited copy was saved from
         'applied_count',     // how many Word slots Python wrote
         'edits_json',        // typed values from the preview (JSON text)
+        'preview_html',      // cached HTML generated once via Python /preview
+        'preview_fields',    // cached fillable field metadata + cache key
         'approval_status',   // draft, pending, returned, rejected, approved
         'display_seq',       // per-module auto-increment for list label
         'display_code',      // persisted NEQ1, NEQ2, … (roots only; not used as FK)
         'reference_document_no', // letterhead Reference Document No. (Version No.)
+    ];
+
+    protected $casts = [
+        'preview_fields' => 'array',
     ];
 
     public function uploader(): BelongsTo
@@ -460,11 +466,25 @@ class NewEquipmentQualification extends Model
                 $pools[] = $payload[$key];
             }
         }
+        if (! empty($payload['fields']) && is_array($payload['fields'])) {
+            $labels = is_array($payload['field_labels'] ?? null) ? $payload['field_labels'] : [];
+            $fieldItems = [];
+            foreach ($payload['fields'] as $loc => $val) {
+                if (is_scalar($val) && isset($labels[$loc])) {
+                    $fieldItems[] = ['label' => (string) $labels[$loc], 'text' => (string) $val];
+                }
+            }
+            if ($fieldItems !== []) {
+                $pools[] = $fieldItems;
+            }
+        }
         if ($pools === [] && (isset($payload['label']) || isset($payload['text']))) {
             $pools[] = [$payload];
         }
 
         $referenceNo = '';
+        $fallbackDocNo = '';
+        $hasReferenceLabel = false;
 
         foreach ($pools as $items) {
             foreach ($items as $item) {
@@ -477,7 +497,13 @@ class NewEquipmentQualification extends Model
                 }
                 $isReference = str_contains($label, 'reference document')
                     || (bool) preg_match('/\bref\.?\s*document\b/', $label);
-                if (! $isReference) {
+                if ($isReference) {
+                    $hasReferenceLabel = true;
+                }
+                $isStandaloneDocNo = ! $isReference
+                    && ! str_contains($label, 'protocol')
+                    && (bool) preg_match('/^(?:document\s*no\.?|document\s*number)\b/', $label);
+                if (! $isReference && ! $isStandaloneDocNo) {
                     continue;
                 }
 
@@ -486,13 +512,19 @@ class NewEquipmentQualification extends Model
                 if (! static::isPlausibleDocumentNumber($text) || static::isDocumentNumberLabelOnly($text)) {
                     continue;
                 }
-                if ($referenceNo === '') {
+                if ($isReference && $referenceNo === '') {
                     $referenceNo = $text;
+                } elseif ($isStandaloneDocNo && $fallbackDocNo === '') {
+                    $fallbackDocNo = $text;
                 }
             }
         }
 
-        return $referenceNo;
+        if ($referenceNo !== '') {
+            return $referenceNo;
+        }
+
+        return $hasReferenceLabel ? '' : $fallbackDocNo;
     }
 
     /**
@@ -518,7 +550,7 @@ class NewEquipmentQualification extends Model
         if (! empty($this->source_id)) {
             return;
         }
-        if (trim((string) ($this->display_code ?? '')) !== '' && (int) ($this->display_seq ?? 0) > 0) {
+        if (trim((string) ($this->display_code ?? '')) !== '') {
             return;
         }
 
@@ -527,7 +559,7 @@ class NewEquipmentQualification extends Model
             if (! $locked || ! empty($locked->source_id)) {
                 return;
             }
-            if (trim((string) ($locked->display_code ?? '')) !== '' && (int) ($locked->display_seq ?? 0) > 0) {
+            if (trim((string) ($locked->display_code ?? '')) !== '') {
                 $this->display_seq = $locked->display_seq;
                 $this->display_code = $locked->display_code;
 
@@ -612,7 +644,107 @@ class NewEquipmentQualification extends Model
             ? $this->editedCopies->isNotEmpty()
             : $this->editedCopies()->exists();
 
+        if (! $hasEdit && $this->savedFieldValuesMap() !== []) {
+            $hasEdit = true;
+        }
+
         return $hasEdit ? 'edited' : 'original';
+    }
+
+    public static function computePreviewCacheKey(string $storedPath, string $absolutePath): string
+    {
+        $mtime = is_file($absolutePath) ? (int) (@filemtime($absolutePath) ?: 0) : 0;
+        $size = is_file($absolutePath) ? (int) (@filesize($absolutePath) ?: 0) : 0;
+
+        return sha1($storedPath) . ':' . $mtime . ':' . $size . ':v1';
+    }
+
+    public function cachedPreviewPayload(): array
+    {
+        $raw = $this->preview_fields;
+        if (! is_array($raw)) {
+            return ['fields' => [], 'cache_key' => '', 'header_table_count' => 1, 'para_target_map' => []];
+        }
+
+        if (isset($raw['fields']) && is_array($raw['fields'])) {
+            return [
+                'fields' => array_values($raw['fields']),
+                'cache_key' => (string) ($raw['cache_key'] ?? ''),
+                'header_table_count' => (int) ($raw['header_table_count'] ?? 1),
+                'para_target_map' => is_array($raw['para_target_map'] ?? null) ? $raw['para_target_map'] : [],
+            ];
+        }
+
+        return [
+            'fields' => array_values($raw),
+            'cache_key' => '',
+            'header_table_count' => 1,
+            'para_target_map' => [],
+        ];
+    }
+
+    public function cachedFillFields(): array
+    {
+        return $this->cachedPreviewPayload()['fields'];
+    }
+
+    public function hasValidPreviewCache(string $absolutePath): bool
+    {
+        if (trim((string) ($this->preview_html ?? '')) === '') {
+            return false;
+        }
+        $payload = $this->cachedPreviewPayload();
+        $expectedKey = static::computePreviewCacheKey((string) $this->stored_path, $absolutePath);
+
+        return $payload['cache_key'] !== '' && hash_equals($payload['cache_key'], $expectedKey);
+    }
+
+    public function decodedEditsPayload(): array
+    {
+        $raw = trim((string) ($this->edits_json ?? ''));
+        if ($raw === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    public function savedFieldValuesMap(): array
+    {
+        $decoded = $this->decodedEditsPayload();
+        $fields = $decoded['fields'] ?? null;
+
+        return is_array($fields) ? $fields : [];
+    }
+
+    public function needsDocxMaterialization(): bool
+    {
+        $decoded = $this->decodedEditsPayload();
+        if ($decoded === []) {
+            return false;
+        }
+
+        $draftVer = (float) ($decoded['draft_version'] ?? 0);
+        $matVer = (float) ($decoded['docx_materialized_version'] ?? 0);
+        $hasContent = ! empty($decoded['fields'])
+            || ! empty($decoded['table_ops'])
+            || ! empty($decoded['added_paragraphs'])
+            || ! empty($decoded['approvers'])
+            || ! empty($decoded['edits'])
+            || ! empty($decoded['cell_edits'])
+            || ! empty($decoded['checkbox_ops']);
+
+        if (! $hasContent) {
+            return false;
+        }
+
+        if ($draftVer > 0) {
+            return $draftVer > $matVer;
+        }
+
+        // Legacy payload saved on root/target with autosave before DOCX write.
+        return empty($this->source_id) && $matVer <= 0;
     }
 
     public function isFullyApproved(): bool

@@ -34,7 +34,22 @@ class NewEquipmentQualificationController extends Controller
         }
 
         // Temporary: show every imported NEQ document in the list (no uploader/assignee filter).
+        // Skip preview HTML and saved-edit JSON — those blobs make the list request exceed PHP's time limit.
         $allUploads = NewEquipmentQualification::query()
+            ->select([
+                'id',
+                'original_filename',
+                'stored_path',
+                'uploaded_by',
+                'source_id',
+                'applied_count',
+                'approval_status',
+                'display_seq',
+                'display_code',
+                'reference_document_no',
+                'created_at',
+                'updated_at',
+            ])
             ->orderByDesc('id')
             ->get();
 
@@ -62,11 +77,11 @@ class NewEquipmentQualificationController extends Controller
             return $original;
         });
 
-        // Prefer persisted display_seq; backfill / sanitize Document No. on roots.
+        // Backfill the list code only when it is still empty. Do not open Word files here.
         foreach ($uploads as $upload) {
-            $upload->assignDisplayCodeIfNeeded();
-            // Always re-resolve: clears bad PR-WBL-… auto-fills and picks QDS/ANNEX from edits.
-            $upload->referenceDocumentNo(true);
+            if (trim((string) ($upload->display_code ?? '')) === '') {
+                $upload->assignDisplayCodeIfNeeded();
+            }
         }
 
         // List newest protocol codes first (NEQ29, NEQ28, …).
@@ -157,10 +172,13 @@ class NewEquipmentQualificationController extends Controller
         ]);
     }
 
-    // Ask Python to extract header/body images (with crop) for the NEQ visual preview overlay.
-    public function previewHtml(NewEquipmentQualification $newEquipmentQualification): JsonResponse
-    {
+    // Return cached fill HTML for the NEQ viewer. Build it once from the DOCX when missing.
+    public function previewHtml(
+        NewEquipmentQualification $newEquipmentQualification,
+        NewEquipmentQualificationDocxService $docxService
+    ): JsonResponse {
         $this->authorizeRecord($newEquipmentQualification, 'view');
+        set_time_limit(180);
 
         $absolutePath = Storage::disk('public')->path($newEquipmentQualification->stored_path);
 
@@ -168,28 +186,70 @@ class NewEquipmentQualificationController extends Controller
             return response()->json(['error' => 'File not found.'], 404);
         }
 
-        $pythonUrl = rtrim(env('PYTHON_NLP_URL', 'http://127.0.0.1:8001'), '/');
+        try {
+            if ($newEquipmentQualification->hasValidPreviewCache($absolutePath)) {
+                $cached = $newEquipmentQualification->cachedPreviewPayload();
+                $html = (string) $newEquipmentQualification->preview_html;
+                $fields = $cached['fields'];
+                $headerTableCount = (int) $cached['header_table_count'];
+                $paraTargetMap = $cached['para_target_map'];
+            } else {
+                $built = $docxService->buildFillPreview($absolutePath);
+                $html = $built['html'];
+                $fields = $built['fields'];
+                $headerTableCount = (int) $built['header_table_count'];
+                $paraTargetMap = $built['para_target_map'];
+                try {
+                    $newEquipmentQualification->forceFill([
+                        'preview_html' => $html,
+                        'preview_fields' => [
+                            'fields' => $fields,
+                            'cache_key' => NewEquipmentQualification::computePreviewCacheKey(
+                                (string) $newEquipmentQualification->stored_path,
+                                $absolutePath
+                            ),
+                            'header_table_count' => $headerTableCount,
+                            'para_target_map' => $paraTargetMap,
+                        ],
+                    ])->save();
+                } catch (\Throwable $cacheError) {
+                    report($cacheError);
+                }
+            }
+        } catch (\Throwable $e) {
+            report($e);
 
-        // Python resolves embedded images and returns base64 placements for the preview UI.
-        $response = Http::timeout(120)
-            ->attach(
-                'file',
-                file_get_contents($absolutePath),
-                $newEquipmentQualification->original_filename
-            )
-            ->post($pythonUrl . '/docx-image-map');
-
-        if (! $response->ok()) {
             return response()->json([
-                'error'   => 'Image resolution failed.',
-                'details' => $response->json('detail') ?? $response->body(),
+                'error' => 'Unable to build document preview. '.trim($e->getMessage()),
             ], 500);
         }
 
-        return response()->json([
-            'placements' => $response->json('placements', []),
-            'messages'   => $response->json('messages', []),
-        ]);
+        if (trim($html) === '') {
+            return response()->json(['error' => 'Document preview was empty.'], 500);
+        }
+
+        $root = $newEquipmentQualification->rootOriginal();
+        $root->load(['approvals.user']);
+        $editsSource = $newEquipmentQualification;
+        if (trim((string) ($newEquipmentQualification->edits_json ?? '')) === ''
+            && (int) $newEquipmentQualification->id === (int) $root->id) {
+            $latest = $root->relationLoaded('editedCopies')
+                ? $root->editedCopies->sortByDesc('id')->first()
+                : $root->latestEditedCopy();
+            if ($latest) {
+                $editsSource = $latest;
+            }
+        }
+
+        $payload = $this->documentActionPayload($root, $newEquipmentQualification, 'Preview ready.');
+        $payload['preview_html'] = $html;
+        $payload['preview_fields'] = $fields;
+        $payload['header_table_count'] = $headerTableCount;
+        $payload['para_target_map'] = $paraTargetMap;
+        $payload['edits_payload'] = $editsSource->decodedEditsPayload();
+        $payload['uploader_id'] = (int) $root->uploaded_by;
+
+        return response()->json($payload);
     }
 
     // Return DOCX body text targets for frontend edit-index mapping.
@@ -207,6 +267,7 @@ class NewEquipmentQualificationController extends Controller
 
         try {
             $targets = $docxService->listTextTargets($absolutePath);
+            $targets = $docxService->listTextTargets($absolutePath, (int) $newEquipmentQualification->id);
         } catch (\Throwable $e) {
             report($e);
 
@@ -215,9 +276,17 @@ class NewEquipmentQualificationController extends Controller
             ], 500);
         }
 
+        $root = $newEquipmentQualification->rootOriginal();
+        $refDocNo = trim((string) ($root->reference_document_no ?? ''));
+        if ($refDocNo === '') {
+            $refDocNo = trim((string) ($root->referenceDocumentNo(true) ?? ''));
+        }
+
         return response()->json([
             'targets' => $targets,
             'count'   => count($targets),
+            'list_id' => $root->id,
+            'reference_document_no' => $refDocNo !== '' ? $refDocNo : null,
         ]);
     }
 
@@ -355,6 +424,66 @@ class NewEquipmentQualificationController extends Controller
             ], 403);
         }
 
+        $isAutosave = $request->boolean('autosave');
+        if ($isAutosave) {
+            $editsJson = json_encode([
+                'edits' => $edits,
+                'cell_edits' => $cellEdits,
+                'table_ops' => $tableOps,
+                'checkbox_ops' => $checkboxOps,
+                'structure_ops' => $structureOps,
+                'approvers' => $approvers,
+            ], JSON_UNESCAPED_UNICODE);
+
+            $record = ! empty($newEquipmentQualification->source_id)
+                ? $newEquipmentQualification
+                : $root->editedCopies()->orderByDesc('id')->first();
+            if (! $record) {
+                $record = NewEquipmentQualification::query()
+                    ->where('uploaded_by', $root->uploaded_by)
+                    ->where('id', '!=', $root->id)
+                    ->orderByDesc('id')
+                    ->get()
+                    ->first(function ($item) use ($root) {
+                        return (int) $item->rootOriginal()->id === (int) $root->id;
+                    });
+            }
+
+            $draftTarget = $record ?: $root;
+            $draftTarget->update([
+                'edits_json' => $editsJson,
+            ]);
+
+            $refNo = NewEquipmentQualification::extractReferenceDocumentNoFromPayload([
+                'edits' => $edits,
+                'cell_edits' => $cellEdits,
+            ]);
+            if ($refNo !== '' && NewEquipmentQualification::isPlausibleDocumentNumber($refNo)) {
+                $root->forceFill(['reference_document_no' => $refNo])->save();
+            }
+
+            $draftTarget->refresh();
+
+            return response()->json([
+                'success' => true,
+                'autosave' => true,
+                'docx_written' => false,
+                'message' => 'Draft saved.',
+                'record_id' => $draftTarget->id,
+                'list_id' => $root->id,
+                'reference_document_no' => trim((string) ($root->reference_document_no ?? '')) ?: null,
+                'approval_status' => $root->workflowStatus(),
+                'saved_at' => optional($draftTarget->updated_at)->format('d-m-Y h:i A') ?? now()->format('d-m-Y h:i A'),
+                'stats' => [
+                    'applied' => 0,
+                    'rows_inserted' => 0,
+                    'rows_deleted' => 0,
+                    'checkbox_applied' => 0,
+                    'structure_applied' => 0,
+                ],
+            ]);
+        }
+
         Log::info('NEQ save-as payload received', [
             'record_id' => $newEquipmentQualification->id,
             'user_id' => auth()->id(),
@@ -466,6 +595,8 @@ class NewEquipmentQualificationController extends Controller
                 'edits' => $edits,
                 'cell_edits' => $cellEdits,
                 'table_ops' => $tableOps,
+                'checkbox_ops' => $checkboxOps,
+                'structure_ops' => $structureOps,
                 'approvers' => $approvers,
             ], JSON_UNESCAPED_UNICODE);
 
@@ -503,6 +634,13 @@ class NewEquipmentQualificationController extends Controller
                     'applied_count'     => $appliedCount + $rowChanges,
                     'edits_json'        => $editsJson,
                 ]);
+            }
+
+            $writtenAbsPath = Storage::disk('public')->path($record->stored_path);
+            $docxService->invalidateTargetCache((int) $record->id, $writtenAbsPath);
+            $docxService->invalidateTargetCache((int) $root->id, $sourcePath);
+            if ((int) $baseRecord->id !== (int) $record->id && (int) $baseRecord->id !== (int) $root->id) {
+                $docxService->invalidateTargetCache((int) $baseRecord->id);
             }
 
             foreach ($edits as $edit) {
@@ -725,6 +863,14 @@ class NewEquipmentQualificationController extends Controller
 
         try {
             Storage::disk('public')->put($target->stored_path, file_get_contents($tempDocxPath));
+            $docxService->invalidateTargetCache(
+                (int) $target->id,
+                Storage::disk('public')->path($target->stored_path)
+            );
+            $docxService->invalidateTargetCache(
+                (int) $root->id,
+                Storage::disk('public')->path($root->stored_path)
+            );
             $step->update([
                 'approved_at' => now(),
                 'approved_by' => auth()->id(),
@@ -815,6 +961,14 @@ class NewEquipmentQualificationController extends Controller
                 $applyStats = is_array($applyResult['stats'] ?? null) ? $applyResult['stats'] : [];
                 if (is_string($tempDocxPath) && $tempDocxPath !== '' && is_file($tempDocxPath)) {
                     Storage::disk('public')->put($target->stored_path, file_get_contents($tempDocxPath));
+                    $docxService->invalidateTargetCache(
+                        (int) $target->id,
+                        Storage::disk('public')->path($target->stored_path)
+                    );
+                    $docxService->invalidateTargetCache(
+                        (int) $root->id,
+                        Storage::disk('public')->path($root->stored_path)
+                    );
                     @unlink($tempDocxPath);
                 }
             } catch (\Throwable $e) {
@@ -921,6 +1075,14 @@ class NewEquipmentQualificationController extends Controller
                 $applyStats = is_array($applyResult['stats'] ?? null) ? $applyResult['stats'] : [];
                 if (is_string($tempDocxPath) && $tempDocxPath !== '' && is_file($tempDocxPath)) {
                     Storage::disk('public')->put($target->stored_path, file_get_contents($tempDocxPath));
+                    $docxService->invalidateTargetCache(
+                        (int) $target->id,
+                        Storage::disk('public')->path($target->stored_path)
+                    );
+                    $docxService->invalidateTargetCache(
+                        (int) $root->id,
+                        Storage::disk('public')->path($root->stored_path)
+                    );
                     @unlink($tempDocxPath);
                 }
             } catch (\Throwable $e) {

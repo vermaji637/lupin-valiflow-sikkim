@@ -72,14 +72,29 @@
     document.addEventListener('DOMContentLoaded', function () {
         let formToSubmit = null;
         let esignCallback = null;
+        let isVerifying = false;
         const modalEl = document.getElementById('esignModal');
-        const modal = new bootstrap.Modal(modalEl);
         const passwordInput = document.getElementById('esign_password');
         const errorBox = document.getElementById('esignError');
+        const confirmBtn = document.getElementById('confirmEsign');
+
+        if (!modalEl || !passwordInput || !errorBox || !confirmBtn || typeof bootstrap === 'undefined') {
+            return;
+        }
+
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        const defaultConfirmText = confirmBtn.textContent.trim() || 'Confirm';
+
+        function resetConfirmButton() {
+            isVerifying = false;
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = defaultConfirmText;
+        }
 
         function resetEsignState() {
             passwordInput.value = '';
             errorBox.innerText = '';
+            resetConfirmButton();
         }
 
         function openEsignModal(form) {
@@ -107,8 +122,28 @@
             });
         });
 
-        document.getElementById('confirmEsign').addEventListener('click', function() {
+        modalEl.addEventListener('shown.bs.modal', function () {
+            passwordInput.focus();
+        });
+
+        passwordInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                confirmBtn.click();
+            }
+        });
+
+        confirmBtn.addEventListener('click', function() {
+            if (isVerifying) {
+                return;
+            }
+
             const password = passwordInput.value;
+            if (!password) {
+                errorBox.innerText = 'Please enter your password.';
+                passwordInput.focus();
+                return;
+            }
 
             if (formToSubmit) {
                 const hiddenField = formToSubmit.querySelector('input[name="password"]');
@@ -117,26 +152,42 @@
                 }
             }
 
-            fetch("{{ route('esign.validate') }}", {
+            isVerifying = true;
+            errorBox.innerText = '';
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Verifying...';
+
+            const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            const csrfToken = (csrfMeta && csrfMeta.getAttribute('content')) || "{{ csrf_token() }}";
+
+            fetch("{{ route('esign.validate', [], false) }}", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     "Accept": "application/json",
-                    "X-CSRF-TOKEN": "{{ csrf_token() }}"
+                    "X-CSRF-TOKEN": csrfToken
                 },
+                credentials: "same-origin",
                 body: JSON.stringify({ password })
             })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    modal.hide();
-
+            .then(async res => {
+                const data = await res.json().catch(() => ({}));
+                return { ok: res.ok, data };
+            })
+            .then(({ ok, data }) => {
+                if (ok && data && data.success) {
                     if (formToSubmit) {
                         const form = formToSubmit;
                         formToSubmit = null;
-                        form.submit();
+                        confirmBtn.textContent = 'Submitting...';
+                        modal.hide();
+                        form.dispatchEvent(new CustomEvent('esign:confirmed'));
+                        HTMLFormElement.prototype.submit.call(form);
                         return;
                     }
+
+                    modal.hide();
+                    resetConfirmButton();
 
                     if (esignCallback) {
                         const callback = esignCallback;
@@ -144,15 +195,19 @@
                         callback(password);
                     }
                 } else {
-                    errorBox.innerText = data.message || "Incorrect password";
+                    resetConfirmButton();
+                    errorBox.innerText = (data && data.message) || "Incorrect password";
+                    passwordInput.focus();
                 }
             })
             .catch(() => {
+                resetConfirmButton();
                 errorBox.innerText = "Something went wrong, try again.";
             });
         });
 
         modalEl.addEventListener('hidden.bs.modal', function () {
+            resetConfirmButton();
             if (!formToSubmit && !esignCallback) {
                 return;
             }

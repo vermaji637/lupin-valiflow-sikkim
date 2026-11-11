@@ -30,8 +30,11 @@ class AppServiceProvider extends ServiceProvider
      *
      * @return void
      */
-       public function boot()
+    public function boot()
     {
+        if (! $this->app->runningInConsole()) {
+            @ini_set('max_execution_time', '300');
+        }
         Paginator::useBootstrap();
         $this->registerAuditObservers();
         $this->ensureRequiredStorageDirectories();
