@@ -60,6 +60,7 @@ def main():
         attachment_links_path = sys.argv[5] if len(sys.argv) > 5 else None
         equipment_id = sys.argv[6] if len(sys.argv) > 6 else ""
         table_ops_path = sys.argv[7] if len(sys.argv) > 7 else None
+        import_source = sys.argv[8] if len(sys.argv) > 8 else ""
 
         fields = []
         if fields_path and os.path.isfile(fields_path):
@@ -85,12 +86,19 @@ def main():
             att_links,
             equipment_id,
             table_ops,
+            import_source,
         )
+        toc_field_values = {
+            loc: val
+            for loc, val in (repaired_values or {}).items()
+            if str(loc).startswith("toc_sdt_") or "_toc_" in str(loc)
+        }
         print(json.dumps({
             "status": "success",
             "output_path": result_path,
             "output_filename": os.path.basename(output_path),
             "repaired_field_values": repaired_values,
+            "toc_field_values": toc_field_values,
         }))
 
     else:

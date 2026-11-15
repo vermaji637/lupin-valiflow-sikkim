@@ -1180,6 +1180,204 @@ def _row_is_spanned_section_title(row) -> bool:
     return True
 
 
+_SERIAL_CELL_RE = re.compile(r"^(\d+)(?:\.\d+)?\.?$")
+
+
+def _table_is_iq_oq_checks_table(table) -> bool:
+    """Attachment 14 IQ/OQ check grids: S.No / Test / Acceptance / Result."""
+    if _table_is_revised_risk_analysis(table):
+        return False
+    for row in list(table.rows)[:4]:
+        texts = [_normalize_preview_text(c.text).lower() for c in _unique_row_cells(row)]
+        blob = " ".join(t for t in texts if t)
+        if not blob:
+            continue
+        has_serial_hdr = bool(re.search(r"(?:^|\s)(?:s\.?\s*no|sr\.?\s*no)\b", blob))
+        has_accept = "accept" in blob
+        has_result = "result" in blob
+        has_test = "test" in blob or "recommended" in blob
+        if has_serial_hdr and has_accept and (has_result or has_test):
+            return True
+    return False
+
+
+def _table_is_revised_risk_analysis(table) -> bool:
+    """Attachment 13 Revised Risk Analysis (S/D/L/RPN/Remarks)."""
+    for row in list(table.rows)[:3]:
+        blob = " ".join(
+            _normalize_preview_text(c.text).lower() for c in _unique_row_cells(row)
+        )
+        if "revised" in blob and "risk" in blob and "analysis" in blob:
+            return True
+        if re.search(r"\brpn\b", blob) and re.search(
+            r"\bhigh\b.*\bmedium\b|\bmedium\b.*\blow\b", blob
+        ):
+            return True
+    return False
+
+
+_SECTION_NUMBER_ONLY_RE = re.compile(r"^\d+\.\d+(?:\.\d+)*\.?$")
+
+
+def _drop_risk_analysis_section_number_ghosts(doc: Document) -> int:
+    """
+    Remove stray body section numbers (e.g. "3.1") that landed alone in the
+    Revised Risk Analysis S column. Those are not Severity values — Soft-A4 /
+    mis-mapped edits sometimes plant a heading number into an empty risk row,
+    and it then shows on the next page under S/D/L/RPN.
+    """
+    cleared = 0
+    for table in collect_docx_tables(doc):
+        if not _table_is_revised_risk_analysis(table):
+            continue
+        for row in table.rows:
+            if _row_is_column_subheader(row):
+                continue
+            cells = _unique_row_cells(row)
+            if len(cells) < 3:
+                continue
+            first = _normalize_preview_text(cells[0].text)
+            if not first or not _SECTION_NUMBER_ONLY_RE.fullmatch(first):
+                continue
+            # Group header row uses long labels, not "3.1".
+            rest = [_normalize_preview_text(c.text) for c in cells[1:]]
+            if any(rest):
+                continue
+            _set_cell_text_preserve(cells[0], "")
+            cleared += 1
+    return cleared
+
+
+def _looks_like_check_section_title(text: str | None) -> bool:
+    t = _normalize_preview_text(text)
+    if not t or len(t) > 180 or _SERIAL_CELL_RE.fullmatch(t):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:check|calibration|operational|safety|performance|"
+            r"installation|utilities|documents|material|components)\b",
+            t,
+            re.I,
+        )
+    )
+
+
+def _format_section_serial(raw: str | None, fallback_num: int | None = None) -> str | None:
+    text = _normalize_preview_text(raw)
+    match = _SERIAL_CELL_RE.fullmatch(text) if text else None
+    if match:
+        return f"{match.group(1)}."
+    if fallback_num is not None and fallback_num > 0:
+        return f"{fallback_num}."
+    return None
+
+
+def _merge_row_cells_from_index(row, keep_leading: int = 1) -> bool:
+    """Keep the first N cells; merge every cell after into one gridSpan cell."""
+    tr = row._tr
+    tcs = list(tr.tc_lst)
+    if keep_leading < 1 or len(tcs) <= keep_leading:
+        return False
+    total_span = sum(_tc_grid_span(tc) for tc in tcs[keep_leading:])
+    if total_span < 2:
+        return False
+    merge_tc = tcs[keep_leading]
+    for tc in tcs[keep_leading + 1 :]:
+        tr.remove(tc)
+    _set_tc_grid_span(merge_tc, total_span)
+    tbl = tr.getparent()
+    while tbl is not None and not str(tbl.tag).endswith("}tbl"):
+        tbl = tbl.getparent()
+    widths = _tbl_grid_widths(tbl) if tbl is not None else []
+    if widths:
+        start = sum(_tc_grid_span(tc) for tc in list(tr.tc_lst)[:keep_leading])
+        width = sum(widths[start : start + total_span])
+        if width > 0:
+            _set_tc_width_dxa(merge_tc, width)
+    return True
+
+
+def _repair_check_table_section_rows(doc: Document) -> int:
+    """Restore Attachment 14 IQ/OQ section serials and title merges."""
+    repaired = 0
+    for table in collect_docx_tables(doc):
+        if not _table_is_iq_oq_checks_table(table):
+            continue
+        rows = list(table.rows)
+        last_serial_num = 0
+        for ri, row in enumerate(rows):
+            cells = _unique_row_cells(row)
+            if not cells:
+                continue
+            if (
+                not _row_is_spanned_section_title(row)
+                and len(cells) >= 3
+                and _looks_like_check_section_title(cells[1].text)
+                and all(not _normalize_preview_text(c.text) for c in cells[2:])
+            ):
+                serial = _normalize_preview_text(cells[0].text)
+                if serial and not _SERIAL_CELL_RE.fullmatch(serial):
+                    continue
+                if _merge_row_cells_from_index(row, keep_leading=1):
+                    repaired += 1
+                    cells = _unique_row_cells(row)
+            if not _row_is_spanned_section_title(row):
+                continue
+            serial = _normalize_preview_text(cells[0].text) if cells else ""
+            title = (
+                _normalize_preview_text(cells[1].text)
+                if len(cells) > 1
+                else _normalize_preview_text(cells[0].text)
+            )
+            if not title:
+                continue
+            inferred = _format_section_serial(serial)
+            if not inferred:
+                for rj in range(ri + 1, min(ri + 4, len(rows))):
+                    nxt = _unique_row_cells(rows[rj])
+                    if not nxt:
+                        continue
+                    if _row_is_spanned_section_title(rows[rj]):
+                        break
+                    inferred = _format_section_serial(nxt[0].text)
+                    if inferred:
+                        break
+            if not inferred and last_serial_num > 0:
+                inferred = _format_section_serial(None, last_serial_num + 1)
+            if not inferred:
+                prior = sum(1 for earlier in rows[:ri] if _row_is_spanned_section_title(earlier))
+                inferred = _format_section_serial(None, prior + 1)
+            if inferred and serial != inferred:
+                _set_cell_text_preserve(cells[0], inferred)
+                repaired += 1
+                serial = inferred
+            match = _SERIAL_CELL_RE.fullmatch(serial) if serial else None
+            if match:
+                last_serial_num = int(match.group(1))
+            if not serial:
+                continue
+            want = _format_section_serial(serial) or serial
+            for rj in range(ri + 1, len(rows)):
+                data_row = rows[rj]
+                if _row_is_spanned_section_title(data_row):
+                    break
+                data_cells = _unique_row_cells(data_row)
+                if not data_cells or len(data_cells) < 2:
+                    continue
+                first = _normalize_preview_text(data_cells[0].text)
+                if first and not _SERIAL_CELL_RE.fullmatch(first):
+                    break
+                has_values = any(_normalize_preview_text(c.text) for c in data_cells[1:])
+                if first == want:
+                    continue
+                if first and first != want:
+                    continue
+                if has_values or rj == ri + 1:
+                    _set_cell_text_preserve(data_cells[0], want)
+                    repaired += 1
+    return repaired
+
+
 def _prepare_row_for_column_writes(row, col_index: int):
     """Ensure row can accept a write at col_index; split horizontal merges when needed."""
     if col_index < 0:
@@ -1192,9 +1390,11 @@ def _prepare_row_for_column_writes(row, col_index: int):
     unique = _unique_row_cells(row)
     grid_len = len(list(row.cells))
     # One merged tc spanning the grid → preview has N columns but Word has 1 unique cell.
-    # Never split verified-by / section-banner / Safety By rows — those stay one simple cell.
+    # Never split verified-by / section-banner / Safety By / IQ-OQ title rows.
     if len(unique) < grid_len and not (
-        _row_is_matrix_section_banner(row) or _row_is_safety_by_signoff(row)
+        _row_is_matrix_section_banner(row)
+        or _row_is_safety_by_signoff(row)
+        or _row_is_spanned_section_title(row)
     ):
         _split_horizontal_merges_in_row(row)
         unique = _unique_row_cells(row)
@@ -1228,6 +1428,8 @@ def _pick_insert_anchor_tr(table: Table, after_index: int):
             return False
         row = table.rows[abs_i]
         if _row_is_matrix_section_banner(row):
+            return False
+        if _row_is_spanned_section_title(row):
             return False
         cells = _unique_row_cells(row)
         probe_parts = [_normalize_preview_text(c.text).lower() for c in cells]
@@ -1344,6 +1546,23 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
         tables = collect_docx_tables(doc)
 
     inserts = [op for op in table_ops if (op or {}).get("op") == "insert"]
+    # Collapse identical insert payloads (1 Add Row that was saved 3× in draft table_ops).
+    unique_inserts: list[dict] = []
+    seen_insert_fp: set[str] = set()
+    for op in inserts:
+        vals = op.get("values") if isinstance(op.get("values"), list) else []
+        fp_vals = "|".join(_normalize_text_value(v).strip().lower() for v in vals)
+        fp = f"{op.get('table')}|{op.get('after_row')}|{fp_vals}"
+        content_fp = f"{op.get('table')}|{fp_vals}"
+        if fp_vals and content_fp in seen_insert_fp:
+            continue
+        if fp in seen_insert_fp:
+            continue
+        seen_insert_fp.add(fp)
+        if fp_vals:
+            seen_insert_fp.add(content_fp)
+        unique_inserts.append(op)
+    inserts = unique_inserts
     # Highest after_row first so earlier indexes stay valid when client sent original positions.
     inserts.sort(
         key=lambda op: (
@@ -1401,6 +1620,13 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
 
         anchor = tr_list[insert_after] if 0 <= insert_after < len(tr_list) else tr_list[-1]
         new_tr = deepcopy(template_tr)
+        # Data rows must not inherit tblHeader/cantSplit — that blocks page splits
+        # and leaves a blank page under headings like "9.1 Installation…".
+        new_tr_pr = new_tr.find(qn("w:trPr"))
+        if new_tr_pr is not None:
+            for tag in ("w:tblHeader", "w:cantSplit"):
+                for node in list(new_tr_pr.findall(qn(tag))):
+                    new_tr_pr.remove(node)
         anchor.addnext(new_tr)
         tr_list = list(table._tbl.tr_lst)
         try:
@@ -1894,11 +2120,20 @@ def _align_cell_text_to_top(tc) -> bool:
 
 
 def _lock_table_layout(tbl) -> bool:
-    """Fixed layout keeps the original grid. Autofit was widening columns to fit text."""
+    """Fixed layout keeps the original grid. Autofit was widening columns to fit text.
+
+    Leave hanging-indent pct tables on autofit (Attachment 13 Deviations /
+    Comments / signatures). Forcing fixed there made Word ignore the pct
+    shrink-to-page behaviour and paint past the right page border.
+    """
     tbl_pr = tbl.find(qn("w:tblPr"))
     if tbl_pr is None:
         tbl_pr = OxmlElement("w:tblPr")
         tbl.insert(0, tbl_pr)
+    # Hanging-indent body tables (often template pct → dxa after clamp) must
+    # keep autofit so Word does not stretch them past the page border.
+    if _table_indent_dxa(tbl) < 0:
+        return False
     layout = tbl_pr.find(qn("w:tblLayout"))
     if layout is None:
         layout = OxmlElement("w:tblLayout")
@@ -1957,10 +2192,12 @@ def _run_uses_symbol_font(r_pr) -> bool:
 
 def _force_run_size(r_pr, half_points: str = "22") -> bool:
     """
-    Filled text is Arial 11.
+    Bump only runs that already declare a too-small size (≤10pt).
 
-    Table Grid leaves a run with no size, and Word then shows Arial 10.
-    12pt headings and 14pt titles already carry a larger size and stay.
+    Do NOT invent w:sz when the template left size empty. Attachment 14 TOC
+    and cover chrome inherit the document default and stay bold; writing an
+    explicit 11pt there made Word show 11 and look smaller than the original.
+    12pt+ headings / 18pt titles already carry a larger size and stay.
     """
     if r_pr is None:
         return False
@@ -1968,10 +2205,6 @@ def _force_run_size(r_pr, half_points: str = "22") -> bool:
     for tag in ("w:sz", "w:szCs"):
         node = r_pr.find(qn(tag))
         if node is None:
-            node = OxmlElement(tag)
-            r_pr.append(node)
-            node.set(qn("w:val"), half_points)
-            changed = True
             continue
         try:
             current = int(node.get(qn("w:val")) or 0)
@@ -2108,8 +2341,11 @@ def _keep_filled_text_inside_cells(
     # and start the body under the letterhead, the same as the preview.
     changed += _flow_page_anchored_tables(doc)
     changed += _keep_body_below_letterhead(doc)
+    changed += _clamp_inflated_letterhead_top_margin(doc)
     changed += _repeat_letterhead_on_every_section(doc)
     changed += _unbold_filled_data_rows(doc)
+    # TOC / contents chrome: bold + inherited size like the original template.
+    changed += _restore_toc_template_fonts(doc)
     _normalize_header_table_fonts(doc, font_name="Arial", font_size_pt=12.0)
     return changed
 
@@ -2280,6 +2516,8 @@ def _flow_page_anchored_tables(doc: Document) -> int:
 
     Rows that still fit stay on this page. Only the overflow moves on.
     A text-anchored table (approval block) keeps its own offset.
+    Preserve tblpX as tblInd so the table does not jump to the left margin
+    and spill past the page border.
     """
     changed = 0
     for tbl in doc.element.body.findall(qn("w:tbl")):
@@ -2291,8 +2529,234 @@ def _flow_page_anchored_tables(doc: Document) -> int:
             continue
         if (anchor.get(qn("w:vertAnchor")) or "").lower() != "page":
             continue
+        existing_ind = tbl_pr.find(qn("w:tblInd"))
+        x_spec = (anchor.get(qn("w:tblpXSpec")) or "").lower()
+        raw_x = anchor.get(qn("w:tblpX"))
+        if existing_ind is None and raw_x is not None and x_spec not in (
+            "center",
+            "right",
+            "inside",
+            "outside",
+        ):
+            try:
+                x_dxa = int(raw_x)
+            except (TypeError, ValueError):
+                x_dxa = None
+            if x_dxa is not None:
+                left_margin = _section_metric(doc, "w:pgMar", "w:left", 1440)
+                horz_raw = (anchor.get(qn("w:horzAnchor")) or "").strip().lower()
+                # Page-absolute tblpX → margin-relative tblInd; text/margin stay as-is.
+                if horz_raw == "page" or (
+                    horz_raw == "" and (anchor.get(qn("w:vertAnchor")) or "").lower() == "page"
+                    and x_dxa >= left_margin
+                ):
+                    ind_dxa = x_dxa - left_margin
+                else:
+                    ind_dxa = x_dxa
+                ind = OxmlElement("w:tblInd")
+                ind.set(qn("w:w"), str(ind_dxa))
+                ind.set(qn("w:type"), "dxa")
+                jc = tbl_pr.find(qn("w:jc"))
+                if jc is not None:
+                    jc.addprevious(ind)
+                else:
+                    tbl_pr.append(ind)
+                changed += 1
         tbl_pr.remove(anchor)
         changed += 1
+    return changed
+
+
+def _table_indent_dxa(tbl) -> int:
+    tbl_pr = tbl.find(qn("w:tblPr"))
+    if tbl_pr is None:
+        return 0
+    ind = tbl_pr.find(qn("w:tblInd"))
+    if ind is None:
+        return 0
+    try:
+        return int(ind.get(qn("w:w")) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _page_border_inset_dxa(doc: Document, side: str = "right") -> int:
+    """Distance from page edge to page border line (twips). Default 24pt."""
+    sect = doc.element.body.find(qn("w:sectPr"))
+    if sect is None:
+        return 480
+    borders = sect.find(qn("w:pgBorders"))
+    if borders is None:
+        return 480
+    node = borders.find(qn(f"w:{side}"))
+    if node is None:
+        return 480
+    try:
+        space_pt = int(node.get(qn("w:space")) or 24)
+    except (TypeError, ValueError):
+        space_pt = 24
+    return max(0, space_pt * 20)
+
+
+def _scale_table_widths(tbl, scale: float) -> int:
+    """Proportionally shrink tblW / tblGrid / tcW so the table fits the page."""
+    if scale >= 0.999:
+        return 0
+    if scale <= 0.05:
+        return 0
+    changed = 0
+    tbl_pr = tbl.find(qn("w:tblPr"))
+    if tbl_pr is not None:
+        tbl_w = tbl_pr.find(qn("w:tblW"))
+        if tbl_w is not None and (tbl_w.get(qn("w:type")) or "") == "dxa":
+            try:
+                cur = int(tbl_w.get(qn("w:w")) or 0)
+            except (TypeError, ValueError):
+                cur = 0
+            if cur > 0:
+                tbl_w.set(qn("w:w"), str(max(1, int(round(cur * scale)))))
+                changed += 1
+    grid = tbl.find(qn("w:tblGrid"))
+    if grid is not None:
+        for col in grid.findall(qn("w:gridCol")):
+            try:
+                cur = int(col.get(qn("w:w")) or 0)
+            except (TypeError, ValueError):
+                continue
+            if cur > 0:
+                col.set(qn("w:w"), str(max(1, int(round(cur * scale)))))
+                changed += 1
+    for tc in tbl.iter(qn("w:tc")):
+        tc_pr = tc.find(qn("w:tcPr"))
+        if tc_pr is None:
+            continue
+        tc_w = tc_pr.find(qn("w:tcW"))
+        if tc_w is None or (tc_w.get(qn("w:type")) or "") != "dxa":
+            continue
+        try:
+            cur = int(tc_w.get(qn("w:w")) or 0)
+        except (TypeError, ValueError):
+            continue
+        if cur > 0:
+            tc_w.set(qn("w:w"), str(max(1, int(round(cur * scale)))))
+            changed += 1
+    return changed
+
+
+def _ensure_table_indent(tbl, indent_dxa: int) -> bool:
+    tbl_pr = tbl.find(qn("w:tblPr"))
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        tbl.insert(0, tbl_pr)
+    ind = tbl_pr.find(qn("w:tblInd"))
+    if ind is None:
+        ind = OxmlElement("w:tblInd")
+        jc = tbl_pr.find(qn("w:jc"))
+        if jc is not None:
+            jc.addprevious(ind)
+        else:
+            tbl_pr.append(ind)
+    try:
+        cur = int(ind.get(qn("w:w")) or 0)
+    except (TypeError, ValueError):
+        cur = 0
+    if cur == indent_dxa and (ind.get(qn("w:type")) or "") == "dxa":
+        return False
+    ind.set(qn("w:w"), str(indent_dxa))
+    ind.set(qn("w:type"), "dxa")
+    return True
+
+
+def _clamp_body_tables_inside_page_border(doc: Document, *, pad_dxa: int = 80) -> int:
+    """
+    Keep body tables inside the printed page border.
+
+    After defloat / fixed-layout lock, a pct-width table can sit at the left
+    margin without its original negative indent and run past the right border.
+    Restore a sibling indent when possible; otherwise shrink proportionally.
+    """
+    page_w = _section_metric(doc, "w:pgSz", "w:w", 12240)
+    left = _section_metric(doc, "w:pgMar", "w:left", 1440)
+    right = _section_metric(doc, "w:pgMar", "w:right", 1440)
+    content_w = max(1440, page_w - left - right)
+    border_right = page_w - _page_border_inset_dxa(doc, "right")
+    max_right = border_right - max(0, pad_dxa)
+    changed = 0
+    prev_ind = 0
+    for tbl in doc.element.body.findall(qn("w:tbl")):
+        width = _story_table_width_dxa(tbl, content_w)
+        grid_sum = sum(_grid_col_widths(tbl))
+        if grid_sum > width:
+            width = grid_sum
+        if width <= 0:
+            continue
+        ind = _table_indent_dxa(tbl)
+        # Repair older bad defloat: text-anchored tblpX (e.g. -565) minus left
+        # margin became -2005 and parked the table on the left with a right gap.
+        if ind < -left + 40:
+            repaired = ind + left
+            if repaired > -left and left + repaired + width <= max_right + 240:
+                if _ensure_table_indent(tbl, repaired):
+                    changed += 1
+                ind = repaired
+        right_edge = left + ind + width
+        # Defloat already dropped tblpX and left no tblInd — borrow the
+        # previous table's hanging indent (Attachment 13 Comments case).
+        if right_edge > max_right and ind == 0 and prev_ind < 0:
+            borrowed = prev_ind
+            if left + borrowed + width <= max_right:
+                if _ensure_table_indent(tbl, borrowed):
+                    changed += 1
+                ind = borrowed
+                right_edge = left + ind + width
+        # Page-absolute tblpX wrongly copied as tblInd (Calibrations: 2167).
+        # Undo double-counting (tblInd should be tblpX - left margin), then
+        # shrink only if it still crosses the page border.
+        if ind >= left and (right_edge > max_right or right_edge > page_w - right + 120):
+            undone = ind - left
+            if left + undone + width <= max_right:
+                if _ensure_table_indent(tbl, undone):
+                    changed += 1
+                ind = undone
+                right_edge = left + ind + width
+        if right_edge > max_right and ind > 0:
+            max_ind = max_right - left - width
+            if max_ind < ind:
+                new_ind = max(-left + 120, max_ind)
+                if _ensure_table_indent(tbl, new_ind):
+                    changed += 1
+                ind = new_ind
+                right_edge = left + ind + width
+        if right_edge <= max_right:
+            tbl_pr = tbl.find(qn("w:tblPr"))
+            if tbl_pr is not None:
+                tbl_w = tbl_pr.find(qn("w:tblW"))
+                if tbl_w is not None and (tbl_w.get(qn("w:type")) or "") == "pct":
+                    tbl_w.set(qn("w:w"), str(width))
+                    tbl_w.set(qn("w:type"), "dxa")
+                    changed += 1
+            if ind != 0:
+                prev_ind = ind
+            continue
+        target = max(720, max_right - left - ind)
+        if target >= width:
+            if ind != 0:
+                prev_ind = ind
+            continue
+        scale = target / float(width)
+        tbl_pr = tbl.find(qn("w:tblPr"))
+        if tbl_pr is not None:
+            tbl_w = tbl_pr.find(qn("w:tblW"))
+            if tbl_w is None:
+                tbl_w = OxmlElement("w:tblW")
+                tbl_pr.append(tbl_w)
+            tbl_w.set(qn("w:w"), str(width))
+            tbl_w.set(qn("w:type"), "dxa")
+        changed += _scale_table_widths(tbl, scale)
+        if ind != 0:
+            prev_ind = ind
+        elif prev_ind == 0:
+            prev_ind = _table_indent_dxa(tbl)
     return changed
 
 
@@ -2361,12 +2825,19 @@ def _keep_body_below_letterhead(doc: Document) -> int:
 
     Without this, the first lines sit behind the header and the page
     looks blank even though the text is there.
+
+    Do not raise top to the full header-table height when the template already
+    clears the header band (~1"). HVAC / revalidation letterheads are taller
+    than w:top on purpose (header draws over the margin). Inflating top to
+    header_distance+table_height left a huge blank gap under the letterhead
+    (e.g. above "4.0 LIST OF ATTACHMENT").
     """
     bottom = _estimated_header_bottom_dxa(doc)
     if bottom <= 0:
         return 0
     gap = _line_pitch_dxa(doc)
     target = bottom + gap
+    header_distance = _section_metric(doc, "w:pgMar", "w:header", 720)
     changed = 0
     for sect in doc.element.body.iter(qn("w:sectPr")):
         mar = sect.find(qn("w:pgMar"))
@@ -2384,9 +2855,43 @@ def _keep_body_below_letterhead(doc: Document) -> int:
             except (TypeError, ValueError):
                 page_h = 16839
         wanted = min(target, int(page_h * 0.45))
+        # Template already starts body at/under the header origin — keep it.
+        if current >= header_distance and current >= 1200:
+            continue
         if current >= wanted:
             continue
         mar.set(qn("w:top"), str(wanted))
+        changed += 1
+    return changed
+
+
+def _clamp_inflated_letterhead_top_margin(doc: Document) -> int:
+    """
+    Restore over-inflated top margins back near the template header distance.
+
+    Filled HVAC/revalidation files had ~3.7" top (estimate) vs ~1.0" original,
+    which pushed "4.0 LIST OF ATTACHMENT" far below the letterhead.
+
+    Only touches the HVAC-style pattern (header distance ~1"+ and top ~2"+).
+    Smaller NEQ header bands are left for _keep_body_below_letterhead.
+    """
+    header_distance = _section_metric(doc, "w:pgMar", "w:header", 720)
+    changed = 0
+    for sect in doc.element.body.iter(qn("w:sectPr")):
+        mar = sect.find(qn("w:pgMar"))
+        if mar is None:
+            continue
+        try:
+            current = int(mar.get(qn("w:top")) or 0)
+        except (TypeError, ValueError):
+            current = 0
+        # HVAC original: header_distance ≈ 1440, top ≈ 1500. Inflated tops were ≥2800.
+        if header_distance < 1300 or current < 2800:
+            continue
+        restore = header_distance + 72
+        if restore >= current:
+            continue
+        mar.set(qn("w:top"), str(restore))
         changed += 1
     return changed
 
@@ -3052,6 +3557,40 @@ def _sentence_tokens(text: str | None) -> list[str]:
     return [token for token in flat.lower().split() if token]
 
 
+def _blank_fill_fingerprint(text: str | None) -> str:
+    """Skeleton of a dotted fill line so empty and filled blanks still match.
+
+    Attachment 14 cover lines:
+      (IOQ) REPORT FOR OF ……gsfdg……….. MACHINE
+      (Identification No.: ……gdf…………)
+    After the first save, original_text is still the empty-dot template. Matching
+    on the skeleton keeps later edits writable instead of rejected.
+    """
+    t = _normalize_preview_text(text).lower()
+    if not t:
+        return ""
+    # Drop short values typed between ellipsis runs.
+    t = re.sub(
+        r"([.\u2026\u00b7]{2,})\s*[^\s.\u2026\u00b7]{1,80}\s*(?=[.\u2026\u00b7]{2,})",
+        r"\1",
+        t,
+    )
+    t = re.sub(r"[.\u2026\u00b7]+", "…", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _same_blank_fill_line(left: str | None, right: str | None) -> bool:
+    left_fp = _blank_fill_fingerprint(left)
+    right_fp = _blank_fill_fingerprint(right)
+    if not left_fp or not right_fp or left_fp != right_fp:
+        return False
+    # Real cover/template lines, not accidental short chrome.
+    if "… " not in left_fp and not left_fp.endswith("…") and "…" not in left_fp:
+        return False
+    return len(left_fp) >= 12
+
+
 def _same_continued_sentence(left: str | None, right: str | None) -> bool:
     """True when both strings are the same protocol sentence.
 
@@ -3060,11 +3599,16 @@ def _same_continued_sentence(left: str | None, right: str | None) -> bool:
     dotted sentence as original_text, so the paragraph no longer matches it.
     The opening words stay the same, and that later value must still be written.
     """
+    if _same_blank_fill_line(left, right):
+        return True
     left_tokens = _sentence_tokens(left)
     right_tokens = _sentence_tokens(right)
-    if len(left_tokens) < 6 or len(right_tokens) < 6:
+    # Attachment 14 "(IOQ) REPORT FOR OF … MACHINE" has only 5 tokens.
+    if len(left_tokens) < 3 or len(right_tokens) < 3:
         return False
-    head = min(6, len(left_tokens), len(right_tokens))
+    head = min(5, len(left_tokens), len(right_tokens))
+    if head < 3:
+        return False
     return left_tokens[:head] == right_tokens[:head]
 
 
@@ -3122,6 +3666,33 @@ def _retarget_shifted_paragraph(
             soft.append(i)
     if len(soft) == 1:
         return soft[0]
+    # Dotted cover lines are short; fingerprint uniquely when only one body match.
+    if expected_norm:
+        want_fp = _blank_fill_fingerprint(expected_norm)
+        fp_hits = []
+        if want_fp:
+            for i, (k, o, z) in enumerate(targets):
+                if k != "para" or z != "body" or _para_is_inside_table(o):
+                    continue
+                if _blank_fill_fingerprint(_get_target_text(k, o)) == want_fp:
+                    fp_hits.append(i)
+        if len(fp_hits) == 1:
+            return fp_hits[0]
+        if fp_hits:
+            return min(fp_hits, key=lambda i: abs(i - resolved))
+    # Keep writing onto the mapped body slot when it is the same dotted template
+    # as the new text (Identification No. / IOQ REPORT FOR … MACHINE).
+    if (
+        kind == "para"
+        and zone == "body"
+        and not _para_is_inside_table(obj)
+        and new_norm
+        and (
+            _same_blank_fill_line(old_norm, new_norm)
+            or _same_blank_fill_line(expected_norm, new_norm)
+        )
+    ):
+        return resolved
     return None
 
 
@@ -3578,6 +4149,101 @@ def _clear_bold_markup(r_pr) -> bool:
     return changed
 
 
+def _table_looks_like_toc(table) -> bool:
+    """Contents list table — keep original bold/size (Attachment 14)."""
+    hits = 0
+    for row in list(table.rows)[:14]:
+        blob = " ".join(
+            _normalize_preview_text(c.text) for c in _unique_row_cells(row)
+        )
+        if _is_toc_slot_text(blob):
+            hits += 1
+    return hits >= 3
+
+
+def _ensure_run_bold(r_pr) -> bool:
+    if r_pr is None:
+        return False
+    changed = False
+    for tag in ("w:b", "w:bCs"):
+        node = r_pr.find(qn(tag))
+        if node is None:
+            node = OxmlElement(tag)
+            r_pr.append(node)
+            changed = True
+            continue
+        val = (node.get(qn("w:val")) or "true").lower()
+        if val in ("0", "false", "off"):
+            if qn("w:val") in node.attrib:
+                del node.attrib[qn("w:val")]
+            changed = True
+    return changed
+
+
+def _strip_invented_run_size(r_pr) -> bool:
+    """Remove explicit 11pt that unify-font invented on template chrome."""
+    if r_pr is None:
+        return False
+    changed = False
+    for tag in ("w:sz", "w:szCs"):
+        node = r_pr.find(qn(tag))
+        if node is None:
+            continue
+        try:
+            current = int(node.get(qn("w:val")) or 0)
+        except (TypeError, ValueError):
+            current = 0
+        # Only strip the invented download default (11pt). Keep real 12/14/18.
+        if current == 22:
+            r_pr.remove(node)
+            changed = True
+    return changed
+
+
+def _restore_toc_template_fonts(doc: Document) -> int:
+    """
+    Put Attachment 14 TABLE OF CONTENTS back to the original look:
+    Arial + bold, no forced 11pt size (inherit like the template).
+    """
+    changed = 0
+    for root in _story_roots(doc):
+        for para_el in root.iter(qn("w:p")):
+            text = _normalize_preview_text("".join(para_el.itertext()))
+            if not text:
+                continue
+            if not (
+                _is_toc_slot_text(text)
+                or re.fullmatch(r"table\s+of\s+contents", text, re.I)
+            ):
+                continue
+            p_pr = para_el.find(qn("w:pPr"))
+            if p_pr is not None:
+                r_pr = p_pr.find(qn("w:rPr"))
+                if r_pr is None:
+                    r_pr = OxmlElement("w:rPr")
+                    p_pr.append(r_pr)
+                if _force_run_font(r_pr, "Arial"):
+                    changed += 1
+                if _ensure_run_bold(r_pr):
+                    changed += 1
+                if _strip_invented_run_size(r_pr):
+                    changed += 1
+            for run_el in para_el.findall(qn("w:r")):
+                if run_el.find(qn("w:t")) is None:
+                    continue
+                r_pr = run_el.find(qn("w:rPr"))
+                if r_pr is None:
+                    r_pr = OxmlElement("w:rPr")
+                    run_el.insert(0, r_pr)
+                if _force_run_font(r_pr, "Arial"):
+                    changed += 1
+                if _ensure_run_bold(r_pr):
+                    changed += 1
+                if _strip_invented_run_size(r_pr):
+                    changed += 1
+    return changed
+
+
 def _unbold_filled_data_rows(doc: Document) -> int:
     """
     A value written onto a bold section heading kept that bold.
@@ -3587,10 +4253,18 @@ def _unbold_filled_data_rows(doc: Document) -> int:
     """
     changed = 0
     for table in doc.tables:
+        # Contents list must stay bold like the original Attachment 14 file.
+        if _table_looks_like_toc(table):
+            continue
         for row in table.rows:
             if _row_is_matrix_section_banner(row) or _row_is_safety_by_signoff(row):
                 continue
             if _row_is_column_heading(row):
+                continue
+            row_blob = " ".join(
+                _normalize_preview_text(c.text) for c in _unique_row_cells(row)
+            )
+            if _is_toc_slot_text(row_blob):
                 continue
             for cell in _unique_row_cells(row):
                 for paragraph in cell.paragraphs:
@@ -3790,21 +4464,33 @@ def _apply_cell_edits(doc: Document, cell_edits: list[dict]) -> int:
             # header fingerprint misses the Word table. The annex number still
             # names the row. Write that cell directly.
             anchor = _annex_key(str(op.get("row_anchor") or ""))
+            annex_table, annex_index = (None, None)
             if anchor:
                 annex_table, annex_index = _find_annex_anchor_row(doc, anchor)
-                if annex_table is not None and annex_index is not None:
-                    try:
-                        annex_col = int(op.get("col"))
-                    except (TypeError, ValueError):
-                        annex_col = 2
-                    annex_cell = _attachment_cell_for_column(annex_table.rows[annex_index], annex_col)
-                    if annex_cell is not None:
-                        annex_new = _normalize_preview_text(new_text)
-                        annex_old = _normalize_preview_text(annex_cell.text)
-                        if annex_new != annex_old and not _is_toc_slot_text(annex_new):
-                            _set_cell_text_preserve(annex_cell, new_text)
-                            applied += 1
-                        continue
+            if annex_table is None:
+                try:
+                    attachment_no = int(op.get("attachment_no") or 0)
+                except (TypeError, ValueError):
+                    attachment_no = 0
+                if attachment_no < 1:
+                    attachment_no = _attachment_no_from_text(
+                        str(op.get("attachment_title") or op.get("row_label") or "")
+                    )
+                if attachment_no > 0:
+                    annex_table, annex_index = _find_attachment_number_row(doc, attachment_no)
+            if annex_table is not None and annex_index is not None:
+                try:
+                    annex_col = int(op.get("col"))
+                except (TypeError, ValueError):
+                    annex_col = 2
+                annex_cell = _attachment_cell_for_column(annex_table.rows[annex_index], annex_col)
+                if annex_cell is not None:
+                    annex_new = _normalize_preview_text(new_text)
+                    annex_old = _normalize_preview_text(annex_cell.text)
+                    if annex_new != annex_old and not _is_toc_slot_text(annex_new):
+                        _set_cell_text_preserve(annex_cell, new_text)
+                        applied += 1
+                    continue
             # Never overwrite section banners / verified-by chrome (Attachment 3/4)
             # unless the client marked an intentional banner / verified-by edit.
             allow_banner = bool(op.get("allow_banner_edit") or op.get("match_abs_row"))
@@ -4007,6 +4693,28 @@ def _apply_cell_edits(doc: Document, cell_edits: list[dict]) -> int:
             if _is_header_parenthetical_fragment(new_norm) and not old_norm:
                 header_blob = " ".join(str(h) for h in (headers_list or [])).lower()
                 if "deviation" in header_blob or "if any" in header_blob:
+                    continue
+            # Never wipe S. No. on IQ/OQ section titles (e.g. "4." / Machine Performance).
+            if (
+                new_norm == ""
+                and old_norm
+                and col_index == 0
+                and _SERIAL_CELL_RE.fullmatch(old_norm)
+                and _row_is_spanned_section_title(table.rows[row_index])
+            ):
+                continue
+            # Attachment 13 risk grid: do not plant a lone body section number
+            # ("3.1") into the S column of an otherwise empty row.
+            if (
+                col_index == 0
+                and _SECTION_NUMBER_ONLY_RE.fullmatch(new_norm)
+                and _table_is_revised_risk_analysis(table)
+            ):
+                other = [
+                    _normalize_preview_text(c.text)
+                    for c in _unique_row_cells(table.rows[row_index])[1:]
+                ]
+                if not any(other):
                     continue
             _set_cell_text_preserve(cell, new_text)
             applied += 1
@@ -4684,8 +5392,50 @@ def _annex_key(text: str) -> str:
     """The annex id only, so 097663 cannot match 09766 or 097664."""
     # Keep the full id. annex_mum_cqa_097656 must not collapse to annex_mum,
     # or every attachment row is saved as the same box.
-    match = re.search(r"annex(?:[_-][a-z0-9]+)+", _normalize_preview_text(text).lower())
-    return match.group(0) if match else ""
+    # Preview often splits trailing digits ("ANNEX_MUM_CQA_0976 62") while Word
+    # may store "097662". Drop separators so both resolve to the same key.
+    raw = _normalize_preview_text(text).lower()
+    # Prefer a match that keeps the numeric tail (avoids stopping at "09766"
+    # when the next run is only "7" / "70").
+    match = re.search(r"annex(?:[\s_-]*[a-z]+)+[\s_-]*\d[\d\s]*", raw)
+    if not match:
+        match = re.search(r"annex(?:[\s_-]*[a-z0-9]+)+", raw)
+    if not match:
+        return ""
+    return re.sub(r"[\s_-]+", "", match.group(0))
+
+
+def _attachment_no_from_text(text: str) -> int:
+    """IOQ Attachment N from the middle column (stable across page splits)."""
+    raw = _normalize_preview_text(text)
+    match = re.search(r"ioq\s*attachment\s*(\d+)", raw, flags=re.I)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _find_attachment_number_row(doc: Document, attachment_no: int):
+    """Body row whose middle cell is IOQ Attachment N."""
+    try:
+        want = int(attachment_no)
+    except (TypeError, ValueError):
+        return None, None
+    if want < 1:
+        return None, None
+    pat = re.compile(rf"ioq\s*attachment\s*{want}\b", re.I)
+    for table in collect_docx_tables(doc):
+        if _table_zone(doc, table) == "header":
+            continue
+        for index, row in enumerate(table.rows):
+            cells = _unique_row_cells(row)
+            if len(cells) < 2:
+                continue
+            if any(pat.search(_normalize_preview_text(cell.text) or "") for cell in cells):
+                return table, index
+    return None, None
 
 
 def _clear_cell_checkbox_glyphs(cell) -> None:
@@ -4711,6 +5461,26 @@ def _find_annex_anchor_row(doc: Document, anchor: str):
         for index, row in enumerate(table.rows):
             if any(_annex_key(cell.text) == want for cell in _unique_row_cells(row)):
                 return table, index
+    # Fallback: compare digit tails only when a unique row matches
+    # (preview "0976 62" vs Word "097662" already normalized by _annex_key;
+    # this catches leftover separator edge cases).
+    want_digits = re.sub(r"\D+", "", want)
+    if len(want_digits) >= 4:
+        hits = []
+        for table in collect_docx_tables(doc):
+            if _table_zone(doc, table) == "header":
+                continue
+            for index, row in enumerate(table.rows):
+                for cell in _unique_row_cells(row):
+                    cell_key = _annex_key(cell.text)
+                    if not cell_key:
+                        continue
+                    cell_digits = re.sub(r"\D+", "", cell_key)
+                    if cell_digits == want_digits or cell_key == want:
+                        hits.append((table, index))
+                        break
+        if len(hits) == 1:
+            return hits[0]
     return None, None
 
 
@@ -5988,6 +6758,8 @@ def apply_indexed_edits_to_docx(
     # Restore verified-by / section banners that were split into column cells.
     banner_merges_repaired = _repair_component_matrix_banner_merges(doc)
     safety_by_merges_repaired = _repair_safety_by_row_merges(doc)
+    check_section_repaired = _repair_check_table_section_rows(doc)
+    risk_ghosts_cleared = _drop_risk_analysis_section_number_ghosts(doc)
     _repair_exploded_full_width_cells(doc)
     serial_autonumber_removed = _strip_manual_serial_autonumber(doc)
     empty_gap_rows_removed = _drop_empty_component_rows_between_content(doc)
@@ -5996,6 +6768,25 @@ def apply_indexed_edits_to_docx(
     cells_wrapped = _keep_filled_text_inside_cells(doc)
     _join_split_esign_dates(doc)
     _normalize_header_table_fonts(doc, font_name="Arial", font_size_pt=12.0)
+    # Same view/download layout pass as report fill_docx (revalidation / NEQ save-as).
+    try:
+        from report_generator import (
+            _normalize_filled_docx_layout,
+            _ensure_body_cell_margins,
+            _keep_approval_names_inside_cells,
+            _pin_annex_footer_inside_page,
+        )
+        # NEQ save-as always uses layout_v2 (defloat / header pct→dxa).
+        _normalize_filled_docx_layout(doc, profile="neq")
+        _ensure_body_cell_margins(doc)
+        _keep_approval_names_inside_cells(doc)
+        _pin_annex_footer_inside_page(doc)
+    except Exception:
+        pass
+    # Defloat can drop tblpX; keep Comments / pct tables inside the page border.
+    _clamp_body_tables_inside_page_border(doc)
+    # After layout helpers, put TOC bold/size back like the original template.
+    _restore_toc_template_fonts(doc)
 
     total_applied = (
         applied
@@ -6011,6 +6802,8 @@ def apply_indexed_edits_to_docx(
         + identity_boxes_removed
         + banner_merges_repaired
         + safety_by_merges_repaired
+        + check_section_repaired
+        + risk_ghosts_cleared
         + serial_autonumber_removed
         + serial_style_fixed
     )

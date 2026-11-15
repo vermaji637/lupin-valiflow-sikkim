@@ -32,11 +32,12 @@ from doc_parser import (
     is_toc_list_table,
     is_toc_entry_text,
     is_equipment_section_banner_row,
+    is_verified_by_sign_row,
     is_repeated_column_header_row,
     _match_cover_label_cell,
 )
 from docx.oxml.ns import qn
-from report_generator import fill_docx, _normalize_text_value
+from report_generator import fill_docx, _normalize_text_value, normalize_existing_filled_docx
 from pydantic import BaseModel, field_validator
 from typing import List, Optional, Any
 import json
@@ -73,6 +74,7 @@ class FillRequest(BaseModel):
     attachment_links: Optional[dict[str, Any]] = None
     equipment_id: Optional[str] = None
     table_ops: Optional[List[dict]] = None
+    import_source: Optional[str] = None
 
     @field_validator("attachment_links", mode="before")
     @classmethod
@@ -121,6 +123,7 @@ GENERATED_REPORTS_PATH = _project_storage_path(
 )
 ATTACHMENTS_PATH = _project_storage_path("ATTACHMENTS_PATH", "attachments")
 
+# [LIBREOFFICE] Path to soffice.exe (set LIBREOFFICE_BIN in .env if needed)
 LIBREOFFICE = os.getenv("LIBREOFFICE_BIN", "soffice")
 REQUIRED_DIRS = [
     UPLOAD_PATH,
@@ -160,13 +163,10 @@ def ensure_required_dirs() -> None:
 
 
 # ── convert_doc_to_docx() ───────────────────────────
-# Converts a legacy .doc file to .docx using LibreOffice headless.
-# Parameters: doc_path — absolute path to the uploaded .doc file
-# Returns: absolute path to the generated .docx in the same folder
-# Key steps:
-#   1. Verifies LibreOffice (soffice.exe) is installed
-#   2. Runs --headless --convert-to docx into the source directory
-#   3. Returns the .docx path or raises if conversion fails
+# Converts old .doc → .docx so the app can parse it.
+# [LIBREOFFICE] Tried first: soffice --headless --convert-to docx
+# [WORD COM]    Backup on Windows if LibreOffice is missing
+# Used by upload/import APIs when the template is still a legacy .doc
 def _converted_docx_path(doc_path: str) -> str:
     return os.path.splitext(doc_path)[0] + ".docx"
 
@@ -176,6 +176,7 @@ def _docx_ready(docx_path: str) -> bool:
 
 
 def _convert_doc_with_libreoffice(doc_path: str, docx_path: str) -> None:
+    # [LIBREOFFICE] Command: soffice --headless --convert-to docx --outdir <folder> <file.doc>
     command = [
         LIBREOFFICE,
         "--headless",
@@ -192,7 +193,7 @@ def _convert_doc_with_libreoffice(doc_path: str, docx_path: str) -> None:
 
 
 def _convert_doc_with_word(doc_path: str, docx_path: str) -> None:
-    """Windows fallback when LibreOffice is not installed. Saves a real .docx Word can open."""
+    """[WORD COM] Windows backup when LibreOffice is not installed. Saves a real .docx."""
     if os.name != "nt":
         raise Exception("Microsoft Word conversion is only available on Windows")
 
@@ -266,8 +267,7 @@ def json_version():
 
 
 # ── health() ────────────────────────────────────────
-# Detailed health check with configured storage paths and LibreOffice status.
-# Returns: JSON with status, upload_path, generated_reports_path, etc.
+# [API] GET /health — also reports if [LIBREOFFICE] soffice is installed.
 @app.get("/health")
 def health():
     return {
@@ -276,20 +276,14 @@ def health():
         "upload_path": UPLOAD_PATH,
         "generated_reports_path": GENERATED_REPORTS_PATH,
         "attachments_path": ATTACHMENTS_PATH,
+        # true when LibreOffice (soffice) can be found
         "libreoffice": bool(shutil.which(LIBREOFFICE) or os.path.exists(LIBREOFFICE)),
     }
 
 
 # ── parse_document() ────────────────────────────────
-# POST /parse — upload a DOC/DOCX, detect fillable fields, save template copy.
-# Parameters: file — UploadFile from multipart form (field name must be "file")
-# Returns: JSON with file_id, fields list, summary counts, paragraphs metadata
-# Key steps:
-#   1. Validates .doc or .docx extension
-#   2. Saves file as {uuid}.docx or {uuid}.doc under UPLOAD_PATH
-#   3. Converts .doc to .docx via LibreOffice if needed
-#   4. Calls parse_docx() on the saved file (body tables/paragraphs only)
-#   5. Returns file_id UUID and fillable_fields for Laravel to store on report
+# [API] POST /parse — upload DOC/DOCX and detect fillable fields.
+# If file is old .doc: [LIBREOFFICE] converts it to .docx first (Word COM backup).
 @app.post("/parse")
 async def parse_document(file: UploadFile = File(...)):
     # Reject uploads that are not .doc or .docx.
@@ -375,14 +369,13 @@ async def parse_document(file: UploadFile = File(...)):
 
 
 # ── fill_document() ─────────────────────────────────
-# POST /fill — inject user values into a previously parsed template.
-# Parameters: FillRequest JSON body (file_id, original_filename, fields[])
-# Returns: JSON with output_filename and path under GENERATED_REPORTS_PATH
-# Key steps:
-#   1. Locates template at UPLOAD_PATH/{file_id}.docx (or .doc)
-#   2. Builds output path as {file_id}_filled.docx in GENERATED_REPORTS_PATH
-#   3. Calls fill_docx() — body tables/paragraphs only; footers preserved
-#   4. Returns output_filename for Laravel to store as docx_filled_path
+# [API] POST /fill — write field values into the DOCX template.
+# Called by Laravel (DocxImportController) on submit / approval / download regen.
+#
+# Inside fill_docx() TOC pages are fixed like this:
+#   [WORD COM]     Microsoft Word reads real page numbers (preferred)
+#   [LIBREOFFICE]  soffice DOCX→PDF only if Word is missing/fails
+#   then returns toc_field_values to Laravel
 @app.post("/fill")
 async def fill_document(request: FillRequest):
     template_path = resolve_docx_template_path(request.file_id)
@@ -406,7 +399,9 @@ async def fill_document(request: FillRequest):
         print(f"Field value raw: {repr(field['value'])}")
 
     try:
-        # Write user values into template; locked fields are skipped by report_generator.
+        # [API] POST /fill → fill_docx()
+        # Inside fill_docx, TOC pages are fixed with:
+        #   [WORD COM] first, then [LIBREOFFICE] DOCX→PDF backup if Word fails.
         result_path, repaired_values = fill_docx(
             template_path,
             field_values,
@@ -414,6 +409,7 @@ async def fill_document(request: FillRequest):
             request.attachment_links or {},
             request.equipment_id or "",
             request.table_ops or [],
+            request.import_source or "",
         )
     except Exception as e:
         raise HTTPException(
@@ -424,18 +420,61 @@ async def fill_document(request: FillRequest):
     filled_count = sum(1 for f in request.fields if not f.locked)
     skipped_count = sum(1 for f in request.fields if f.locked)
 
+    # TOC digits come back from fill_docx (Word/LibreOffice layout step above).
+    toc_field_values = {
+        loc: val
+        for loc, val in (repaired_values or {}).items()
+        if str(loc).startswith("toc_sdt_") or "_toc_" in str(loc)
+    }
+
     return {
         "status":            "success",
         "file_id":           request.file_id,
         "output_filename":   output_filename,
         "output_path":       result_path,
         "repaired_field_values": repaired_values,
+        "toc_field_values": toc_field_values,
         "summary": {
             "total_fields":   len(request.fields),
             "filled_fields":  filled_count,
             "skipped_locked": skipped_count,
+            "toc_updated":    len(toc_field_values),
         }
     }
+
+
+class NormalizeLayoutRequest(BaseModel):
+    """Absolute or storage-relative path to an already-filled DOCX."""
+    path: str
+    import_source: Optional[str] = None
+
+
+@app.post("/normalize-layout")
+async def normalize_layout(request: NormalizeLayoutRequest):
+    """
+    Apply post-fill layout fixes onto an existing DOCX.
+    NEQ-only layout_v2 rewrite; requal/reval are no-ops (legacy path preserved).
+    """
+    raw = (request.path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="path is required")
+
+    candidates = [raw]
+    # Laravel often sends storage-relative paths like generated_reports/foo_filled.docx
+    if not os.path.isabs(raw):
+        candidates.append(str(Path(GENERATED_REPORTS_PATH) / raw))
+        candidates.append(str(Path(GENERATED_REPORTS_PATH) / Path(raw).name))
+
+    docx_path = next((p for p in candidates if p and os.path.isfile(p)), None)
+    if not docx_path:
+        raise HTTPException(status_code=404, detail=f"DOCX not found: {raw}")
+
+    try:
+        normalize_existing_filled_docx(docx_path, import_source=request.import_source or "")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Normalize layout failed: {e}") from e
+
+    return {"status": "success", "path": docx_path}
 
 
 # ── preview_document() ──────────────────────────────
@@ -452,6 +491,7 @@ async def preview_document(
     file_id: str = Form(...),
     fields_json: Optional[str] = Form(None),
     mode: str = Form("edit"),
+    import_source: Optional[str] = Form(None),
 ):
     template_path = resolve_docx_template_path(file_id)
 
@@ -477,6 +517,9 @@ async def preview_document(
             mode != "readonly"
             and mode == "pre_approval"
         )
+        # Requal/reval treat every *_col_0 as a label. NEQ edit mode must keep
+        # Comments / Severity S / Revision No. fillable when PHP unlocks them.
+        is_requal_col0_lock = mode in ("pre_approval", "requalification")
 
         fields = []
         for ff in fresh:
@@ -487,10 +530,17 @@ async def preview_document(
                 any(k in lbl_lower for k in ("methodology", "report approval"))
                 or any(k in val_lower for k in ("methodology", "report approval"))
             )
-            is_col_0_label = ff.get("type") == "table_2col_label" or bool(loc and loc.endswith("_col_0"))
+            is_col_0_label = ff.get("type") == "table_2col_label" or (
+                is_requal_col0_lock and bool(loc and loc.endswith("_col_0"))
+            )
 
             if loc in stored_by_loc:
                 sv = stored_by_loc[loc]
+                parse_prefilled = bool(ff.get("prefilled"))
+                parse_type = ff.get("type")
+                parse_role = ff.get("approver_role")
+                parse_widget = ff.get("widget")
+                parse_sig_date_loc = ff.get("signature_date_location")
                 if sv.get("value") not in (None, ""):
                     ff["value"] = sv["value"]
                 if is_heading_or_fixed or is_col_0_label:
@@ -527,8 +577,10 @@ async def preview_document(
                             ff["locked"] = sv_locked.strip().lower() in ("1", "true", "yes")
                         else:
                             ff["locked"] = bool(sv_locked)
-                    # Paragraphs and 2-col keys (Col 0) are strictly locked!
-                    elif ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
+                    # Paragraphs / 2-col labels stay locked; col_0 only for requal modes.
+                    elif ff.get("type") in ("paragraph_content", "table_2col_label") or (
+                        is_requal_col0_lock and loc and loc.endswith("_col_0")
+                    ):
                         ff["locked"] = True
                     # 2-col values (Col 1) are fillable (excluding approvers and locked fields)!
                     elif (ff.get("type") == "table_2col" or (loc and (loc.endswith("_col_1") or re.match(r"^table_\d+_row_\d+$", loc)))) and ff.get("type") != "approver":
@@ -540,14 +592,91 @@ async def preview_document(
                     "approver_role",
                     "user_id",
                     "signature_date_location",
+                    "department_location",
+                    "signature_location",
                     "stamp_eligible",
                     "is_pre_approver",
+                    "prefilled",
+                    "user_filled",
+                    "auto_from_name",
                 ):
                     if meta_key not in sv:
                         continue
                     val = sv[meta_key]
-                    if meta_key in ("stamp_eligible", "is_pre_approver") or val not in (None, ""):
+                    if meta_key in (
+                        "stamp_eligible",
+                        "is_pre_approver",
+                        "prefilled",
+                        "user_filled",
+                        "auto_from_name",
+                    ) or val not in (None, ""):
                         ff[meta_key] = val
+                # Word-prefilled template text stays locked unless the user typed over it.
+                if (
+                    (parse_prefilled or ff.get("prefilled") or sv.get("prefilled"))
+                    and not sv.get("user_filled")
+                    and not ff.get("user_filled")
+                ):
+                    ff["locked"] = True
+                    ff["prefilled"] = True
+                # Fresh parse wins for 8.0 Report Approval Name dropdowns — older drafts may
+                # have demoted them to plain text inputs via scrubFalseApprovalStampFields.
+                if parse_type == "approver" or (
+                    isinstance(parse_role, str)
+                    and parse_role.startswith("post_")
+                    and parse_type != "approval_stamp_signature"
+                    and parse_type != "approval_stamp_date"
+                    and not (isinstance(parse_type, str) and parse_type.startswith("approval_stamp"))
+                ):
+                    # Only Name cells become dropdowns — never Signature/Date stamp cells.
+                    loc_s = str(loc or "")
+                    if not re.search(r"_col_[23]$", loc_s):
+                        ff["type"] = "approver"
+                        ff["widget"] = parse_widget or "approver"
+                        if parse_role:
+                            ff["approver_role"] = parse_role
+                        if parse_sig_date_loc:
+                            ff["signature_date_location"] = parse_sig_date_loc
+                        if not ff.get("user_filled") and not sv.get("is_pre_approver"):
+                            ff["locked"] = False
+                # Signature / Date always stay locked stamps from the fresh parse.
+                if isinstance(parse_type, str) and parse_type.startswith("approval_stamp"):
+                    ff["type"] = parse_type
+                    ff["widget"] = parse_widget or (
+                        "date" if parse_type == "approval_stamp_date" else "text"
+                    )
+                    ff["locked"] = True
+                    if parse_role:
+                        ff["approver_role"] = parse_role
+                # Att07 component serials: keep fresh auto_serial / locked table_sl_no.
+                if parse_type == "table_sl_no" or ff.get("auto_serial") not in (None, ""):
+                    ff["type"] = "table_sl_no"
+                    ff["locked"] = True
+                    if not str(ff.get("value") or "").strip():
+                        auto_serial = ff.get("auto_serial")
+                        if auto_serial not in (None, ""):
+                            try:
+                                ff["value"] = f"{int(auto_serial)}."
+                            except (TypeError, ValueError):
+                                pass
+                    if str(ff.get("label") or "").strip().lower() in {
+                        "main body",
+                        "mechanical components",
+                        "electrical components",
+                        "pneumatic components",
+                    }:
+                        ff["label"] = "Sr. No."
+                # Empty Sr. No. cells stay fillable — do not keep legacy locked table_sl_no.
+                elif (
+                    parse_type == "table_multicol"
+                    and str(sv.get("type") or "") == "table_sl_no"
+                    and not str(ff.get("value") or "").strip()
+                    and not str(sv.get("value") or "").strip()
+                    and re.search(r"_col_0$", str(loc or ""))
+                ):
+                    ff["type"] = "table_multicol"
+                    ff["widget"] = "text"
+                    ff["locked"] = False
             else:
                 parent_para = ff.get("parent_para")
                 if is_heading_or_fixed or is_col_0_label:
@@ -565,7 +694,9 @@ async def preview_document(
                                 ff["locked"] = sv_locked.strip().lower() in ("1", "true", "yes")
                             else:
                                 ff["locked"] = bool(sv_locked)
-                        elif ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
+                        elif ff.get("type") in ("paragraph_content", "table_2col_label") or (
+                            is_requal_col0_lock and loc and loc.endswith("_col_0")
+                        ):
                             ff["locked"] = True
                 elif is_pre_approval_mode:
                     if loc and loc.endswith("_row_0_col_1") and ff.get("type") == "table_2col":
@@ -573,13 +704,20 @@ async def preview_document(
                     elif ff.get("type") not in ("approval_stamp", "table_sl_no") and not (loc and loc.endswith("_row_0")):
                         ff["locked"] = False
                 else:
-                    if ff.get("type") in ("paragraph_content", "table_2col_label") or (loc and loc.endswith("_col_0")):
+                    if ff.get("type") in ("paragraph_content", "table_2col_label") or (
+                        is_requal_col0_lock and loc and loc.endswith("_col_0")
+                    ):
                         ff["locked"] = True
                     elif ff.get("type") == "table_2col" or (loc and (loc.endswith("_col_1") or re.match(r"^table_\d+_row_\d+$", loc))):
                         ff["locked"] = False
             fields.append(ff)
 
-        html = build_fill_html(template_path, fields, mode=mode)
+        html = build_fill_html(
+            template_path,
+            fields,
+            mode=mode,
+            import_source=import_source or "",
+        )
         debug_widgets = _collect_widget_debug(fields)
         _log_widget_debug(debug_widgets)
         # Return HTML for embedding in Laravel fill.blade.php (read-only; does not modify DOCX).
@@ -1128,6 +1266,23 @@ def _cell_rowspan(cell) -> int:
     return 1
 
 
+def _count_shared_tc_rowspan(table, r_idx: int, col_idx: int, cell) -> int:
+    """
+    Count consecutive rows that share the same tc for this column.
+    python-docx returns the merge-start cell for vertically merged cells, so
+    shared identity is the reliable rowspan signal (OOXML may mark both as restart).
+    """
+    tc = cell._tc
+    span = 1
+    for nxt in range(r_idx + 1, len(table.rows)):
+        nxt_cells = table.rows[nxt].cells
+        if col_idx < len(nxt_cells) and nxt_cells[col_idx]._tc is tc:
+            span += 1
+        else:
+            break
+    return span
+
+
 # ── _is_textarea_cell() ─────────────────────────────
 # Large comment/observation cells or vertically merged cells use <textarea>.
 def _is_textarea_cell(field: dict | None, row_label: str, rowspan: int) -> bool:
@@ -1500,6 +1655,8 @@ def _render_approver_cell(field: dict, mode: str = "edit", colspan_attr: str = "
     date_loc = _escape_html(field.get("signature_date_location", ""))
     value = field.get("value", "")
     user_id = field.get("user_id", "")
+    # Pre-approver lock is role/flag based only — never table_1/2/3 index.
+    # NEQ Att11 APPROVAL PAGE is often table_3 and must stay a user dropdown.
     is_pre = (
         field.get("is_pre_approver")
         or role in (
@@ -1511,7 +1668,6 @@ def _render_approver_cell(field: dict, mode: str = "edit", colspan_attr: str = "
             "approved_by_user_name",
             "approved_by_quality_name",
         )
-        or bool(re.match(r"^table_[123]_row_\d+_col_\d+$", location))
     )
     if _is_readonly_mode(mode) or _is_field_locked(field) or (is_pre and mode != "pre_approval"):
         display = _render_readonly_span(value, field, location)
@@ -1526,15 +1682,27 @@ def _render_approver_cell(field: dict, mode: str = "edit", colspan_attr: str = "
             extra_class="readonly docx-approver-readonly font-weight-bold text-dark",
         )
     is_pre_attr = ' data-is-pre-approver="1"' if is_pre else ""
-    required = "" if (is_pre or mode == "pre_approval") else (" required" if role else "")
+    # Att01 personnel table Name / Training Imparted by are optional data entry.
+    # Only real POST workflow roles (e.g. Validation/QA) are HTML-required.
+    optional_roles = {
+        "training_personnel_name",
+        "training_imparted_by_name",
+    }
+    required = ""
+    if not is_pre and mode != "pre_approval" and role and role not in optional_roles:
+        required = " required"
     user_id_attr = f' data-user-id="{user_id}"' if user_id else ""
     val_attr = f' value="{_escape_html(value)}"' if value else ' value=""'
+    dept_loc = _escape_html(str(field.get("department_location") or ""))
+    sig_loc = _escape_html(str(field.get("signature_location") or ""))
+    dept_attr = f' data-department-location="{dept_loc}"' if dept_loc else ""
+    sig_attr = f' data-signature-location="{sig_loc}"' if sig_loc else ""
     return (
         f'<td class="docx-cell editable docx-approver-cell"{colspan_attr}>'
         f'<select class="docx-input approver-field" '
         f'data-approver-role="{role}" '
         f'data-field-location="{location}" '
-        f'data-signature-date-location="{date_loc}"{user_id_attr}{is_pre_attr}{required}>'
+        f'data-signature-date-location="{date_loc}"{dept_attr}{sig_attr}{user_id_attr}{is_pre_attr}{required}>'
         f'<option value="">-- Select User --</option>'
         f"</select>"
         f'<input type="hidden" name="fields[{location}]" '
@@ -1654,7 +1822,10 @@ def _render_heading_paragraph(
         is_locked_section_title(prefixed_clean_p)
         or is_section_heading_paragraph(prefixed_clean_p)
         or is_num_section
-        or re.match(r"^(?:\d+(?:\.\d+)*\s*)?(?:METHODOLOGY|REPORT APPROVAL)\b", clean_upper)
+        or re.match(
+            r"^(?:\d+(?:\.\d+)*\s*)?(?:METHODOLOGY|REPORT APPROVAL|APPROVAL PAGE)\b",
+            clean_upper,
+        )
     ):
         heading_prefix = _num_prefix_span(eff_prefix, is_bullet, bold=True)
         return (
@@ -1737,6 +1908,22 @@ def _render_paragraph(
 
     if field and field.get("type") == "paragraph_radio":
         return _render_paragraph_yes_no_radio(para_index, para_text, field, mode)
+
+    # Att01 Validation /Quality Assurance: — user select (POST approval assignee).
+    if field and field.get("type") == "approver":
+        label = dedupe_colon_label(para_text or field.get("label") or "").strip()
+        if label and not label.endswith(":"):
+            label = f"{label}:"
+        if _is_readonly_mode(mode) or _is_field_locked(field):
+            display = _render_readonly_span(field.get("value", ""), field, field.get("location", loc))
+            return f'<p class="docx-para">{_escape_html(label + " ") if label else ""}{display}</p>'
+        select_html = _render_approver_cell(field, mode=mode)
+        # Strip outer <td>…</td> so the select sits inline after the paragraph label.
+        inner = re.sub(r"^<td[^>]*>|</td>$", "", select_html.strip(), flags=re.I)
+        return (
+            f'<p class="docx-para docx-para-editable docx-para-approver">'
+            f"{_escape_html(label + ' ') if label else ''}{inner}</p>"
+        )
 
     if (
         field is None
@@ -1959,22 +2146,28 @@ def _looks_like_sl_no_value(value: str) -> bool:
 def _format_sl_no_display(r_idx: int, field: dict | None, cell_text: str) -> str:
     """
     Display value for a locked Sl. No. cell.
-    Keeps pre-filled DOCX values (1., 1.0); auto-generates 1, 2, 3 for empty data rows.
-    Ignores junk typed into legacy editable Sl. No. fields.
+    Prefers live DOCX cell text (1., 2.). When Word left the cell empty but the
+    parser assigned an auto_serial (Att07 Main Body / Components blocks), show that.
+    Otherwise empty Word cells stay blank — do not invent row-index serials.
     """
     if r_idx == 0:
         return cell_text
-    for candidate in (
-        (field or {}).get("value", ""),
-        cell_text,
-    ):
-        val = (candidate or "").strip()
-        if val and _looks_like_sl_no_value(val):
-            return val
-    auto = (field or {}).get("auto_serial")
-    if auto is not None and str(auto).strip() != "":
-        return str(auto)
-    return str(r_idx)
+    cell_val = (cell_text or "").strip()
+    if cell_val and _looks_like_sl_no_value(cell_val):
+        return cell_val
+    field_val = ((field or {}).get("value") or "").strip()
+    if field_val and _looks_like_sl_no_value(field_val):
+        return field_val
+    auto_serial = (field or {}).get("auto_serial")
+    if auto_serial not in (None, ""):
+        try:
+            return f"{int(auto_serial)}."
+        except (TypeError, ValueError):
+            pass
+    # Empty in Word with no assigned serial → blank (merged Sr. No. continuation).
+    if not cell_val:
+        return ""
+    return cell_val
 
 
 def _render_sl_no_cell(
@@ -2079,12 +2272,15 @@ def _cell_numbered_text(cell, num_resolver) -> str:
     return "\n".join(ln for ln in lines if ln).strip() or cell.text.strip()
 
 
-def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_tracker: list = None, header_tpl: str = "", footer_tpl: str = "", num_resolver=None) -> str:
+def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_tracker: list = None, header_tpl: str = "", footer_tpl: str = "", num_resolver=None, hard_page_breaks_only: bool = False) -> str:
     html = [f'<table class="docx-table" data-table-index="{t_idx}">']
     readonly = _is_readonly_mode(mode)
     sl_no_col = _table_sl_no_col_index(table)
     toc_table = is_toc_table(table) or is_toc_list_table(table)
     col_headers = get_table_column_headers(table, is_report_approval_block_table(table))
+    # Track vertically merged cells so Sr. No. (and other merges) render once with rowspan.
+    # Hold the tc element objects themselves — id() integers are unsafe across rows (GC reuse).
+    rendered_tc_els: set = set()
 
     for r_idx, row in enumerate(table.rows):
         is_row_page_break = False
@@ -2092,7 +2288,9 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
             try:
                 from lxml import etree
                 xml_b = etree.tostring(row._tr)
-                if b"lastRenderedPageBreak" in xml_b or b'type="page"' in xml_b:
+                if b'type="page"' in xml_b or b"<w:pageBreakBefore" in xml_b:
+                    is_row_page_break = True
+                elif (not hard_page_breaks_only) and b"lastRenderedPageBreak" in xml_b:
                     is_row_page_break = True
             except Exception:
                 pass
@@ -2121,6 +2319,53 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
         html.append(f'<tr data-row-index="{r_idx}">')
 
         cells = row.cells
+        # Att07 / Att3: "Verified by sign and date :" is an e-sign line, not a section banner.
+        if is_verified_by_sign_row(row):
+            colspan = len(cells) or 1
+            colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
+            loc = f"table_{t_idx}_row_{r_idx}_col_0"
+            field = field_map.get(loc)
+            if field is None:
+                # Merged footer may be stored under another col index of the same tc.
+                for ci in range(colspan):
+                    alt = field_map.get(f"table_{t_idx}_row_{r_idx}_col_{ci}")
+                    if alt:
+                        field = alt
+                        loc = alt.get("location") or loc
+                        break
+            label = "Verified by sign and date :"
+            raw_label = dedupe_colon_label((cells[0].text if cells else "") or "")
+            if raw_label:
+                label = raw_label if raw_label.endswith(":") else f"{raw_label.rstrip()} :"
+            value = str((field or {}).get("value") or "").strip()
+            style = _inline_cell_style("", readonly=readonly, value_cell=not readonly)
+            if readonly or _is_field_locked(field or {}):
+                display = value or label
+                html.append(
+                    f'<td class="docx-cell" style="{style}"{colspan_attr} data-field="{_escape_html(loc)}">'
+                    f"{_escape_html(display)}</td>"
+                )
+            else:
+                inp = _render_field_input(
+                    loc,
+                    field
+                    if isinstance(field, dict)
+                    else {
+                        "location": loc,
+                        "label": label,
+                        "type": "table_multicol",
+                        "widget": "text",
+                    },
+                    css_class="docx-input",
+                    placeholder=label,
+                    value=value,
+                )
+                html.append(
+                    f'<td class="docx-cell editable" style="{style}"{colspan_attr} '
+                    f'data-field="{_escape_html(loc)}">{inp}</td>'
+                )
+            html.append("</tr>")
+            continue
         # "Mechanical Adjustment:" / "Machine Performance:" / "Major components :" are merged title rows.
         # Col 0 is the Sr. No. column, so without this they render as the row number.
         if is_equipment_section_banner_row(row):
@@ -2142,12 +2387,12 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
             html.append("</tr>")
             continue
         if r_idx > 0 and is_repeated_column_header_row(row, col_headers):
-            seen_header: set[int] = set()
+            seen_header: set = set()
             for cell in cells:
-                tc_id = id(cell._tc)
-                if tc_id in seen_header:
+                tc_el = cell._tc
+                if tc_el in seen_header:
                     continue
-                seen_header.add(tc_id)
+                seen_header.add(tc_el)
                 c_span = _cell_colspan(cell, cells)
                 c_span_attr = f' colspan="{c_span}"' if c_span > 1 else ""
                 style = _inline_cell_style("font-weight:bold;", readonly=readonly)
@@ -2160,20 +2405,26 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
         is_two_col = len(cells) == 2
         is_one_col = len(cells) == 1
         row_label = cells[0].text.strip() if cells else ""
-        seen_tc_ids = set()
+        seen_tc_els: set = set()
 
         for col_idx, cell in enumerate(cells):
-            tc_id = id(cell._tc)
-            if tc_id in seen_tc_ids:
+            tc_el = cell._tc
+            if tc_el in seen_tc_els:
                 continue
-            seen_tc_ids.add(tc_id)
+            seen_tc_els.add(tc_el)
 
-            rowspan = _cell_rowspan(cell)
-            if rowspan == 0:
+            # Vertical merge continuation (shared tc already rendered on an earlier row).
+            if tc_el in rendered_tc_els:
+                continue
+            rendered_tc_els.add(tc_el)
+
+            if _cell_rowspan(cell) == 0:
                 continue
 
+            rowspan = _count_shared_tc_rowspan(table, r_idx, col_idx, cell)
             colspan = _cell_colspan(cell, cells)
             colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
+            rowspan_attr = f' rowspan="{rowspan}"' if rowspan > 1 else ""
 
             text = dedupe_colon_label(cell.text.strip())
             display_text = (
@@ -2183,7 +2434,6 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
             )
             is_header = r_idx == 0 and not (is_two_col and not is_two_col_grid_table(table) and not is_two_col_header_row(cells, table.rows))
             cell_style = "font-weight:bold;" if is_header else ""
-            rowspan_attr = ""
 
             if is_header:
                 style = _inline_cell_style(cell_style + "background:#f1f5f9; color:#1e293b;", readonly=readonly)
@@ -2269,10 +2519,53 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 t_idx, r_idx, col_idx, cell, cells, is_two_col, field_map
             )
 
-            # Sl. No. / component serial column — locked auto-numbered text.
-            is_sl_no_cell = (sl_no_col is not None and col_idx == sl_no_col) or (
-                field and field.get("type") == "table_sl_no"
+            # Sl. No. / component serial: locked when Word already has a number (Att14).
+            # Empty Sr. No. cells are always editable inputs in fill mode (Att11).
+            word_has_serial = bool((text or "").strip() and _looks_like_sl_no_value(text))
+            field_val = str((field or {}).get("value") or "").strip()
+            cell_empty = not (text or "").strip() and not field_val
+            editable_empty_sl = (
+                not readonly
+                and r_idx > 0
+                and sl_no_col is not None
+                and col_idx == sl_no_col
+                and cell_empty
             )
+            field_is_locked_sl = bool(
+                field
+                and field.get("type") == "table_sl_no"
+                and (word_has_serial or field_val)
+            )
+            is_sl_no_cell = (
+                field_is_locked_sl
+                or (sl_no_col is not None and col_idx == sl_no_col and word_has_serial)
+            ) and not editable_empty_sl
+            if editable_empty_sl:
+                # Force fillable Sr. No. even if an older draft still marks table_sl_no/locked.
+                loc = (
+                    (field or {}).get("location")
+                    or f"table_{t_idx}_row_{r_idx}_col_{col_idx}"
+                )
+                inp = _render_field_input(
+                    loc,
+                    field
+                    if isinstance(field, dict)
+                    else {
+                        "location": loc,
+                        "label": "Sr. No.",
+                        "type": "table_multicol",
+                        "widget": "text",
+                    },
+                    css_class="docx-input",
+                    placeholder="Sr. No.",
+                    value=field_val,
+                )
+                style = _inline_cell_style(cell_style, readonly=False, value_cell=True)
+                html.append(
+                    f'<td class="docx-cell editable" style="{style}"{rowspan_attr}{colspan_attr} '
+                    f'data-field="{_escape_html(loc)}">{inp}</td>'
+                )
+                continue
             if is_sl_no_cell:
                 loc = (
                     (field or {}).get("location")
@@ -2597,12 +2890,16 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
     return "\n".join(html)
 
 
-def _element_has_page_break(element) -> bool:
-    """Detect if an XML element contains a hard or rendered page break."""
+def _element_has_page_break(element, *, hard_only: bool = False) -> bool:
+    """Detect page breaks. hard_only ignores Word lastRenderedPageBreak soft markers."""
     try:
         from lxml import etree
         xml_b = etree.tostring(element)
-        return b"lastRenderedPageBreak" in xml_b or b'type="page"' in xml_b or b"<w:pageBreakBefore" in xml_b
+        if b'type="page"' in xml_b or b"<w:pageBreakBefore" in xml_b:
+            return True
+        if hard_only:
+            return False
+        return b"lastRenderedPageBreak" in xml_b
     except Exception:
         return False
 
@@ -2626,17 +2923,29 @@ def _collect_live_letterhead_values(field_map: dict | None) -> dict[str, str]:
     return values
 
 
-def extract_header_and_footer_templates(doc, field_map: dict | None = None) -> tuple[str, str]:
+def extract_header_and_footer_templates(
+    doc,
+    field_map: dict | None = None,
+    mode: str = "edit",
+) -> tuple[str, str]:
     """Extract official Header table and Footer from docx section to render on each A4 sheet."""
     header_html = ""
-    footer_annex = "ANNEX_SKM_QA_070156 | (1.0) | SOP_SKM_QA_070136 | CLASS I"
+    # Only show annex footer when the template itself has one (HVAC original has none).
+    footer_annex = ""
     live_cover_values = _collect_live_letterhead_values(field_map)
+    # NEQ fill (mode=edit): empty / unlocked letterhead value cells become yellow inputs.
+    # Requal modes keep display-only header cells (mapping panel still syncs via data-letterhead-field).
+    letterhead_inputs = mode == "edit"
 
     if doc.sections:
         sec = doc.sections[0]
-        # Footer text from template
+        # Footer text from template — skip invented ANNEX_xxx placeholders.
         for p in sec.footer.paragraphs:
             txt = p.text.strip()
+            if not txt:
+                continue
+            if "ANNEX_xxx" in txt.lower() or "sop_xxxx" in txt.lower():
+                continue
             if "ANNEX" in txt or "SOP" in txt or "CLASS" in txt:
                 footer_annex = txt
                 break
@@ -2716,15 +3025,58 @@ def extract_header_and_footer_templates(doc, field_map: dict | None = None) -> t
                     elif prev_label_key:
                         loc_key = f"header_0_row_{r_idx}_col_{c_idx}"
                         loc_field = (field_map or {}).get(loc_key) if field_map else None
+                        # Cover/protocol locations may also carry the live letterhead value.
+                        cover_field = None
+                        if field_map:
+                            for cand in field_map.values():
+                                if not isinstance(cand, dict):
+                                    continue
+                                if str(cand.get("cover_key") or "").strip() == prev_label_key:
+                                    cover_field = cand
+                                    break
+                                if str(cand.get("protocol_key") or "").strip() == prev_label_key:
+                                    cover_field = cand
+                                    break
                         live_val = ""
                         if isinstance(loc_field, dict) and str(loc_field.get("value") or "").strip():
                             live_val = str(loc_field.get("value") or "").strip()
+                        elif isinstance(cover_field, dict) and str(cover_field.get("value") or "").strip():
+                            live_val = str(cover_field.get("value") or "").strip()
                         elif prev_label_key in live_cover_values:
                             live_val = live_cover_values[prev_label_key]
                         else:
                             live_val = txt
                         lh_attr = f' data-letterhead-field="{_escape_html(prev_label_key)}"'
-                        content = _escape_html(live_val)
+                        field_for_input = loc_field if isinstance(loc_field, dict) else cover_field
+                        field_locked = (
+                            _is_field_locked(field_for_input)
+                            if isinstance(field_for_input, dict)
+                            else False
+                        )
+                        # Prefer a real parsed location so fill() can write back to the DOCX header.
+                        input_loc = loc_key
+                        if isinstance(loc_field, dict) and str(loc_field.get("location") or "").strip():
+                            input_loc = str(loc_field.get("location"))
+                        elif isinstance(cover_field, dict) and str(cover_field.get("location") or "").strip():
+                            input_loc = str(cover_field.get("location"))
+                        if letterhead_inputs and not field_locked:
+                            style += " background: #fffde7;"
+                            content = _render_field_input(
+                                input_loc,
+                                field_for_input
+                                if isinstance(field_for_input, dict)
+                                else {
+                                    "location": input_loc,
+                                    "label": prev_label_key,
+                                    "type": "header_cell",
+                                    "widget": "text",
+                                },
+                                css_class="docx-input",
+                                placeholder=prev_label_key.replace("_", " ").title(),
+                                value=live_val,
+                            )
+                        else:
+                            content = _escape_html(live_val)
                         prev_label_key = ""
                     elif c_idx in (1, 3):
                         style += " font-weight: 600; background: #f8fafc;"
@@ -2784,7 +3136,12 @@ def extract_header_and_footer_templates(doc, field_map: dict | None = None) -> t
 #   2. Renders each table via _render_table() and each paragraph inline
 #   3. Breaks document into realistic A4 page sheets (<div class="docx-a4-page">)
 #   4. De-duplicates repeated <p> element references in the body walk
-def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str:
+def build_fill_html(
+    template_path: str,
+    fields: list,
+    mode: str = "edit",
+    import_source: str | None = None,
+) -> str:
     """
     Generate interactive HTML form from DOCX structure.
 
@@ -2802,6 +3159,9 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
             pass
     field_map = {f["location"]: f for f in fields}
     paragraphs = doc.paragraphs
+    # NEQ: ignore Word lastRenderedPageBreak soft markers (they create huge approval-page gaps).
+    # Requal/reval keep the previous soft+hard break behavior.
+    hard_page_breaks_only = (import_source or "").strip().lower() == "new_equipment_qualification"
 
     # Body walk can surface the same <p> element more than once; keep the longest text
     # per para_index so blank-field paragraphs are not lost on an empty first visit.
@@ -2823,7 +3183,9 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
     for txbx_index, parent_para_index, txbx_element in iter_unique_textboxes(doc):
         textbox_by_parent_para[parent_para_index] = (txbx_index, txbx_element)
 
-    header_html_tpl, footer_html_tpl = extract_header_and_footer_templates(doc, field_map=field_map)
+    header_html_tpl, footer_html_tpl = extract_header_and_footer_templates(
+        doc, field_map=field_map, mode=mode
+    )
     num_resolver = _WordNumberingResolver(doc)
     preview_class = "docx-preview docx-preview-readonly" if _is_readonly_mode(mode) else "docx-preview"
     page_tracker = [1]
@@ -2853,6 +3215,7 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                         header_tpl=header_html_tpl,
                         footer_tpl=footer_html_tpl,
                         num_resolver=num_resolver,
+                        hard_page_breaks_only=hard_page_breaks_only,
                     )
                 )
                 has_content_on_page = True
@@ -2864,7 +3227,7 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                 para_text = _para_text_from_element(child)
                 if para_text:
                     num_prefix, is_bullet = num_resolver.prefix_for_p(child)
-                    if _element_has_page_break(child) and has_content_on_page:
+                    if _element_has_page_break(child, hard_only=hard_page_breaks_only) and has_content_on_page:
                         page_tracker[0] += 1
                         next_p = page_tracker[0]
                         prev_f = footer_html_tpl.replace("{PAGE}", str(next_p - 1))
@@ -2897,7 +3260,7 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                 continue
             seen_para_indices.add(para_index)
 
-            if _element_has_page_break(child) and has_content_on_page:
+            if _element_has_page_break(child, hard_only=hard_page_breaks_only) and has_content_on_page:
                 page_tracker[0] += 1
                 next_p = page_tracker[0]
                 prev_f = footer_html_tpl.replace("{PAGE}", str(next_p - 1))
@@ -2977,7 +3340,7 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                 has_content_on_page = True
 
         elif tag == "sdt":
-            if _element_has_page_break(child) and has_content_on_page:
+            if _element_has_page_break(child, hard_only=hard_page_breaks_only) and has_content_on_page:
                 page_tracker[0] += 1
                 next_p = page_tracker[0]
                 prev_f = footer_html_tpl.replace("{PAGE}", str(next_p - 1))
@@ -3043,7 +3406,11 @@ def build_fill_html(template_path: str, fields: list, mode: str = "edit") -> str
                         clean_title = m_sec.group(2) if m_sec else title_val
                         if page:
                             if _is_readonly_mode(mode):
-                                page_html = f'<span class="toc-page" style="flex-shrink: 0; font-weight: 600; color: #1e293b;">{_escape_html(val)}</span>'
+                                page_html = (
+                                    f'<span class="toc-page" data-field="{_escape_html(loc)}" '
+                                    f'data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}" '
+                                    f'style="flex-shrink: 0; font-weight: 600; color: #1e293b;">{_escape_html(val)}</span>'
+                                )
                                 title_html = f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500;">{_escape_html(title_val)}</span>'
                             else:
                                 title_html = (

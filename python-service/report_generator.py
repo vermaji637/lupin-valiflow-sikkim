@@ -25,8 +25,13 @@ from copy import deepcopy
 DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
-# Standard annex footer line appended to every generated report.
+# Legacy placeholder only — never invent this on fill. Original HVAC / requal
+# / revalidation templates have no annex footer line.
 FOOTER_ANNEX_TEXT = "ANNEX_xxx_xxx_XXXXX | (1.0) | SOP_XXXX_XXX_00000 | CLASS I"
+_PLACEHOLDER_ANNEX_RE = re.compile(
+    r"ANNEX_xxx[_\w]*\s*\|\s*\([^)]*\)\s*\|\s*SOP_XXXX[_\w]*\s*\|\s*CLASS\s*I",
+    re.IGNORECASE,
+)
 
 
 # Normalize user-submitted text: strip nulls, fix mojibake, coerce to UTF-8 string.
@@ -405,10 +410,226 @@ def _is_header_cell(cell) -> bool:
     return False
 
 
+def _para_has_numbering(para) -> bool:
+    p_pr = para._element.find(qn("w:pPr"))
+    return p_pr is not None and p_pr.find(qn("w:numPr")) is not None
+
+
+def _delete_paragraph_element(para) -> None:
+    element = para._element
+    parent = element.getparent()
+    if parent is not None:
+        parent.remove(element)
+
+
+def _extract_para_run_font(para):
+    """Return (bold, italic, size, name) from the first styled run or paragraph mark."""
+    font_bold = font_italic = font_size = font_name = None
+    for run in para.runs:
+        if not (
+            (run.text or "").strip()
+            or run.bold is not None
+            or run.font.size is not None
+            or run.font.name
+        ):
+            continue
+        font_bold = run.bold
+        font_italic = run.italic
+        font_size = run.font.size
+        font_name = run.font.name
+        if font_size is not None or font_name:
+            return font_bold, font_italic, font_size, font_name
+    p_pr = para._element.find(qn("w:pPr"))
+    if p_pr is not None:
+        r_pr = p_pr.find(qn("w:rPr"))
+        if r_pr is not None:
+            sz = r_pr.find(qn("w:sz"))
+            if sz is not None:
+                try:
+                    font_size = Pt(int(sz.get(qn("w:val")) or 0) / 2.0)
+                except (TypeError, ValueError):
+                    pass
+            fonts = r_pr.find(qn("w:rFonts"))
+            if fonts is not None:
+                font_name = fonts.get(qn("w:ascii")) or fonts.get(qn("w:hAnsi")) or font_name
+    return font_bold, font_italic, font_size, font_name
+
+
+def _write_run_with_font(para, value: str, font_bold, font_italic, font_size, font_name) -> None:
+    """Write text with explicit rPr so list bullets keep the same size as the label."""
+    new_run = para.add_run(value)
+    r_pr = new_run._element.get_or_add_rPr()
+    try:
+        if font_bold is not None:
+            new_run.bold = font_bold
+        if font_italic is not None:
+            new_run.italic = font_italic
+        if font_name:
+            new_run.font.name = font_name
+            fonts = r_pr.find(qn("w:rFonts"))
+            if fonts is None:
+                fonts = OxmlElement("w:rFonts")
+                r_pr.insert(0, fonts)
+            fonts.set(qn("w:ascii"), font_name)
+            fonts.set(qn("w:hAnsi"), font_name)
+            fonts.set(qn("w:cs"), font_name)
+        # Default 12pt when missing — matches HVAC Acceptance Criteria label.
+        size = font_size if font_size is not None else Pt(12)
+        new_run.font.size = size
+        try:
+            half = str(int(round(float(size.pt) * 2)))
+        except (AttributeError, TypeError, ValueError):
+            half = "24"
+        for tag in ("w:sz", "w:szCs"):
+            node = r_pr.find(qn(tag))
+            if node is None:
+                node = OxmlElement(tag)
+                r_pr.append(node)
+            node.set(qn("w:val"), half)
+        # Keep paragraph mark size in sync so Word/LO don't fall back smaller.
+        p_pr = para._element.get_or_add_pPr()
+        p_r_pr = p_pr.find(qn("w:rPr"))
+        if p_r_pr is None:
+            p_r_pr = OxmlElement("w:rPr")
+            p_pr.append(p_r_pr)
+        for tag in ("w:sz", "w:szCs"):
+            node = p_r_pr.find(qn(tag))
+            if node is None:
+                node = OxmlElement(tag)
+                p_r_pr.append(node)
+            node.set(qn("w:val"), half)
+        if font_name:
+            fonts = p_r_pr.find(qn("w:rFonts"))
+            if fonts is None:
+                fonts = OxmlElement("w:rFonts")
+                p_r_pr.insert(0, fonts)
+            fonts.set(qn("w:ascii"), font_name)
+            fonts.set(qn("w:hAnsi"), font_name)
+    except Exception:
+        pass
+
+
+def _sync_list_cell_fonts_to_label(cell) -> bool:
+    """
+    Make Word-list bullet lines the same font size as the lead-in label
+    (e.g. 'Airflow should be:' vs 'From Positive pressure…').
+    Also drop accidental duplicate bullet paragraphs from earlier repairs.
+    """
+    paras = [
+        p for p in cell.paragraphs if not any(_run_has_image(r) for r in p.runs)
+    ]
+    if len(paras) < 2:
+        return False
+    changed = False
+    # Remove consecutive duplicate listed paragraphs (same visible text).
+    prev_txt = None
+    for para in list(paras):
+        if not _para_has_numbering(para):
+            prev_txt = None
+            continue
+        txt = re.sub(r"\s+", " ", (para.text or "").strip()).lower()
+        if txt and prev_txt == txt:
+            _delete_paragraph_element(para)
+            changed = True
+            continue
+        prev_txt = txt or prev_txt
+
+    paras = [
+        p for p in cell.paragraphs if not any(_run_has_image(r) for r in p.runs)
+    ]
+    listed = [p for p in paras if _para_has_numbering(p) and (p.text or "").strip()]
+    if not listed:
+        return changed
+    label = next((p for p in paras if not _para_has_numbering(p) and (p.text or "").strip()), paras[0])
+    font_bold, font_italic, font_size, font_name = _extract_para_run_font(label)
+    if font_size is None:
+        font_size = Pt(12)
+    if not font_name:
+        font_name = "Arial"
+
+    def _run_needs_size(para) -> bool:
+        for run in para.runs:
+            if not (run.text or "").strip():
+                continue
+            r_pr = run._element.find(qn("w:rPr"))
+            if r_pr is None or r_pr.find(qn("w:sz")) is None:
+                return True
+            try:
+                cur = int(r_pr.find(qn("w:sz")).get(qn("w:val")) or 0)
+            except (TypeError, ValueError):
+                return True
+            if cur < int(round(float(font_size.pt) * 2)):
+                return True
+        return False
+
+    # Keep the label itself at the same explicit size.
+    if (label.text or "").strip() and _run_needs_size(label):
+        text = (label.text or "").strip()
+        _clear_text_runs(label)
+        _write_run_with_font(label, text, font_bold, font_italic, font_size, font_name)
+        changed = True
+
+    for para in listed:
+        text = (para.text or "").strip()
+        if not text or not _run_needs_size(para):
+            continue
+        _clear_text_runs(para)
+        _write_run_with_font(para, text, font_bold, font_italic, font_size, font_name)
+        changed = True
+    return changed
+
+
+def _split_value_for_list_paras(value: str, para_count: int) -> list[str]:
+    """
+    Map a flat/newline cell value onto existing paragraphs so Word list bullets
+    (Acceptance Criteria row 13) stay on their original numbered paragraphs.
+    """
+    if para_count <= 1:
+        return [value]
+    raw_lines = [ln.strip() for ln in re.split(r"\r?\n+", value) if ln.strip()]
+    if len(raw_lines) == para_count:
+        return raw_lines
+    if len(raw_lines) > para_count:
+        head = raw_lines[: para_count - 1]
+        tail = " ".join(raw_lines[para_count - 1 :])
+        return head + [tail]
+    # Single mashed line: "Label: item1. item2." (space after "." may be missing).
+    sentence_split = re.compile(r"(?<=\.)\s*(?=[A-Z])")
+    if len(raw_lines) <= 1 and para_count >= 2:
+        text = raw_lines[0] if raw_lines else value
+        if ":" in text:
+            idx = text.find(":")
+            first = text[: idx + 1].strip()
+            rest = text[idx + 1 :].strip()
+            segs = [s.strip() for s in sentence_split.split(rest) if s.strip()]
+            if len(segs) == para_count - 1:
+                return [first] + segs
+            if len(segs) > para_count - 1:
+                return [first] + segs[: para_count - 2] + [
+                    " ".join(segs[para_count - 2 :])
+                ]
+            if segs:
+                parts = [first] + segs
+                while len(parts) < para_count:
+                    parts.append("")
+                return parts[:para_count]
+        segs = [s.strip() for s in sentence_split.split(text) if s.strip()]
+        if len(segs) == para_count:
+            return segs
+    parts = raw_lines[:] if raw_lines else ([value] if value else [])
+    while len(parts) < para_count:
+        parts.append("")
+    return parts[:para_count]
+
+
 def _set_cell_text(cell, value: str) -> None:
     """
     Write value into a table cell without destroying logo/image runs.
     Preserves the first text run's font so filled cells match the original DOCX look.
+
+    Multi-paragraph list cells (Word numPr bullets) keep their structure: lines are
+    mapped onto existing paragraphs. Empty leftover list paragraphs are removed so
+    orphan bullet dots do not appear in Observation / Result.
     """
     value = _normalize_text_value(value).strip()
     text_paras = []
@@ -423,16 +644,16 @@ def _set_cell_text(cell, value: str) -> None:
         if any(_run_has_image(r) for r in para.runs):
             continue
         text_paras.append(para)
-        if font_size is None and font_name is None and font_bold is None:
-            for run in para.runs:
-                if (run.text or "").strip() or run.bold is not None or run.font.size is not None:
-                    font_bold = run.bold
-                    font_italic = run.italic
-                    font_size = run.font.size
-                    font_name = run.font.name
-                    break
 
-    if is_header:
+    if text_paras:
+        # Prefer the non-list label font ("Airflow should be:") for bullet lines.
+        label = next(
+            (p for p in text_paras if not _para_has_numbering(p) and (p.text or "").strip()),
+            text_paras[0],
+        )
+        font_bold, font_italic, font_size, font_name = _extract_para_run_font(label)
+
+    if is_header or any(_para_has_numbering(p) for p in text_paras):
         if not font_name:
             font_name = "Arial"
         if font_size is None or int(getattr(font_size, "pt", 0) or 0) < 12:
@@ -441,27 +662,41 @@ def _set_cell_text(cell, value: str) -> None:
     if not text_paras:
         text_paras = [cell.add_paragraph()]
 
+    has_list = any(_para_has_numbering(p) for p in text_paras)
+
+    # Preserve template list layout: write one line per existing paragraph.
+    if has_list and len(text_paras) > 1:
+        lines = _split_value_for_list_paras(value, len(text_paras)) if value else [""] * len(text_paras)
+        for para, line in zip(text_paras, lines):
+            _clear_text_runs(para)
+            if line:
+                _write_run_with_font(
+                    para, line, font_bold, font_italic, font_size, font_name
+                )
+        # Drop trailing empty list paragraphs that would render as lone bullets.
+        for para in list(text_paras[1:]):
+            if not (para.text or "").strip() and _para_has_numbering(para):
+                _delete_paragraph_element(para)
+        _sync_list_cell_fonts_to_label(cell)
+        return
+
     for para in text_paras:
         _clear_text_runs(para)
 
     target_para = text_paras[0]
     # Keep existing paragraph alignment/indent from the template — do not force left/reset.
     if value:
-        new_run = target_para.add_run(value)
-        try:
-            if font_bold is not None:
-                new_run.bold = font_bold
-            if font_italic is not None:
-                new_run.italic = font_italic
-            if font_size is not None:
-                new_run.font.size = font_size
-            if font_name:
-                new_run.font.name = font_name
-        except Exception:
-            pass
+        _write_run_with_font(
+            target_para, value, font_bold, font_italic, font_size, font_name
+        )
 
-    for para in text_paras[1:]:
+    # Never leave emptied list paragraphs behind (orphan • in Observation column).
+    for para in list(text_paras[1:]):
         _clear_text_runs(para)
+        if not (para.text or "").strip() and _para_has_numbering(para):
+            _delete_paragraph_element(para)
+        else:
+            _remove_paragraph_numbering(para)
 
 
 def _fill_colon_label_cell(cell, value: str) -> None:
@@ -579,43 +814,44 @@ def _body_paragraph(doc, para_index: int):
     return paragraphs[para_index]
 
 
+_YES_NO_BOX_RE = re.compile(
+    r"[\u2611\u2610\u2612☑✓☐☒□■\u25a1\uF0A7\uF0A8\uF0FE\uF0FD\uF070\uF0FC\uF06F\uF0A2]"
+)
+
+
 # Toggle Yes/No checkbox symbols on inline paragraph radio lines.
 def _fill_paragraph_yes_no(para, choice: str) -> None:
     """Mark Yes or No on inline paragraph radio lines like 'Training imparted: Yes □ No □'."""
     choice = _normalize_text_value(choice).strip().lower()
     if choice not in ("yes", "no"):
         return
-    full_text = para.text
-    if choice == "yes":
-        new_text = re.sub(
-            r"(Yes)\s*[\u25a1\u2610☐□]",
-            r"\1 \u2611",
-            full_text,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        new_text = re.sub(
-            r"(No)\s*[\u25a1\u2610☐□\u2611☑]",
-            r"\1 \u25a1",
-            new_text,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-    else:
-        new_text = re.sub(
-            r"(Yes)\s*[\u25a1\u2610☐□\u2611☑]",
-            r"\1 \u25a1",
-            full_text,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        new_text = re.sub(
-            r"(No)\s*[\u25a1\u2610☐□]",
-            r"\1 \u2611",
-            new_text,
-            count=1,
-            flags=re.IGNORECASE,
-        )
+    yes_checked = choice == "yes"
+    yes_mark = "\u2611" if yes_checked else "\u2610"
+    no_mark = "\u2610" if yes_checked else "\u2611"
+
+    # Prefer swapping the first two checkbox glyphs in-place (Word often splits Yes / □).
+    seen = 0
+    for run in para.runs:
+        text = run.text or ""
+        if not text or not _YES_NO_BOX_RE.search(text):
+            continue
+        chars: list[str] = []
+        changed = False
+        for char in text:
+            if _YES_NO_BOX_RE.match(char) and seen < 2:
+                chars.append(yes_mark if seen == 0 else no_mark)
+                seen += 1
+                changed = True
+            else:
+                chars.append(char)
+        if changed:
+            run.text = "".join(chars)
+    if seen >= 2:
+        return
+
+    # Fallback: rebuild the whole line with explicit Yes/No marks.
+    label = re.split(r"\s*:\s*", para.text or "", maxsplit=1)[0].strip() or "Training imparted"
+    new_text = f"{label}: Yes {yes_mark}  No {no_mark}"
     _clear_text_runs(para)
     para.add_run(new_text)
 
@@ -931,27 +1167,13 @@ def _apply_single_field(
             m_sdt_title = re.match(r"^toc_sdt_(\d+)_title$", location)
             if m_sdt_title:
                 sdt_idx = int(m_sdt_title.group(1))
-                W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
                 sdt_paras = doc._element.xpath("//w:sdt//w:p")
                 if sdt_idx < len(sdt_paras):
                     p_el = sdt_paras[sdt_idx]
-                    t_nodes = p_el.findall(f".//{{{W_NS}}}t")
-                    if t_nodes:
-                        page_node_idx = -1
-                        for i in range(len(t_nodes) - 1, -1, -1):
-                            if re.search(r"\d+\s*$", t_nodes[i].text or ""):
-                                page_node_idx = i
-                                break
-                        if page_node_idx == 0 and len(t_nodes) == 1:
-                            m = re.search(r"\d+\s*$", t_nodes[0].text or "")
-                            pg = m.group(0) if m else ""
-                            t_nodes[0].text = f"{value}\t{pg}"
-                        else:
-                            t_nodes[0].text = str(value)
-                            for i in range(1, page_node_idx if page_node_idx > 0 else len(t_nodes)):
-                                txt = t_nodes[i].text or ""
-                                m_dots = re.search(r"([\.\u2026\u22ef\t\s]+)$", txt)
-                                t_nodes[i].text = m_dots.group(1) if m_dots else ""
+                    _title, page = _parse_toc_title_from_element(p_el)
+                    # Keep existing page; rewrite full line so page digits stay on one tab column.
+                    if page:
+                        _rewrite_toc_paragraph_element(p_el, str(value).strip(), page)
                 return
 
             m_sdt = re.match(r"^toc_sdt_(\d+)$", location)
@@ -979,24 +1201,9 @@ def _apply_single_field(
                     paras = cell.paragraphs
                     if l_i < len(paras):
                         p_el = paras[l_i]._element
-                        W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-                        t_nodes = p_el.findall(f".//{{{W_NS}}}t")
-                        if t_nodes:
-                            page_node_idx = -1
-                            for i in range(len(t_nodes) - 1, -1, -1):
-                                if re.search(r"\d+\s*$", t_nodes[i].text or ""):
-                                    page_node_idx = i
-                                    break
-                            if page_node_idx == 0 and len(t_nodes) == 1:
-                                m = re.search(r"\d+\s*$", t_nodes[0].text or "")
-                                pg = m.group(0) if m else ""
-                                t_nodes[0].text = f"{value}\t{pg}"
-                            else:
-                                t_nodes[0].text = str(value)
-                                for i in range(1, page_node_idx if page_node_idx > 0 else len(t_nodes)):
-                                    txt = t_nodes[i].text or ""
-                                    m_dots = re.search(r"([\.\u2026\u22ef\t\s]+)$", txt)
-                                    t_nodes[i].text = m_dots.group(1) if m_dots else ""
+                        _title, page = _parse_toc_title_from_element(p_el)
+                        if page:
+                            _rewrite_toc_paragraph_element(p_el, str(value).strip(), page)
                 return
 
             m_tbl_toc = re.match(r"^table_(\d+)_row_(\d+)_toc_(\d+)$", location)
@@ -1482,6 +1689,10 @@ def _drop_floating_tables_below_following_text(doc) -> None:
             target.addprevious(_blank_paragraph_like(spacer))
 
 
+def _is_neq_import_source(import_source: str | None) -> bool:
+    return (import_source or "").strip().lower() == "new_equipment_qualification"
+
+
 def fill_docx(
     template_path: str,
     field_values: dict,
@@ -1489,12 +1700,16 @@ def fill_docx(
     attachment_links: dict | None = None,
     equipment_id: str | None = None,
     table_ops: list | None = None,
+    import_source: str | None = None,
 ) -> tuple[str, dict[str, str]]:
     """
     Fill template DOCX with user values.
     Body fields are written first; header XML is restored from the template (logos),
     then header text fields are applied so fills are not overwritten.
     attachment_links maps field location → download URL for clickable attachment cells.
+
+    NEQ-only layout_v2 (defloat / header pct→dxa) is gated by import_source so
+    requalification / revalidation keep their legacy filled layout.
 
     Returns (output_path, repaired_values) where repaired_values maps location →
     restored template cell text for fields that had column-header echo corruption.
@@ -1560,20 +1775,27 @@ def fill_docx(
         from neq_docx_save import _apply_table_ops
         _apply_table_ops(doc, table_ops)
 
-    # Ensure table header row repeats across pages on multi-row tables in Word
+    # Ensure ONLY the first row repeats as header — never mark data rows as headers
+    # (that forces the whole table onto the next page and leaves a blank gap after 9.1).
     try:
-        from docx.oxml import OxmlElement
-        W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
         for tbl in doc.tables:
-            if len(tbl.rows) > 1:
-                r0 = tbl.rows[0]._tr
-                trPr = r0.get_or_add_trPr()
-                if not trPr.findall(f".//{{{W_NS}}}tblHeader"):
-                    trPr.append(OxmlElement("w:tblHeader"))
+            rows = list(tbl.rows)
+            if len(rows) <= 1:
+                continue
+            for index, row in enumerate(rows):
+                tr_pr = row._tr.get_or_add_trPr()
+                headers = tr_pr.findall(qn("w:tblHeader"))
+                if index == 0:
+                    if not headers:
+                        tr_pr.append(OxmlElement("w:tblHeader"))
+                    continue
+                for node in headers:
+                    tr_pr.remove(node)
     except Exception:
         pass
 
     add_footer_to_doc(doc)
+    _repair_mashed_bullet_cells(doc)
     doc.save(output_path)
     # Restore original header XML so logos and images are not lost after body fill.
     _restore_header_parts(template_path, output_path)
@@ -1593,10 +1815,22 @@ def fill_docx(
     _write_header_equipment_id(doc, equipment_id or "")
     # Keep the template font sizes. Do not restyle runs to Arial 11, and do not
     # insert hard breaks in the middle of words such as "Instrument" or "Calibration".
-    from neq_docx_save import _keep_filled_text_inside_cells
+    from neq_docx_save import (
+        _keep_filled_text_inside_cells,
+        _clamp_inflated_letterhead_top_margin,
+    )
     _keep_filled_text_inside_cells(doc, unify_font=False, break_long_tokens=False)
+    _clamp_inflated_letterhead_top_margin(doc)
+    # 14/11 baseline (requal/reval): defloat + clamp. NEQ adds header pct→dxa.
+    _normalize_filled_docx_layout(
+        doc,
+        profile="neq" if _is_neq_import_source(import_source) else "legacy",
+    )
     _drop_floating_tables_below_following_text(doc)
     _fill_blank_sl_no_cells(doc)
+    _trim_empty_paras_before_attachment_heading(doc, keep=2)
+    _repair_mashed_bullet_cells(doc)
+    _repair_abbreviation_entries(doc)
     _keep_approval_names_inside_cells(doc)
     _apply_heading_font_from_paragraph_mark(doc)
     _unbold_filled_body_lines(doc)
@@ -1604,9 +1838,881 @@ def fill_docx(
     _normalize_header_table_fonts(doc, font_name="Arial", font_size_pt=12.0)
     # Font unify runs after the footer is written and can leave footer distance at 0.
     _pin_annex_footer_inside_page(doc)
+    # Re-apply after approval clamp so every body cell keeps ~1-letter padding.
+    _ensure_body_cell_margins(doc)
+    # [TOC] Save filled DOCX first, then fix Table of Contents page numbers.
+    # Called from API: POST /fill  (and CLI fill). Uses Word first, LibreOffice only as backup.
+    doc.save(output_path)
+    toc_updates = recompute_toc_page_numbers(doc, layout_docx_path=output_path)
+    if toc_updates:
+        repaired_values.update(toc_updates)
+    # Guarantee every TOC page digit sits on the same right-tab column.
+    _realign_toc_page_columns(doc)
     doc.save(output_path)
 
     return output_path, repaired_values
+
+
+def normalize_existing_filled_docx(docx_path: str, import_source: str | None = None) -> str:
+    """
+    Apply view/download layout fixes to an already-filled DOCX in place.
+
+    Requal/reval use 14/11 layout_v1 profile. NEQ uses layout_v2 (header pct→dxa).
+    """
+    if not docx_path or not os.path.isfile(docx_path):
+        raise FileNotFoundError(f"Filled DOCX not found: {docx_path}")
+    profile = "neq" if _is_neq_import_source(import_source) else "legacy"
+    doc = Document(docx_path)
+    _normalize_filled_docx_layout(doc, profile=profile)
+    _ensure_body_cell_margins(doc)
+    _keep_approval_names_inside_cells(doc)
+    _repair_mashed_bullet_cells(doc)
+    _repair_abbreviation_entries(doc)
+    _pin_annex_footer_inside_page(doc)
+    from neq_docx_save import _clamp_inflated_letterhead_top_margin
+    _clamp_inflated_letterhead_top_margin(doc)
+    _trim_empty_paras_before_attachment_heading(doc, keep=2)
+    _realign_toc_page_columns(doc)
+    doc.save(docx_path)
+    return docx_path
+
+
+# ── TOC recompute after final fill (post-approval stamps included) ───────────
+# Easy map:
+#   1) [WORD COM]  Microsoft Word reads real page numbers (best match for users)
+#   2) [LIBREOFFICE] Only if Word fails — converts DOCX→PDF, then we read pages
+#   3) Soft estimate if both fail
+# Trigger API: POST http://127.0.0.1:8001/fill
+
+def _block_has_page_break(element) -> bool:
+    try:
+        xml_b = element.xml if hasattr(element, "xml") else None
+        if xml_b is None:
+            from lxml import etree
+            xml_b = etree.tostring(element)
+        if isinstance(xml_b, str):
+            xml_b = xml_b.encode("utf-8", errors="ignore")
+        return (
+            b"lastRenderedPageBreak" in xml_b
+            or b'type="page"' in xml_b
+            or b"<w:pageBreakBefore" in xml_b
+        )
+    except Exception:
+        return False
+
+
+def _estimate_block_lines(text: str, is_table: bool = False, row_count: int = 0) -> float:
+    """Rough A4 body consumption for soft page breaks after content grows."""
+    if is_table:
+        return max(1.5, float(row_count) * 1.15)
+    flat = re.sub(r"\s+", " ", (text or "")).strip()
+    if not flat:
+        return 0.4
+    return max(1.0, (len(flat) / 95.0) + flat.count("\n") * 0.6)
+
+
+def _iter_body_blocks(doc):
+    """Yield (kind, element, text, meta) for body paragraphs and tables in order."""
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    body = doc.element.body
+    tbl_i = 0
+    for child in list(body.iterchildren()):
+        if child.tag == qn("w:tbl"):
+            table = Table(child, doc)
+            text = "\n".join(
+                re.sub(r"\s+", " ", (c.text or "")).strip()
+                for row in table.rows
+                for c in row.cells
+            )
+            yield ("table", child, text, {"rows": len(table.rows), "table": table, "index": tbl_i})
+            tbl_i += 1
+        elif child.tag == qn("w:p"):
+            para = Paragraph(child, doc)
+            text = re.sub(r"\s+", " ", (para.text or "")).strip()
+            yield ("para", child, text, {"para": para})
+
+
+def _section_heading_match(text: str):
+    """Return (sec_num, title) for major headings like '3.0 RESPONSIBILITY'."""
+    flat = re.sub(r"\s+", " ", (text or "")).strip()
+    if not flat or len(flat) > 140:
+        return None
+    m = re.match(r"^(\d+\.0)\s+([A-Za-z].+)$", flat)
+    if not m:
+        return None
+    title = re.sub(r"[\.\:\-_]+$", "", m.group(2)).strip()
+    if len(title) < 3:
+        return None
+    return m.group(1), title
+
+
+def _score_heading_candidate(sec_num: str, title: str, toc_title: str) -> int:
+    score = 20
+    if re.match(r"^\d+\.0$", sec_num):
+        score += 30
+    toc_words = [
+        w for w in re.sub(r"[\.\:\-_]+", " ", (toc_title or "").upper()).split()
+        if len(w) > 2 and w not in {"AND", "THE", "FOR", "ANY", "OF"}
+    ]
+    upper = (title or "").upper()
+    hits = sum(1 for w in toc_words if w in upper)
+    score += hits * 25
+    if hits == 0 and toc_words:
+        score -= 35
+    if len(title) <= 60:
+        score += 10
+    return score
+
+
+def _map_section_pages(doc) -> dict[str, dict]:
+    """
+    Map major section numbers (1.0, 2.0, …) to {page, title} in the filled DOCX.
+    Uses hard page breaks when present, otherwise soft A4 estimate.
+    """
+    usable_lines = 46.0
+    page = 1
+    used = 0.0
+    # sec -> list of (score, page, title)
+    candidates: dict[str, list[tuple[int, int, str]]] = {}
+
+    for kind, element, text, meta in _iter_body_blocks(doc):
+        if _block_has_page_break(element) and (text or kind == "table"):
+            if used > 2:
+                page += 1
+                used = 0.0
+
+        matched = _section_heading_match(text) if kind == "para" else None
+        if matched:
+            sec, title = matched
+            score = _score_heading_candidate(sec, title, title)
+            candidates.setdefault(sec, []).append((score, page, title))
+
+        lines = _estimate_block_lines(
+            text,
+            is_table=(kind == "table"),
+            row_count=int(meta.get("rows") or 0),
+        )
+        used += lines
+        while used >= usable_lines:
+            page += 1
+            used -= usable_lines
+
+    best: dict[str, dict] = {}
+    for sec, rows in candidates.items():
+        rows.sort(key=lambda r: (r[0], r[1]), reverse=True)
+        top_score = rows[0][0]
+        tied = [r for r in rows if r[0] == top_score]
+        tied.sort(key=lambda r: r[1])
+        score, page_no, title = tied[-1]
+        best[sec] = {"page": page_no, "title": title, "score": score}
+    return best
+
+
+def _toc_search_query(title: str) -> str:
+    """Build a Word Find query from a TOC title (skip section number)."""
+    flat = re.sub(r"\s+", " ", (title or "")).strip()
+    flat = re.sub(r"^\d+(?:\.\d+)*\s*", "", flat).strip()
+    flat = re.sub(r"[\.\:\-_]+$", "", flat).strip()
+    if not flat:
+        return ""
+    # Prefer distinctive multi-word titles; strip noisy punctuation for Find.
+    flat = flat.replace("/", " ").replace("’", "'")
+    flat = re.sub(r"\s+", " ", flat).strip()
+    # Very long SOP titles still match when shortened.
+    if len(flat) > 48:
+        parts = [w for w in flat.split() if len(w) > 2]
+        flat = " ".join(parts[:5])
+    return flat
+
+
+def _collect_toc_entries_from_doc(doc) -> list[dict]:
+    """Read current TOC SDT/table lines as {sec, title, query}."""
+    entries: list[dict] = []
+    seen = set()
+
+    def push(title: str) -> None:
+        title = re.sub(r"\s+", " ", (title or "")).strip()
+        if not title:
+            return
+        m = re.match(r"^(\d+\.0)\b\s*(.*)$", title)
+        if not m:
+            return
+        sec = m.group(1)
+        if sec in seen:
+            return
+        rest = (m.group(2) or "").strip() or title
+        query = _toc_search_query(title)
+        if not query:
+            return
+        seen.add(sec)
+        entries.append({"sec": sec, "title": rest[:90], "query": query})
+
+    try:
+        sdt_paras = doc._element.xpath("//w:sdt//w:p")
+    except Exception:
+        sdt_paras = []
+    for p_el in sdt_paras:
+        title, _old = _parse_toc_title_from_element(p_el)
+        push(title)
+
+    if entries:
+        return entries
+
+    for table in doc.tables:
+        if not table.rows:
+            continue
+        for row in table.rows[:30]:
+            if not row.cells:
+                continue
+            for para in row.cells[0].paragraphs:
+                title, _old = _parse_toc_title_from_element(para._element)
+                push(title)
+    return entries
+
+
+_WORD_TOC_MAP_PS1 = r"""
+param([string]$DocPath, [string]$QueriesPath)
+$ErrorActionPreference = "Stop"
+$word = $null
+$doc = $null
+try {
+  $queries = Get-Content -Raw -Path $QueriesPath | ConvertFrom-Json
+  $word = New-Object -ComObject Word.Application
+  $word.Visible = $false
+  $word.DisplayAlerts = 0
+  # Open writable copy semantics so pagination matches what users see (not a stale read-only view).
+  $doc = $word.Documents.Open($DocPath, $false, $false)
+  try { $doc.Repaginate() } catch {}
+  $total = [int]$doc.ComputeStatistics(2)
+  $results = @()
+  foreach ($q in $queries) {
+    $sec = [string]$q.sec
+    $text = [string]$q.query
+    $title = [string]$q.title
+    $bodyPage = 0
+    $alt = New-Object System.Collections.Generic.List[string]
+    if ($text) { $alt.Add($text) | Out-Null }
+    # Fallbacks when exact title punctuation differs in body vs TOC.
+    if ($title -match 'EQUIPMENT') {
+      $alt.Add('EQUIPMENT / SYSTEM DETAILS') | Out-Null
+      $alt.Add('EQUIPMENT /SYSTEM DETAILS') | Out-Null
+      $alt.Add('SYSTEM DETAILS') | Out-Null
+    }
+    if ($title -match 'SUMMARY') {
+      $alt.Add('SUMMARY & CONCLUSION') | Out-Null
+      $alt.Add('SUMMARY AND CONCLUSION') | Out-Null
+      $alt.Add('SUMMARY') | Out-Null
+    }
+    if ($title -match 'REFERENCES') { $alt.Add('REFERENCES') | Out-Null }
+    if ($title -match 'REVISION') { $alt.Add('REVISION HISTORY') | Out-Null }
+    if ($title -match 'POST') {
+      $alt.Add('POST-APPROVAL') | Out-Null
+      $alt.Add('POST APPROVAL') | Out-Null
+      $alt.Add('POST-APPROVAL SIGNATURE') | Out-Null
+    }
+    if ($title -match 'attachment') {
+      $alt.Add('LIST OF ATTACHMENT') | Out-Null
+      $alt.Add('list of attachment') | Out-Null
+    }
+    $seenAlt = @{}
+    foreach ($needle in $alt) {
+      if (-not $needle -or $seenAlt.ContainsKey($needle)) { continue }
+      $seenAlt[$needle] = $true
+      $start = 0
+      for ($n=0; $n -lt 12; $n++) {
+        $rng = $doc.Range([Math]::Max($start,0), $doc.Content.End)
+        $find = $rng.Find
+        $null = $find.ClearFormatting()
+        $find.Text = $needle
+        $find.Forward = $true
+        $find.Wrap = 0
+        $find.MatchCase = $false
+        if (-not $find.Execute()) { break }
+        $page = [int]$rng.Information(3)
+        # Skip TOC sheet (page 1-2). First later hit is the real section heading.
+        if ($page -gt 2) {
+          $bodyPage = $page
+          break
+        }
+        $start = [int]$rng.End + 1
+        if ($start -ge $doc.Content.End) { break }
+      }
+      if ($bodyPage -gt 0) { break }
+    }
+    $results += [pscustomobject]@{ sec=$sec; title=$title; page=$bodyPage; query=$text }
+  }
+  ([pscustomobject]@{ total=$total; sections=$results }) | ConvertTo-Json -Compress -Depth 5
+} finally {
+  if ($doc -ne $null) { $doc.Close($false) | Out-Null }
+  if ($word -ne $null) { $word.Quit() | Out-Null }
+  [GC]::Collect() | Out-Null
+}
+"""
+
+
+def _map_section_pages_from_word(docx_path: str, toc_entries: list[dict] | None = None) -> dict[str, dict]:
+    """
+    [WORD COM] Open the filled DOCX in Microsoft Word (PowerShell COM) and read
+    the real page of each TOC heading. This is NOT LibreOffice.
+    Skips TOC-page hits (page 1–2) so body headings win.
+    Used by: recompute_toc_page_numbers() during API POST /fill.
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    if os.name != "nt" or not docx_path or not os.path.isfile(docx_path):
+        return {}
+
+    entries = list(toc_entries or [])
+    if not entries:
+        # Minimal fallback queries for common requal TOC.
+        entries = [
+            {"sec": "15.0", "title": "REVISION HISTORY", "query": "REVISION HISTORY"},
+        ]
+
+    tmp_dir = tempfile.mkdtemp(prefix="valiflow_word_toc_")
+    ps1_path = os.path.join(tmp_dir, "word_map.ps1")
+    queries_path = os.path.join(tmp_dir, "queries.json")
+    try:
+        with open(ps1_path, "w", encoding="utf-8") as fh:
+            fh.write(_WORD_TOC_MAP_PS1)
+        with open(queries_path, "w", encoding="utf-8") as fh:
+            json.dump(entries, fh, ensure_ascii=False)
+
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            ps1_path,
+            "-DocPath",
+            os.path.abspath(docx_path),
+            "-QueriesPath",
+            queries_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        raw = (result.stdout or "").strip()
+        if not raw:
+            return {}
+        # Last JSON object line (ignore Word COM noise).
+        payload = None
+        for line in reversed(raw.splitlines()):
+            line = line.strip()
+            if line.startswith("{") and "sections" in line:
+                payload = json.loads(line)
+                break
+        if not isinstance(payload, dict):
+            return {}
+
+        found: dict[str, dict] = {}
+        for row in payload.get("sections") or []:
+            if not isinstance(row, dict):
+                continue
+            sec = str(row.get("sec") or "").strip()
+            page = int(row.get("page") or 0)
+            title = str(row.get("title") or "").strip()
+            if not sec or page < 3:
+                continue
+            found[sec] = {"page": page, "title": title[:90], "score": 200}
+        return found
+    except Exception:
+        return {}
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _find_libreoffice_bin() -> str | None:
+    # [LIBREOFFICE] Find soffice.exe / libreoffice on this machine.
+    # Env override: LIBREOFFICE_BIN
+    env = (os.getenv("LIBREOFFICE_BIN") or "soffice").strip()
+    if env and os.path.isfile(env):
+        return env
+    found = shutil.which(env) if env else None
+    if found:
+        return found
+    for candidate in (
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        "/usr/bin/soffice",
+        "/usr/bin/libreoffice",
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _docx_to_pdf_for_toc(docx_path: str) -> str | None:
+    """
+    [LIBREOFFICE] Convert filled DOCX → PDF with: soffice --headless --convert-to pdf
+    Used ONLY when Microsoft Word is not available for TOC page mapping.
+    Related API path: POST /fill → fill_docx() → recompute_toc_page_numbers()
+    """
+    import subprocess
+    import tempfile
+
+    lo = _find_libreoffice_bin()
+    if not lo or not os.path.isfile(docx_path):
+        return None
+    out_dir = tempfile.mkdtemp(prefix="valiflow_toc_")
+    try:
+        # [LIBREOFFICE COMMAND] soffice --headless --convert-to pdf --outdir <tmp> <docx>
+        cmd = [
+            lo,
+            "--headless",
+            "--norestore",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            out_dir,
+            os.path.abspath(docx_path),
+        ]
+        subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        base = os.path.splitext(os.path.basename(docx_path))[0] + ".pdf"
+        pdf_path = os.path.join(out_dir, base)
+        if os.path.isfile(pdf_path) and os.path.getsize(pdf_path) > 0:
+            return pdf_path
+    except Exception:
+        return None
+    return None
+
+
+def _map_section_pages_from_pdf(pdf_path: str) -> dict[str, dict]:
+    """
+    [LIBREOFFICE RESULT] Read section heading pages from the PDF LibreOffice made.
+    Uses PyMuPDF (fitz). Backup only — can be ±1 page vs real Word.
+    Handles split lines ('1.0' then 'OBJECTIVE:') common in protocol DOCX.
+    """
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        return {}
+
+    try:
+        pdf = fitz.open(pdf_path)
+    except Exception:
+        return {}
+
+    found: dict[str, dict] = {}
+    try:
+        for i in range(pdf.page_count):
+            page_no = i + 1
+            lines = [
+                re.sub(r"\s+", " ", ln).strip()
+                for ln in pdf.load_page(i).get_text("text").splitlines()
+            ]
+            lines = [ln for ln in lines if ln]
+            for idx, ln in enumerate(lines):
+                if "TABLE OF CONTENTS" in ln.upper():
+                    continue
+                if re.search(r"[\.\u2026]{5,}", ln):
+                    continue
+                # Skip TOC page itself (usually page 2).
+                if page_no <= 2:
+                    continue
+
+                sec = None
+                title = None
+                m_num = re.match(r"^(\d+\.0)\s*$", ln)
+                if m_num and idx + 1 < len(lines):
+                    nxt = lines[idx + 1]
+                    if re.match(r"^[A-Za-z/(]", nxt) and not re.search(r"[\.\u2026]{3,}", nxt):
+                        sec = m_num.group(1)
+                        title = re.sub(r"[:\s]+$", "", nxt).strip()
+                else:
+                    m = re.match(r"^(\d+\.0)\s+([A-Za-z/(].+)$", ln)
+                    if not m:
+                        continue
+                    if re.search(r"[\.\u2026]{3,}", ln):
+                        continue
+                    cand_title = m.group(2).strip()
+                    # Skip glued TOC leftovers like "POST APPROVAL 17".
+                    if re.search(r"\d+\s*$", cand_title) and not re.search(
+                        r"[A-Za-z:)\]]$", cand_title
+                    ):
+                        continue
+                    sec = m.group(1)
+                    title = re.sub(r"[:\s]+$", "", cand_title).strip()
+
+                if not sec or not title or len(title) < 3 or len(title) > 120:
+                    continue
+                # First content hit wins (true section start).
+                if sec not in found:
+                    found[sec] = {"page": page_no, "title": title[:90], "score": 100}
+    finally:
+        pdf.close()
+    return found
+
+
+def _parse_toc_title_from_element(p_el) -> tuple[str, str]:
+    tokens = []
+    for elem in p_el.iter():
+        tag = elem.tag.split("}")[-1]
+        if tag == "t" and elem.text:
+            tokens.append(elem.text)
+        elif tag == "tab":
+            tokens.append("\t")
+    raw = "".join(tokens).strip()
+    if not raw or raw.lower() == "table of contents":
+        return "", ""
+    # Prefer split on tab (title | page).
+    if "\t" in raw:
+        left, right = raw.rsplit("\t", 1)
+        page = re.sub(r"\D", "", right)
+        title = re.sub(r"[\.\u2026\u22ef\t_:]+$", "", left).strip()
+        title = re.sub(r"^(\d+\.\d+)\s*([A-Za-z])", r"\1 \2", title)
+        return re.sub(r"\s+", " ", title), page
+    m = re.search(r"^(.*?)[ \t\.\u2026\u22ef]+(\d+)\s*$", raw)
+    if not m:
+        m = re.search(r"^(.*?)(\d+)\s*$", raw)
+    if m:
+        title = re.sub(r"[\.\u2026\u22ef\t_:]+$", "", m.group(1)).strip()
+        title = re.sub(r"^(\d+\.\d+)\s*([A-Za-z])", r"\1 \2", title)
+        return re.sub(r"\s+", " ", title), m.group(2).strip()
+    return re.sub(r"\s+", " ", raw), ""
+
+
+def _ppr_insert_tabs(p_pr, tabs_el) -> None:
+    """Insert w:tabs in OOXML schema order (before spacing/ind/jc/rPr)."""
+    old = p_pr.find(qn("w:tabs"))
+    if old is not None:
+        p_pr.remove(old)
+    after_tags = {
+        qn("w:pStyle"),
+        qn("w:keepNext"),
+        qn("w:keepLines"),
+        qn("w:pageBreakBefore"),
+        qn("w:framePr"),
+        qn("w:widowControl"),
+        qn("w:numPr"),
+        qn("w:suppressLineNumbers"),
+        qn("w:pBdr"),
+        qn("w:shd"),
+        qn("w:tabs"),
+    }
+    insert_at = 0
+    for i, child in enumerate(list(p_pr)):
+        if child.tag in after_tags:
+            insert_at = i + 1
+            continue
+        break
+    p_pr.insert(insert_at, tabs_el)
+
+
+def _make_toc_tab_stops():
+    """
+    Match original requal TOC1 stops used by Word:
+      left 1495  → section title column after the number
+      right 9000 → page-number column (dot leaders)
+    Extra style stops (left 0 / right 9656) make LibreOffice land the first
+    content tab too early, so page digits no longer share one vertical line.
+    """
+    tabs = OxmlElement("w:tabs")
+    left = OxmlElement("w:tab")
+    left.set(qn("w:val"), "left")
+    left.set(qn("w:pos"), "1495")
+    tabs.append(left)
+    right = OxmlElement("w:tab")
+    right.set(qn("w:val"), "right")
+    right.set(qn("w:leader"), "dot")
+    right.set(qn("w:pos"), "9000")
+    tabs.append(right)
+    return tabs
+
+
+def _fix_toc1_style_tabs(doc) -> None:
+    """Force TOC1/TOC2 style tab stops to the original requal two-stop layout."""
+    try:
+        styles_el = doc.styles.element
+    except Exception:
+        return
+    for style in styles_el.findall(qn("w:style")):
+        sid = (style.get(qn("w:styleId")) or "").upper()
+        name_el = style.find(qn("w:name"))
+        nm = (name_el.get(qn("w:val")) if name_el is not None else "") or ""
+        if sid not in {"TOC1", "TOC2"} and not re.match(r"^toc\s*[12]$", nm, re.I):
+            continue
+        p_pr = style.find(qn("w:pPr"))
+        if p_pr is None:
+            p_pr = OxmlElement("w:pPr")
+            style.insert(0, p_pr)
+        _ppr_insert_tabs(p_pr, _make_toc_tab_stops())
+
+
+def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
+    """
+    Rebuild one TOC line like the original requal Word template:
+
+      1.0  [tab→1495]  OBJECTIVE  [tab→9000 + dots]  3
+
+    Two content tabs + the two style/paragraph stops keep every page digit on
+    one right column in both Word and LibreOffice PDF (final view).
+    """
+    title = re.sub(r"\s+", " ", (title or "")).strip()
+    # Drop trailing leader junk if a prior bad fill left dots on the title.
+    title = re.sub(r"[\.\u2026\u22ef\t_:]+$", "", title).strip()
+    page_value = str(page_value or "").strip()
+    if not title or not page_value:
+        return False
+
+    m_num = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title)
+    if m_num:
+        num_part = m_num.group(1)
+        rest_part = (m_num.group(2) or "").strip()
+    else:
+        num_part = title
+        rest_part = ""
+
+    # Keep style id (TOC1) if present.
+    style_id = "TOC1"
+    old_pr = p_el.find(qn("w:pPr"))
+    if old_pr is not None:
+        ps = old_pr.find(qn("w:pStyle"))
+        if ps is not None and (ps.get(qn("w:val")) or "").strip():
+            style_id = ps.get(qn("w:val"))
+
+    for child in list(p_el):
+        p_el.remove(child)
+
+    p_pr = OxmlElement("w:pPr")
+    p_el.append(p_pr)
+    ps = OxmlElement("w:pStyle")
+    ps.set(qn("w:val"), style_id)
+    p_pr.append(ps)
+    # Paragraph-level stops override/merge cleanly; same two stops as style.
+    _ppr_insert_tabs(p_pr, _make_toc_tab_stops())
+
+    def _append_text_run(text: str, *, bold: bool = True) -> None:
+        if text is None:
+            return
+        run = OxmlElement("w:r")
+        r_pr = OxmlElement("w:rPr")
+        fonts = OxmlElement("w:rFonts")
+        fonts.set(qn("w:ascii"), "Arial")
+        fonts.set(qn("w:hAnsi"), "Arial")
+        r_pr.append(fonts)
+        if bold:
+            r_pr.append(OxmlElement("w:b"))
+        sz = OxmlElement("w:sz")
+        sz.set(qn("w:val"), "22")
+        r_pr.append(sz)
+        sz_cs = OxmlElement("w:szCs")
+        sz_cs.set(qn("w:val"), "22")
+        r_pr.append(sz_cs)
+        # Slight negative spacing matches original requal TOC glyph density.
+        spacing = OxmlElement("w:spacing")
+        spacing.set(qn("w:val"), "-1")
+        r_pr.append(spacing)
+        run.append(r_pr)
+        t_el = OxmlElement("w:t")
+        if text.startswith(" ") or text.endswith(" "):
+            t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        t_el.text = text
+        run.append(t_el)
+        p_el.append(run)
+
+    def _append_tab() -> None:
+        tab_run = OxmlElement("w:r")
+        tab_run.append(OxmlElement("w:tab"))
+        p_el.append(tab_run)
+
+    _append_text_run(num_part)
+    _append_tab()
+    if rest_part:
+        _append_text_run(rest_part)
+    _append_tab()
+    _append_text_run(page_value)
+    return True
+
+
+def _realign_toc_page_columns(doc) -> int:
+    """Re-apply original two-tab TOC layout so page digits share one column."""
+    _fix_toc1_style_tabs(doc)
+    fixed = 0
+    try:
+        sdt_paras = doc._element.xpath("//w:sdt//w:p")
+    except Exception:
+        sdt_paras = []
+    for p_el in sdt_paras:
+        title, page = _parse_toc_title_from_element(p_el)
+        if not title or not page:
+            continue
+        if _rewrite_toc_paragraph_element(p_el, title, page):
+            fixed += 1
+    for table in doc.tables:
+        for row in table.rows:
+            if not row.cells:
+                continue
+            cell = row.cells[0]
+            for para in cell.paragraphs:
+                raw = (para.text or "").strip()
+                if not raw or not re.match(r"^\d+(?:\.\d+)*\s+\S", raw):
+                    continue
+                title, page = _parse_toc_title_from_element(para._element)
+                if not title or not page:
+                    continue
+                if _rewrite_toc_paragraph_element(para._element, title, page):
+                    fixed += 1
+    return fixed
+
+
+def recompute_toc_page_numbers(doc, layout_docx_path: str | None = None) -> dict[str, str]:
+    """
+    Rewrite TOC page numbers after final fill / approval stamps.
+
+    Where this runs:
+      API: POST /fill  →  fill_docx()  →  this function
+
+    Page source order (easy to recognize):
+      [WORD COM]     try Microsoft Word first (best)
+      [LIBREOFFICE]  if Word fails, soffice DOCX→PDF then read pages
+      [ESTIMATE]     last fallback if both tools fail
+    """
+    section_pages: dict[str, dict] = {}
+    pdf_dir = None
+    # Lock TOC1/TOC2 tab stops before rewriting lines (LibreOffice merges style tabs).
+    _fix_toc1_style_tabs(doc)
+    toc_entries = _collect_toc_entries_from_doc(doc)
+    used_word = False
+    need = max(1, len(toc_entries))
+
+    # --- [WORD COM] Step 1: real pages from Microsoft Word ---
+    if layout_docx_path and os.path.isfile(layout_docx_path):
+        section_pages = _map_section_pages_from_word(layout_docx_path, toc_entries)
+        used_word = bool(section_pages)
+
+    # --- [LIBREOFFICE] Step 2: if Word missed most TOC rows, fill gaps from PDF ---
+    # Tool: soffice --headless --convert-to pdf  (see _docx_to_pdf_for_toc)
+    if layout_docx_path and (
+        not section_pages or len(section_pages) < max(3, int(need * 0.6))
+    ):
+        pdf_path = _docx_to_pdf_for_toc(layout_docx_path)
+        if pdf_path:
+            pdf_dir = os.path.dirname(pdf_path)
+            lo_pages = _map_section_pages_from_pdf(pdf_path) or {}
+            if not section_pages:
+                section_pages = lo_pages
+                used_word = False
+            else:
+                for key, info in lo_pages.items():
+                    if key not in section_pages:
+                        section_pages[key] = info
+
+    # --- [ESTIMATE] Step 3: soft A4 guess if both tools failed ---
+    if not section_pages:
+        section_pages = _map_section_pages(doc)
+    if not section_pages:
+        if pdf_dir and os.path.isdir(pdf_dir):
+            shutil.rmtree(pdf_dir, ignore_errors=True)
+        # Still realign existing TOC tabs so page digits share one column.
+        _realign_toc_page_columns(doc)
+        return {}
+
+    updates: dict[str, str] = {}
+    last_page = 0
+
+    def resolve_page(title: str) -> int | None:
+        nonlocal last_page
+        flat = (title or "").strip()
+        sec = ""
+        m = re.match(r"^(\d+\.0)\b", flat)
+        if m:
+            sec = m.group(1)
+        else:
+            m2 = re.match(r"^(\d+)\b", flat)
+            if m2:
+                sec = f"{m2.group(1)}.0"
+
+        page = None
+        if sec and sec in section_pages:
+            page = int(section_pages[sec]["page"])
+        else:
+            toc_words = [
+                w for w in re.sub(r"[\.\:\-_]+", " ", flat.upper()).split()
+                if len(w) > 2 and w not in {"AND", "THE", "FOR", "ANY", "OF"}
+                and not re.match(r"^\d", w)
+            ]
+            best_score = -1
+            for cand_sec, info in section_pages.items():
+                score = _score_heading_candidate(cand_sec, info.get("title") or "", flat)
+                if toc_words:
+                    upper = (info.get("title") or "").upper()
+                    hits = sum(1 for w in toc_words if w in upper)
+                    if hits <= 0:
+                        continue
+                    score += hits * 10
+                if score > best_score:
+                    best_score = score
+                    page = int(info["page"])
+            if best_score < 40:
+                page = None
+
+        if not page:
+            return None
+        # Word pages are authoritative — do not inflate REFERENCES 30 → 31 because a
+        # previous LO/estimate row was too high. Only keep TOC monotonic for soft estimates.
+        if (not used_word) and last_page and page < last_page:
+            page = last_page
+        elif used_word and last_page and page < last_page:
+            # Tiny tolerance only (same-page sections OK; never jump forward to fix).
+            page = page
+        last_page = max(last_page, page)
+        return page
+
+    try:
+        sdt_paras = doc._element.xpath("//w:sdt//w:p")
+    except Exception:
+        sdt_paras = []
+    for idx, p_el in enumerate(sdt_paras):
+        title, old_page = _parse_toc_title_from_element(p_el)
+        if not title:
+            continue
+        page = resolve_page(title)
+        if not page and old_page:
+            try:
+                page = int(old_page)
+            except (TypeError, ValueError):
+                page = None
+        if not page:
+            continue
+        if _rewrite_toc_paragraph_element(p_el, title, str(page)):
+            updates[f"toc_sdt_{idx}"] = str(page)
+
+    for t_i, table in enumerate(doc.tables):
+        for r_i, row in enumerate(table.rows):
+            if not row.cells:
+                continue
+            cell = row.cells[0]
+            for l_i, para in enumerate(cell.paragraphs):
+                raw = (para.text or "").strip()
+                if not raw:
+                    continue
+                if not re.match(r"^\d+(?:\.\d+)*\s+\S", raw):
+                    continue
+                title, old_page = _parse_toc_title_from_element(para._element)
+                if not title:
+                    continue
+                if "...." not in raw and "…" not in raw and not re.search(r"[\.\u2026]{3,}", raw):
+                    if "\t" not in raw and not re.search(r"\d+\s*$", raw):
+                        continue
+                    if len(raw) > 100:
+                        continue
+                page = resolve_page(title)
+                if not page and old_page:
+                    try:
+                        page = int(old_page)
+                    except (TypeError, ValueError):
+                        page = None
+                if not page:
+                    continue
+                if _rewrite_toc_paragraph_element(para._element, title, str(page)):
+                    updates[f"table_{t_i}_row_{r_i}_toc_{l_i}"] = str(page)
+
+    if pdf_dir and os.path.isdir(pdf_dir):
+        shutil.rmtree(pdf_dir, ignore_errors=True)
+    return updates
 
 
 def _normalize_header_table_fonts(doc, font_name: str = "Arial", font_size_pt: float = 12.0) -> None:
@@ -1632,6 +2738,452 @@ def _normalize_header_table_fonts(doc, font_name: str = "Arial", font_size_pt: f
                                 if (run.text or "").strip():
                                     run.font.name = font_name
                                     run.font.size = Pt(font_size_pt)
+
+
+def _fix_broken_hanging_indents(doc) -> int:
+    """
+    Template list paragraphs use hanging > left (e.g. left=720, hanging=810).
+
+    That puts the first line (and first word like "Any") at a negative indent, so
+    LibreOffice/Word draw "Any" above the line and "other specific tests" below —
+    and text can paint over the previous floating table. Clamp hanging <= left.
+    Also drop negative tab stops that amplify the glitch.
+    """
+    changed = 0
+    for para_el in doc.element.body.iter(qn("w:p")):
+        p_pr = para_el.find(qn("w:pPr"))
+        if p_pr is None:
+            continue
+        ind = p_pr.find(qn("w:ind"))
+        if ind is not None:
+            try:
+                left = int(ind.get(qn("w:left")) or 0)
+            except (TypeError, ValueError):
+                left = 0
+            try:
+                hanging = int(ind.get(qn("w:hanging")) or 0)
+            except (TypeError, ValueError):
+                hanging = 0
+            if hanging > left and hanging > 0:
+                # Keep number gutter inside the left indent (first-line start >= 0).
+                if left > 0:
+                    ind.set(qn("w:hanging"), str(left))
+                else:
+                    ind.set(qn("w:left"), str(hanging))
+                changed += 1
+        tabs = p_pr.find(qn("w:tabs"))
+        if tabs is None:
+            continue
+        removed_tab = False
+        for tab in list(tabs.findall(qn("w:tab"))):
+            try:
+                pos = int(tab.get(qn("w:pos")) or 0)
+            except (TypeError, ValueError):
+                continue
+            if pos < 0:
+                tabs.remove(tab)
+                removed_tab = True
+                changed += 1
+        if removed_tab and len(tabs) == 0:
+            p_pr.remove(tabs)
+    return changed
+
+
+def _defloat_body_tables(doc) -> int:
+    """
+    Floating body tables (tblpPr) grow when filled and paint over the next
+    heading/rows in LibreOffice PDF (overlap at page bottoms, 8.x cut-off).
+    Keep them in normal document flow instead.
+
+    Preserve the horizontal offset as tblInd. tblpX with horzAnchor=page is
+    page-absolute (e.g. Calibrations tblpX=2167); tblInd is relative to the
+    left margin — copying 2167 unchanged pushed the table past the right border.
+    """
+    changed = 0
+    left_margin = 1350
+    try:
+        from neq_docx_save import _section_metric
+
+        left_margin = int(_section_metric(doc, "w:pgMar", "w:left", 1350))
+    except Exception:
+        for sect in doc.element.body.iter(qn("w:sectPr")):
+            mar = sect.find(qn("w:pgMar"))
+            if mar is not None and mar.get(qn("w:left")):
+                try:
+                    left_margin = int(mar.get(qn("w:left")))
+                except (TypeError, ValueError):
+                    pass
+                break
+
+    for tbl in doc.element.body.findall(qn("w:tbl")):
+        tbl_pr = tbl.find(qn("w:tblPr"))
+        if tbl_pr is None:
+            continue
+        anchor = tbl_pr.find(qn("w:tblpPr"))
+        if anchor is not None:
+            existing_ind = tbl_pr.find(qn("w:tblInd"))
+            x_spec = (anchor.get(qn("w:tblpXSpec")) or "").lower()
+            raw_x = anchor.get(qn("w:tblpX"))
+            if existing_ind is None and raw_x is not None and x_spec not in ("center", "right", "inside", "outside"):
+                try:
+                    x_dxa = int(raw_x)
+                except (TypeError, ValueError):
+                    x_dxa = None
+                if x_dxa is not None:
+                    # Only explicit page anchors are page-absolute. Missing/text/margin
+                    # tblpX is already margin-relative (e.g. Comments x=-565). Treating
+                    # missing as "page" previously did x-left_margin → -2005 and shoved
+                    # the table left with a large empty right margin in LO PDF.
+                    horz_raw = (anchor.get(qn("w:horzAnchor")) or "").strip().lower()
+                    vert_raw = (anchor.get(qn("w:vertAnchor")) or "").strip().lower()
+                    if horz_raw == "page":
+                        ind_dxa = x_dxa - left_margin
+                    else:
+                        ind_dxa = x_dxa
+                    # Text-anchored floats with a large positive x still need margin math.
+                    if horz_raw == "" and vert_raw == "page" and x_dxa >= left_margin:
+                        ind_dxa = x_dxa - left_margin
+                    ind = OxmlElement("w:tblInd")
+                    ind.set(qn("w:w"), str(ind_dxa))
+                    ind.set(qn("w:type"), "dxa")
+                    jc = tbl_pr.find(qn("w:jc"))
+                    if jc is not None:
+                        jc.addprevious(ind)
+                    else:
+                        tbl_pr.append(ind)
+                    changed += 1
+            tbl_pr.remove(anchor)
+            changed += 1
+        overlap = tbl_pr.find(qn("w:tblOverlap"))
+        if overlap is not None:
+            tbl_pr.remove(overlap)
+            changed += 1
+    return changed
+
+
+def _normalize_header_footer_table_widths(doc) -> int:
+    """
+    Letterhead tables often use tblW type=pct. LibreOffice PDF then draws them
+    narrower than Word and parks them on the left. Convert to dxa from grid
+    (same as body tables after fill) so every viewer matches the original DOCX.
+    """
+    changed = 0
+    parts = []
+    for sect in doc.sections:
+        for hdr in (
+            getattr(sect, "header", None),
+            getattr(sect, "first_page_header", None),
+            getattr(sect, "even_page_header", None),
+        ):
+            if hdr is not None:
+                parts.append(hdr)
+        for ftr in (
+            getattr(sect, "footer", None),
+            getattr(sect, "first_page_footer", None),
+            getattr(sect, "even_page_footer", None),
+        ):
+            if ftr is not None:
+                parts.append(ftr)
+
+    for part in parts:
+        try:
+            tables = part.tables
+        except Exception:
+            continue
+        for table in tables:
+            tbl = table._tbl
+            tbl_pr = tbl.find(qn("w:tblPr"))
+            if tbl_pr is None:
+                continue
+            tbl_w = tbl_pr.find(qn("w:tblW"))
+            grid = tbl.find(qn("w:tblGrid"))
+            grid_sum = 0
+            if grid is not None:
+                for col in grid.findall(qn("w:gridCol")):
+                    try:
+                        grid_sum += int(col.get(qn("w:w")) or 0)
+                    except (TypeError, ValueError):
+                        continue
+            if grid_sum <= 0:
+                continue
+            if tbl_w is None:
+                tbl_w = OxmlElement("w:tblW")
+                tbl_pr.append(tbl_w)
+            kind = (tbl_w.get(qn("w:type")) or "").lower()
+            try:
+                cur = int(tbl_w.get(qn("w:w")) or 0)
+            except (TypeError, ValueError):
+                cur = 0
+            if kind == "pct" or cur <= 0 or (kind == "dxa" and abs(cur - grid_sum) > 80 and cur < grid_sum):
+                tbl_w.set(qn("w:w"), str(grid_sum))
+                tbl_w.set(qn("w:type"), "dxa")
+                changed += 1
+            # Keep original hanging indent when present; default slightly negative
+            # like Lupin letterheads so the block spans to the page border.
+            ind = tbl_pr.find(qn("w:tblInd"))
+            if ind is None:
+                ind = OxmlElement("w:tblInd")
+                ind.set(qn("w:w"), "-635")
+                ind.set(qn("w:type"), "dxa")
+                jc = tbl_pr.find(qn("w:jc"))
+                if jc is not None:
+                    jc.addprevious(ind)
+                else:
+                    tbl_pr.append(ind)
+                changed += 1
+    return changed
+
+
+def _tc_width_dxa(tc) -> int:
+    tc_pr = tc.find(qn("w:tcPr"))
+    if tc_pr is None:
+        return 0
+    tc_w = tc_pr.find(qn("w:tcW"))
+    if tc_w is None or (tc_w.get(qn("w:type")) or "") != "dxa":
+        return 0
+    try:
+        return int(tc_w.get(qn("w:w")) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _ensure_body_cell_margins(
+    doc,
+    *,
+    left_twips: int = 120,
+    right_twips: int = 120,
+    top_twips: int = 40,
+    bottom_twips: int = 40,
+) -> int:
+    """
+    Add ~1-letter left/right cell padding when the template has no tcMar.
+    Stops Super Admin / signature text from sticking to the cell border.
+    120 twips ≈ one character at ~11pt.
+
+    Narrow columns (Calibrations "Sr. No." ≈ 636 twips) must use smaller
+    pads — 120+120 ate the cell and LO stacked letters / shoved the table out.
+    """
+    changed = 0
+    for table in doc.tables:
+        for row in table.rows:
+            seen = set()
+            for cell in row.cells:
+                tc = cell._tc
+                if id(tc) in seen:
+                    continue
+                seen.add(id(tc))
+                width = _tc_width_dxa(tc)
+                pad_l, pad_r = left_twips, right_twips
+                if 0 < width < 900:
+                    pad_l = pad_r = min(36, max(18, width // 16))
+                elif 0 < width < 1500:
+                    pad_l = pad_r = min(72, left_twips)
+                sides = (
+                    ("left", pad_l),
+                    ("right", pad_r),
+                    ("top", top_twips),
+                    ("bottom", bottom_twips),
+                )
+                tc_pr = tc.get_or_add_tcPr()
+                tc_mar = tc_pr.find(qn("w:tcMar"))
+                if tc_mar is None:
+                    tc_mar = OxmlElement("w:tcMar")
+                    tc_pr.append(tc_mar)
+                for side, want in sides:
+                    node = tc_mar.find(qn(f"w:{side}"))
+                    if node is None:
+                        node = OxmlElement(f"w:{side}")
+                        tc_mar.append(node)
+                        node.set(qn("w:w"), str(want))
+                        node.set(qn("w:type"), "dxa")
+                        changed += 1
+                        continue
+                    try:
+                        cur = int(node.get(qn("w:w")) or 0)
+                    except (TypeError, ValueError):
+                        cur = 0
+                    # Raise floor for wide cells; shrink oversized pads on narrow ones.
+                    if cur < want or (width and width < 1500 and cur > want):
+                        node.set(qn("w:w"), str(want))
+                        node.set(qn("w:type"), "dxa")
+                        changed += 1
+    return changed
+
+
+def _normalize_table_page_breaks(doc) -> int:
+    """
+    Only the first row of a table may be tblHeader. The template (or row-copy)
+    sometimes marks every data row as a header; Word/LibreOffice then refuse to
+    split the table and leave a huge blank band after headings like 9.1.
+
+    Also drop cantSplit on body rows so filled tables can continue on the next page.
+    """
+    changed = 0
+    for tbl in doc.element.body.iter(qn("w:tbl")):
+        rows = tbl.findall(qn("w:tr"))
+        if not rows:
+            continue
+        for index, tr in enumerate(rows):
+            tr_pr = tr.find(qn("w:trPr"))
+            if tr_pr is None:
+                continue
+            headers = tr_pr.findall(qn("w:tblHeader"))
+            if index == 0:
+                # Keep a single header marker on the first row.
+                if len(headers) > 1:
+                    for extra in headers[1:]:
+                        tr_pr.remove(extra)
+                        changed += 1
+                continue
+            # Data rows must not repeat as headers or block splitting.
+            for node in headers:
+                tr_pr.remove(node)
+                changed += 1
+            cant = tr_pr.find(qn("w:cantSplit"))
+            if cant is not None:
+                tr_pr.remove(cant)
+                changed += 1
+        # First row: allow split of the table as a whole (header can repeat).
+        first_pr = rows[0].find(qn("w:trPr"))
+        if first_pr is not None:
+            cant = first_pr.find(qn("w:cantSplit"))
+            if cant is not None:
+                first_pr.remove(cant)
+                changed += 1
+    return changed
+
+
+def _expand_clipping_textboxes(doc) -> int:
+    """
+    History / recommendation content lives in floating Word textboxes with
+    wps:noAutofit and a fixed cy. Filled lines then clip at the bottom border
+    (8.5 History box). Enable spAutoFit and grow cy so every paragraph shows.
+    """
+    from docx.oxml import parse_xml
+
+    wps_ns = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+    a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    wp_ns = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    changed = 0
+
+    for txbx in doc.element.body.findall(
+        ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}txbxContent"
+    ):
+        paras = txbx.findall(qn("w:p"))
+        if not paras:
+            continue
+        full = "".join(t.text or "" for t in txbx.findall(".//" + qn("w:t")))
+        if len(full.strip()) < 40:
+            continue
+
+        # Estimate wrapped lines inside ~6.4" wide box (underlines need extra air).
+        lines = 0
+        for para in paras:
+            text = "".join(t.text or "" for t in para.findall(".//" + qn("w:t"))).strip()
+            if not text:
+                lines += 1
+                continue
+            lines += max(1, (len(text) // 55) + 1)
+
+        node = txbx.getparent()
+        wsp = None
+        anchor = None
+        while node is not None:
+            tag = str(node.tag)
+            if tag.endswith("}wsp"):
+                wsp = node
+            if tag.endswith("}anchor") or tag.endswith("}inline"):
+                anchor = node
+                break
+            node = node.getparent()
+        if wsp is None:
+            continue
+
+        body_pr = wsp.find(f"{{{wps_ns}}}bodyPr")
+        if body_pr is not None:
+            for child in list(body_pr):
+                ctag = str(child.tag)
+                if ctag.endswith("}noAutofit") or ctag.endswith("}normAutofit"):
+                    body_pr.remove(child)
+                    changed += 1
+            if body_pr.find(f"{{{wps_ns}}}spAutoFit") is None:
+                body_pr.append(
+                    parse_xml(
+                        f'<wps:spAutoFit xmlns:wps="{wps_ns}"/>'
+                    )
+                )
+                changed += 1
+            # Small inner padding so text is not flush to the box border.
+            for attr, emu in (("lIns", "72000"), ("rIns", "72000"), ("tIns", "36000"), ("bIns", "90000")):
+                try:
+                    cur = int(body_pr.get(attr) or 0)
+                except (TypeError, ValueError):
+                    cur = 0
+                if cur < int(emu):
+                    body_pr.set(attr, emu)
+                    changed += 1
+
+        # Grow fixed height for LibreOffice (often ignores spAutoFit).
+        # Cap so the floating 8.5 History box cannot paint through the ANNEX footer
+        # (user: even if original clips, final must stay above the footer).
+        emu_in = 914400
+        need_cy = max(lines * 280000 + 360000, int(2.8 * emu_in))
+        # Original template box is ~3.17"; never grow past ~3.4" on-page.
+        max_cy = int(3.4 * emu_in)
+        need_cy = min(need_cy, max_cy)
+
+        # If this history/recommendation box is mid-page, start it on a fresh page
+        # so the capped height still clears the footer band.
+        host_para = txbx.getparent()
+        while host_para is not None and not str(host_para.tag).endswith("}p"):
+            host_para = host_para.getparent()
+        if host_para is not None and (
+            "history card" in full.lower()
+            or "engineering shall review" in full.lower()
+            or "recommendation" in full.lower()
+        ):
+            _set_para_page_break_before(host_para, enabled=True)
+
+        extents = []
+        if anchor is not None:
+            extents.extend(anchor.findall(f"{{{wp_ns}}}extent"))
+        extents.extend(wsp.findall(f".//{{{a_ns}}}ext"))
+        for ext in extents:
+            if ext.get("cy") is None:
+                continue
+            try:
+                cur = int(ext.get("cy") or 0)
+            except (TypeError, ValueError):
+                continue
+            # Grow up to cap; also shrink previously over-expanded boxes.
+            if cur <= 0:
+                continue
+            if need_cy != cur and (need_cy > cur or cur > max_cy):
+                ext.set("cy", str(min(need_cy, max_cy)))
+                changed += 1
+
+    return changed
+
+
+def _normalize_filled_docx_layout(doc, profile: str = "legacy") -> None:
+    """Post-fill layout pass so Word/LibreOffice PDF match readable formatting.
+
+    profile='legacy' = 14/11 baseline (defloat + page-border clamp).
+    profile='neq' adds header/footer pct→dxa (layout_v2 only).
+    """
+    _fix_broken_hanging_indents(doc)
+    _defloat_body_tables(doc)
+    if (profile or "").strip().lower() == "neq":
+        _normalize_header_footer_table_widths(doc)
+    try:
+        from neq_docx_save import _clamp_body_tables_inside_page_border
+
+        _clamp_body_tables_inside_page_border(doc)
+    except Exception:
+        pass
+    _normalize_table_page_breaks(doc)
+    _ensure_body_cell_margins(doc)
+    _expand_clipping_textboxes(doc)
 
 
 def _keep_approval_names_inside_cells(doc) -> None:
@@ -1793,22 +3345,372 @@ def _clamp_paragraph_inside_cell(para) -> None:
         tc_pr.remove(no_wrap)
 
 
-def add_footer_to_doc(doc) -> None:
-    """Only write default annex line if the document section footer has no paragraphs."""
+def _is_placeholder_annex_footer_text(text: str | None) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    if t == FOOTER_ANNEX_TEXT:
+        return True
+    return bool(_PLACEHOLDER_ANNEX_RE.fullmatch(t))
+
+
+def _strip_placeholder_annex_footer(doc) -> int:
+    """
+    Remove invented ANNEX_xxx | SOP_XXXX | CLASS I lines that were never in the
+    original template (e.g. PERIODIC HVAC VALIDATION REPORT).
+    Keep real template footers such as ANNEX_SKM_QA_….
+    """
+    removed = 0
     for section in doc.sections:
         footer = section.footer
-        if footer and any(p.text.strip() for p in footer.paragraphs):
-            # Template already has official footer paragraphs (including Page numbering) — preserve it.
+        if footer is None:
             continue
-        footer.is_linked_to_previous = False
-        while footer.paragraphs:
-            element = footer.paragraphs[0]._element
-            element.getparent().remove(element)
-        para = footer.add_paragraph()
-        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _tighten_footer_paragraph(para)
-        run_annex = para.add_run(FOOTER_ANNEX_TEXT)
-        run_annex.font.size = Pt(9)
+        for para in list(footer.paragraphs):
+            if not _is_placeholder_annex_footer_text(para.text):
+                continue
+            element = para._element
+            parent = element.getparent()
+            if parent is not None:
+                parent.remove(element)
+                removed += 1
+    return removed
+
+
+def _unique_table_row_cells(row):
+    seen = set()
+    cells = []
+    for cell in row.cells:
+        tc_id = id(cell._tc)
+        if tc_id in seen:
+            continue
+        seen.add(tc_id)
+        cells.append(cell)
+    return cells
+
+
+def _para_plain_text(p_element) -> str:
+    return "".join(node.text or "" for node in p_element.iter(qn("w:t"))).strip()
+
+
+def _is_list_of_attachment_heading(text: str) -> bool:
+    t = re.sub(r"\s+", " ", (text or "").strip()).upper()
+    if not t:
+        return False
+    if "LIST OF ATTACHMENT" in t:
+        return True
+    return bool(re.match(r"^\d+(\.\d+)*\.?\s+LIST OF ATTACH", t))
+
+
+def _is_tight_gap_section_heading(text: str) -> bool:
+    """
+    Major HVAC / revalidation body headings that often sit under the letterhead
+    after a stack of empty paragraphs (OBJECTIVE after TOC, RESPONSIBILITY after
+    the SCOPE table, LIST OF ATTACHMENT, …).
+    """
+    t = re.sub(r"\s+", " ", (text or "").strip()).upper().rstrip(":")
+    if not t:
+        return False
+    if _is_list_of_attachment_heading(text):
+        return True
+    # Template often stores bare titles; Word list numbering adds "1.0" / "3.0".
+    bare = {
+        "OBJECTIVE",
+        "SCOPE",
+        "RESPONSIBILITY",
+        "TYPE OF QUALIFICATION",
+        "EQUIPMENT /SYSTEM DETAILS",
+        "EQUIPMENT / SYSTEM DETAILS",
+        "EQUIPMENT/SYSTEM DETAILS",
+        "PRE-REQUISITES",
+        "PRE-REQUISITE",
+        "APPLICABLE STANDARD OPERATING PROCEDURE (SOP'S)",
+        "APPLICABLE STANDARD OPERATING PROCEDURE (SOP’S)",
+        "PRE-QUALIFICATION CHECKS",
+        "REQUALIFICATION CHECKS",
+        "DEVIATIONS (IF ANY)",
+        "DEVIATIONS",
+        "METHODOLOGY",
+        "OBSERVATION / RESULTS AND EVALUATION",
+        "OBSERVATION/RESULTS AND EVALUATION",
+        "SUMMARY AND CONCLUSION",
+        "SUMMARY & CONCLUSION",
+        "LIST OF ATTACHMENT",
+        "LIST OF ATTACHMENTS",
+        "REFERENCES",
+        "ABBREVIATIONS",
+        "REVISION HISTORY",
+        "POST APPROVAL",
+    }
+    if t in bare:
+        return True
+    if re.match(
+        r"^\d+(\.\d+)*\.?\s+(OBJECTIVE|SCOPE|RESPONSIBILITY|TYPE OF QUALIFICATION|"
+        r"EQUIPMENT|PRE-REQUISITE|APPLICABLE STANDARD|PRE-QUALIFICATION|"
+        r"REQUALIFICATION|DEVIATION|METHODOLOGY|OBSERVATION|SUMMARY|"
+        r"LIST OF ATTACH|REFERENCE|ABBREVIATION|REVISION HISTORY|POST APPROVAL)",
+        t,
+    ):
+        return True
+    return False
+
+
+def _normalize_section_spacer_para(p_el) -> None:
+    """Turn an empty ListParagraph spacer into a plain ~one-line blank."""
+    p_pr = p_el.find(qn("w:pPr"))
+    if p_pr is None:
+        p_pr = OxmlElement("w:pPr")
+        p_el.insert(0, p_pr)
+    for tag in ("w:pStyle", "w:numPr", "w:ind"):
+        node = p_pr.find(qn(tag))
+        if node is not None:
+            p_pr.remove(node)
+    spacing = p_pr.find(qn("w:spacing"))
+    if spacing is None:
+        spacing = OxmlElement("w:spacing")
+        p_pr.append(spacing)
+    spacing.set(qn("w:before"), "0")
+    spacing.set(qn("w:after"), "0")
+    spacing.set(qn("w:line"), "240")
+    spacing.set(qn("w:lineRule"), "auto")
+    # Drop any leftover runs so the spacer stays truly empty.
+    for child in list(p_el):
+        if child.tag != qn("w:pPr"):
+            p_el.remove(child)
+
+
+def _set_para_page_break_before(p_el, enabled: bool = True) -> None:
+    p_pr = p_el.find(qn("w:pPr"))
+    if p_pr is None:
+        p_pr = OxmlElement("w:pPr")
+        p_el.insert(0, p_pr)
+    existing = p_pr.find(qn("w:pageBreakBefore"))
+    if enabled:
+        if existing is None:
+            p_pr.append(OxmlElement("w:pageBreakBefore"))
+    elif existing is not None:
+        p_pr.remove(existing)
+
+
+def _collect_empty_idxs_before(children, idx: int) -> tuple[list[int], int]:
+    """Return (empty_para_indexes nearest-first, index of first non-empty sibling)."""
+    empty_idxs: list[int] = []
+    j = idx - 1
+    while j >= 0:
+        prev = children[j]
+        if prev.tag != qn("w:p"):
+            break
+        if _para_plain_text(prev):
+            break
+        empty_idxs.append(j)
+        j -= 1
+    return empty_idxs, j
+
+
+def _ensure_para_keep_next(p_el) -> None:
+    """Keep a section heading with the following body text (avoids orphan at page bottom)."""
+    p_pr = p_el.find(qn("w:pPr"))
+    if p_pr is None:
+        p_pr = OxmlElement("w:pPr")
+        p_el.insert(0, p_pr)
+    if p_pr.find(qn("w:keepNext")) is None:
+        # After pStyle/numPr when present.
+        kn = OxmlElement("w:keepNext")
+        insert_at = 0
+        for i, child in enumerate(list(p_pr)):
+            if child.tag in {qn("w:pStyle"), qn("w:keepNext"), qn("w:keepLines")}:
+                insert_at = i + 1
+        p_pr.insert(insert_at, kn)
+
+
+def _trim_empty_paras_before_attachment_heading(doc, *, keep: int = 2) -> int:
+    """
+    Keep at most ~2 blank lines above major section headings.
+
+    Matches the original requal Word template: short spacers only, no forced
+    pageBreakBefore. Forcing breaks after tables left mostly-empty pages
+    (Qualification History) and large gaps above PRE-REQUISITES / 8.0 / 5.0.
+    """
+    keep = max(0, int(keep))
+    body = doc.element.body
+    removed = 0
+
+    # Pass 1: drop surplus empty paragraphs above each target heading.
+    changed = True
+    while changed:
+        changed = False
+        children = list(body)
+        for idx, el in enumerate(children):
+            if el.tag != qn("w:p"):
+                continue
+            if not _is_tight_gap_section_heading(_para_plain_text(el)):
+                continue
+            empty_idxs, _prev_j = _collect_empty_idxs_before(children, idx)
+            if len(empty_idxs) <= keep:
+                continue
+            for drop_i in sorted(empty_idxs[keep:]):
+                node = children[drop_i]
+                parent = node.getparent()
+                if parent is not None:
+                    parent.remove(node)
+                    removed += 1
+                    changed = True
+            break
+
+    # Pass 2: normalize spacers; clear forced page breaks from older fills.
+    # Original has no pageBreakBefore on PRE-REQUISITES / EQUIPMENT / 8.0 —
+    # Word flows naturally; keepNext avoids orphan headings at page bottoms.
+    children = list(body)
+    for el in list(children):
+        if el.tag != qn("w:p"):
+            continue
+        if not _is_tight_gap_section_heading(_para_plain_text(el)):
+            continue
+        children = list(body)
+        try:
+            idx = children.index(el)
+        except ValueError:
+            continue
+        empty_idxs, prev_j = _collect_empty_idxs_before(children, idx)
+        precedes_table = prev_j >= 0 and children[prev_j].tag == qn("w:tbl")
+        local_keep = 1 if precedes_table else keep
+        if len(empty_idxs) > local_keep:
+            for drop_i in sorted(empty_idxs[local_keep:]):
+                node = children[drop_i]
+                parent = node.getparent()
+                if parent is not None:
+                    parent.remove(node)
+                    removed += 1
+            children = list(body)
+            try:
+                idx = children.index(el)
+            except ValueError:
+                continue
+            empty_idxs, prev_j = _collect_empty_idxs_before(children, idx)
+
+        for i in empty_idxs:
+            _normalize_section_spacer_para(children[i])
+            _set_para_page_break_before(children[i], enabled=False)
+        _set_para_page_break_before(el, enabled=False)
+        _ensure_para_keep_next(el)
+
+    return removed
+
+
+def _repair_mashed_bullet_cells(doc) -> int:
+    """
+    Fix Acceptance Criteria cells flattened by an older _set_cell_text:
+    all text in para 0, empty Word-list paras below → orphan bullet dots.
+    Restore lines onto the numbered paragraphs (row 13 airflow pattern).
+    """
+    repaired = 0
+    sentence_split = re.compile(r"(?<=\.)\s*(?=[A-Z])")
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in _unique_table_row_cells(row):
+                paras = [
+                    p
+                    for p in cell.paragraphs
+                    if not any(_run_has_image(r) for r in p.runs)
+                ]
+                if len(paras) < 2:
+                    continue
+
+                # Half-fixed: "Label:" + one listed para holding two mashed sentences.
+                if (
+                    len(paras) == 2
+                    and (paras[0].text or "").strip().endswith(":")
+                    and _para_has_numbering(paras[1])
+                ):
+                    segs = [
+                        s.strip()
+                        for s in sentence_split.split((paras[1].text or "").strip())
+                        if s.strip()
+                    ]
+                    if len(segs) >= 2:
+                        font_bold, font_italic, font_size, font_name = _extract_para_run_font(
+                            paras[0]
+                        )
+                        if font_size is None:
+                            font_size = Pt(12)
+                        if not font_name:
+                            font_name = "Arial"
+                        _clear_text_runs(paras[1])
+                        _write_run_with_font(
+                            paras[1], segs[0], font_bold, font_italic, font_size, font_name
+                        )
+                        new_el = deepcopy(paras[1]._element)
+                        for t_el in new_el.findall(f".//{{{W_NS}}}t"):
+                            t_el.text = ""
+                        paras[1]._element.addnext(new_el)
+                        new_para = cell.paragraphs[-1]
+                        _clear_text_runs(new_para)
+                        _write_run_with_font(
+                            new_para,
+                            " ".join(segs[1:]),
+                            font_bold,
+                            font_italic,
+                            font_size,
+                            font_name,
+                        )
+                        repaired += 1
+                        continue
+
+                empty_listed = [
+                    p
+                    for p in paras[1:]
+                    if not (p.text or "").strip() and _para_has_numbering(p)
+                ]
+                if not empty_listed:
+                    continue
+                # Only the mash pattern: trailing paras empty+listed, no other content paras.
+                mid_ok = all(
+                    (not (p.text or "").strip()) or _para_has_numbering(p)
+                    for p in paras[1:]
+                )
+                if not mid_ok:
+                    continue
+                head = (paras[0].text or "").strip()
+                if not head:
+                    for p in empty_listed:
+                        _delete_paragraph_element(p)
+                    repaired += 1
+                    continue
+                lines = _split_value_for_list_paras(head, len(paras))
+                if len([ln for ln in lines if ln]) < 2:
+                    for p in empty_listed:
+                        _delete_paragraph_element(p)
+                    repaired += 1
+                    continue
+                font_bold, font_italic, font_size, font_name = _extract_para_run_font(paras[0])
+                if font_size is None:
+                    font_size = Pt(12)
+                if not font_name:
+                    font_name = "Arial"
+                for para, line in zip(paras, lines):
+                    _clear_text_runs(para)
+                    if line:
+                        _write_run_with_font(
+                            para, line, font_bold, font_italic, font_size, font_name
+                        )
+                for para in list(paras[1:]):
+                    if not (para.text or "").strip() and _para_has_numbering(para):
+                        _delete_paragraph_element(para)
+                _sync_list_cell_fonts_to_label(cell)
+                repaired += 1
+        # Always equalize bullet font to the label size (row 13 Acceptance Criteria).
+        for row in table.rows:
+            for cell in _unique_table_row_cells(row):
+                if _sync_list_cell_fonts_to_label(cell):
+                    repaired += 1
+    return repaired
+
+
+def add_footer_to_doc(doc) -> None:
+    """
+    Do not invent an annex footer. Original revalidation / HVAC templates have
+    none; only strip legacy placeholder lines and pin real annex text if present.
+    """
+    _strip_placeholder_annex_footer(doc)
     _pin_annex_footer_inside_page(doc)
 
 
@@ -1820,25 +3722,205 @@ def _tighten_footer_paragraph(para) -> None:
     fmt.line_spacing = 1.0
 
 
+def _parse_abbreviation_line(text: str) -> tuple[str, str] | None:
+    """Split 'AHU-Air Handling Unit' / 'MOC- Material…' into (abbr, definition)."""
+    raw = re.sub(r"\s+", " ", (text or "").strip())
+    if not raw or raw.upper().rstrip(":").endswith("ABBREVIATIONS"):
+        return None
+    # Stop at next major section heading.
+    if re.match(
+        r"^\d+(\.\d+)*\.?\s*(REVISION HISTORY|POST APPROVAL|REFERENCES)\b",
+        raw,
+        re.I,
+    ) or raw.upper().rstrip(":") in {
+        "REVISION HISTORY",
+        "POST APPROVAL",
+        "REFERENCES",
+        "ABBREVIATIONS",
+    }:
+        return None
+    m = re.match(r"^(.+?)\s*-\s*(.+)$", raw)
+    if not m:
+        return None
+    abbr = m.group(1).strip()
+    definition = m.group(2).strip()
+    if not abbr or not definition:
+        return None
+    # Avoid rewriting ordinary sentences that happen to contain a hyphen.
+    if len(abbr) > 40 or " " in abbr and len(abbr) > 24:
+        return None
+    return abbr, definition
+
+
+def _rewrite_abbreviation_paragraph(p_el, abbr: str, definition: str) -> None:
+    """
+    Restore original requal layout:  AHU  [tab]  -  [tab]  Air Handling Unit
+    so the hyphen column aligns and reads as 'AHU - definition'.
+    """
+    # Keep style / indent from the template line.
+    old_pr = p_el.find(qn("w:pPr"))
+    style_id = None
+    ind_attrib = None
+    if old_pr is not None:
+        ps = old_pr.find(qn("w:pStyle"))
+        if ps is not None:
+            style_id = ps.get(qn("w:val"))
+        ind = old_pr.find(qn("w:ind"))
+        if ind is not None:
+            ind_attrib = dict(ind.attrib)
+
+    for child in list(p_el):
+        p_el.remove(child)
+
+    p_pr = OxmlElement("w:pPr")
+    p_el.append(p_pr)
+    if style_id:
+        ps = OxmlElement("w:pStyle")
+        ps.set(qn("w:val"), style_id)
+        p_pr.append(ps)
+    else:
+        ps = OxmlElement("w:pStyle")
+        ps.set(qn("w:val"), "ListParagraph")
+        p_pr.append(ps)
+    if ind_attrib:
+        ind = OxmlElement("w:ind")
+        for k, v in ind_attrib.items():
+            ind.set(k, v)
+        p_pr.append(ind)
+    else:
+        ind = OxmlElement("w:ind")
+        ind.set(qn("w:left"), "1170")
+        p_pr.append(ind)
+    # One shared tab stop so IQ / GI / °C align with AHU / PIBCV (default tabs
+    # left short abbreviations with a broken gap before the hyphen).
+    tabs = OxmlElement("w:tabs")
+    tab_def = OxmlElement("w:tab")
+    tab_def.set(qn("w:val"), "left")
+    tab_def.set(qn("w:pos"), "2700")
+    tabs.append(tab_def)
+    _ppr_insert_tabs(p_pr, tabs)
+
+    spacing = OxmlElement("w:spacing")
+    spacing.set(qn("w:before"), "0")
+    spacing.set(qn("w:after"), "0")
+    spacing.set(qn("w:line"), "240")
+    spacing.set(qn("w:lineRule"), "auto")
+    p_pr.append(spacing)
+
+    def _run(text: str = None, *, tab: bool = False) -> None:
+        run = OxmlElement("w:r")
+        r_pr = OxmlElement("w:rPr")
+        fonts = OxmlElement("w:rFonts")
+        fonts.set(qn("w:ascii"), "Arial")
+        fonts.set(qn("w:hAnsi"), "Arial")
+        r_pr.append(fonts)
+        sz = OxmlElement("w:sz")
+        sz.set(qn("w:val"), "22")
+        r_pr.append(sz)
+        run.append(r_pr)
+        if tab:
+            run.append(OxmlElement("w:tab"))
+        else:
+            t_el = OxmlElement("w:t")
+            if text and (text.startswith(" ") or text.endswith(" ")):
+                t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            t_el.text = text or ""
+            run.append(t_el)
+        p_el.append(run)
+
+    # AHU[tab] - Air Handling Unit  → hyphen column lines up for every row.
+    _run(abbr)
+    _run(tab=True)
+    _run(f" - {definition}")
+
+
+def _repair_abbreviation_entries(doc) -> int:
+    """
+    Requalification 14.0 ABBREVIATIONS lines lose their tab separators after fill
+    ('AHU-Air Handling Unit'). Restore abbr + tab + hyphen + tab + definition
+    like the original Word template so hyphens align with spaces around them.
+    """
+    body = list(doc.element.body)
+    start = None
+    for i, el in enumerate(body):
+        if el.tag != qn("w:p"):
+            continue
+        plain = _para_plain_text(el).upper().rstrip(":")
+        if plain == "ABBREVIATIONS" or re.match(r"^\d+(\.\d+)*\.?\s*ABBREVIATIONS$", plain):
+            start = i
+            break
+    if start is None:
+        return 0
+
+    # Start the list under the letterhead so LO does not clip entries under ANNEX.
+    _set_para_page_break_before(body[start], enabled=True)
+    _ensure_para_keep_next(body[start])
+
+    fixed = 0
+    for el in body[start + 1 :]:
+        if el.tag == qn("w:tbl"):
+            break
+        if el.tag != qn("w:p"):
+            continue
+        # Build plain text including tabs so we can detect a healthy layout.
+        tokens = []
+        for node in el.iter():
+            if node.tag == qn("w:t") and node.text:
+                tokens.append(node.text)
+            elif node.tag == qn("w:tab"):
+                tokens.append("\t")
+        joined = "".join(tokens)
+        plain = re.sub(r"\s+", " ", joined.replace("\t", " ")).strip()
+        upper = plain.upper().rstrip(":")
+        if upper in {"REVISION HISTORY", "POST APPROVAL", "REFERENCES"} or re.match(
+            r"^\d+(\.\d+)*\.?\s*(REVISION HISTORY|POST APPROVAL)\b",
+            plain,
+            re.I,
+        ):
+            break
+        # Already repaired: AHU \t - definition (shared tab stop).
+        if joined.count("\t") == 1 and re.search(r"\t - ", joined):
+            continue
+        # Legacy original: AHU \t - \t definition
+        if joined.count("\t") >= 2 and re.search(r"\t\s*-\s*\t", joined):
+            # Still rewrite so IQ/GI/°C get the shared tab stop.
+            pass
+        parsed = _parse_abbreviation_line(plain)
+        if not parsed:
+            continue
+        abbr, definition = parsed
+        _rewrite_abbreviation_paragraph(el, abbr, definition)
+        fixed += 1
+    return fixed
+
+
 def _pin_annex_footer_inside_page(doc) -> None:
     """
-    A footer distance of 0 draws the annex line on the page edge.
-    Word then shows it in the gap under the sheet, outside the footer.
+    Keep a real annex footer readable: not glued to the page edge, and not
+    glued to the last table row. Skip when the template has no annex line.
     """
+    _strip_placeholder_annex_footer(doc)
     for section in doc.sections:
         footer = section.footer
         if footer is None:
             continue
-        annex_paras = [p for p in footer.paragraphs if "ANNEX" in (p.text or "")]
+        annex_paras = [
+            p
+            for p in footer.paragraphs
+            if "ANNEX" in (p.text or "") and not _is_placeholder_annex_footer_text(p.text)
+        ]
         if not annex_paras:
             continue
         for para in annex_paras:
             _tighten_footer_paragraph(para)
-        # Half an inch from the edge keeps one line inside the bottom margin.
-        if section.footer_distance is None or int(section.footer_distance) < int(Pt(28)):
-            section.footer_distance = Pt(36)
-        if section.bottom_margin is None or int(section.bottom_margin) < int(Pt(64)):
-            section.bottom_margin = Pt(72)
+        # Distance from page bottom edge → footer line (avoid edge-stuck look).
+        if section.footer_distance is None or int(section.footer_distance) < int(Pt(40)):
+            section.footer_distance = Pt(44)
+        # Body must clear the annex line (LO otherwise paints IQ under ANNEX).
+        footer_dxa = int(section.footer_distance)
+        min_bottom = footer_dxa + int(Pt(56))
+        if section.bottom_margin is None or int(section.bottom_margin) < min_bottom:
+            section.bottom_margin = min_bottom
 
 
 # Copy header*.xml and footer*.xml parts from the template zip back into the filled output zip.

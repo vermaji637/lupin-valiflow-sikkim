@@ -326,14 +326,52 @@ public function store(Request $request, Template $template)
     $preSteps  = $report->approvalSteps->where('stage','pre')->sortBy('step_order');
     $postSteps = $report->approvalSteps->where('stage','post')->sortBy('step_order');
 
-    // DOCX import reports: show read-only table preview instead of HTML template body
+    // 14/11 baseline: NEQ / revalidation / requalification use print-accurate PDF on show.
     $docxPreviewHtml = '';
+    $docxTocPageMap = ['by_index' => [], 'by_sec' => [], 'max' => 0];
+    $docxPdfPreviewUrl = null;
     if ($report->docx_import_path) {
-        // Build table HTML preview from filled DOCX via DocxImportController
-        $docxPreviewHtml = app(DocxImportController::class)->buildShowPreviewHtml($report);
+        $docxImport = app(DocxImportController::class);
+        // If fill completed but filled DOCX is missing, regenerate so view matches download.
+        if (
+            ($report->docx_import_status ?? '') === 'completed'
+            && ! $docxImport->hasFilledDocxOnDisk($report)
+        ) {
+            try {
+                $docxImport->ensureLatestFilledDocxForDownload($report);
+                $report->refresh();
+            } catch (\Throwable $e) {
+                \Log::warning('Show view: filled DOCX regenerate skipped: ' . $e->getMessage(), [
+                    'report_id' => $report->id,
+                ]);
+            }
+        }
+        // Same file as Download PDF/DOCX — real page count, not soft HTML A4 estimate.
+        if ($docxImport->hasFilledDocxOnDisk($report)) {
+            $docxPdfPreviewUrl = route('reports.docx-import.preview-pdf', $report)
+                . '?v=' . rawurlencode((string) (@filemtime(
+                    storage_path('app/public/' . ltrim((string) $report->docx_filled_path, '/'))
+                ) ?: time()));
+        }
+        // HTML soft preview kept as fallback when PDF is unavailable.
+        if ($docxPdfPreviewUrl === null) {
+            $docxPreviewHtml = $docxImport->buildShowPreviewHtml($report);
+        }
+        $docxTocPageMap = $docxImport->tocPageMapFromFields(
+            is_array($report->docx_import_fields) ? $report->docx_import_fields : []
+        );
     }
 
-    return view('reports.show', compact('report','bodyHtml','currentStep','preSteps','postSteps','docxPreviewHtml'));
+    return view('reports.show', compact(
+        'report',
+        'bodyHtml',
+        'currentStep',
+        'preSteps',
+        'postSteps',
+        'docxPreviewHtml',
+        'docxTocPageMap',
+        'docxPdfPreviewUrl'
+    ));
 }
 
 private function lockAllFields(string $html): string
@@ -769,6 +807,7 @@ private function lockAllFields(string $html): string
             'stage'              => 'pre',
             'status'             => 'pre_returned',   // 👈 goes to creator
             'current_step_order' => 0,
+            'docx_import_status' => $report->docx_import_path ? 'pending' : $report->docx_import_status,
         ]);
 
         $report->refresh();
@@ -818,13 +857,14 @@ private function lockAllFields(string $html): string
     $baseHtml = $report->rendered_html ?: ($report->template->body_html ?? '');
     $rendered = $this->injectValuesIntoHtml($baseHtml, $data);
 
-    // 🔹 Send back to creator
+    // 🔹 Send back to creator — reopen DOCX fill like a fresh pending draft.
     $report->update([
         'data'               => $data,
         'rendered_html'      => $rendered,
         'stage'              => 'post',
         'status'             => 'post_returned',   // 👈 NEW STATUS
         'current_step_order' => 0,
+        'docx_import_status' => $report->docx_import_path ? 'pending' : $report->docx_import_status,
     ]);
     $report->refresh();
     ProtocolAuditLogger::recordRejected($report, $remark);
@@ -2666,6 +2706,14 @@ public function downloadAttachment(Report $report, int $index)
 
 public function downloadApprovedWord(Report $report)
 {
+    // NEQ: download only after full POST chain (Prepared → Checked → Approved).
+    if (
+        ($report->import_source ?? '') === 'new_equipment_qualification'
+        && ($report->status ?? '') !== 'approved'
+    ) {
+        abort(403, 'Download is available only after all post-approval steps are complete.');
+    }
+
     if (! empty($report->docx_import_path) && $report->docx_import_status === 'completed') {
         app(DocxImportController::class)->ensureLatestFilledDocxForDownload($report->fresh());
         $report->refresh();
@@ -2676,7 +2724,10 @@ public function downloadApprovedWord(Report $report)
     // Prefer the latest regenerated DOCX path (kept in sync during approvals).
     if (!empty($report->docx_filled_path) && Storage::disk('public')->exists($report->docx_filled_path)) {
         $directPath = Storage::disk('public')->path($report->docx_filled_path);
-        $downloadName = basename((string) $report->docx_filled_path);
+        // Use original protocol id (REQ1 / REV2), not storage uuid filename.
+        $code = trim($report->displayCode());
+        $safe = preg_replace('/[^\w.\-]+/', '_', $code) ?: ('report-' . $report->id);
+        $downloadName = $safe . '.docx';
 
         return $this->downloadWordFile($directPath, $downloadName);
     }
@@ -2839,15 +2890,8 @@ $font = null; // default font
 //     [0, 0, 0]
 // );
 
-// Second line (Document Info - Centered)
-$canvas->page_text(
-    $width / 2 - 120,
-    $height - 40,
-    "ANNEX_xxx_xxx_XXXXX | (1.0) | SOP_XXXX_XXX_00000 | CLASS I",
-    $font,
-    9,
-    [0, 0, 0]
-);
+// Do not invent ANNEX_xxx | SOP_XXXX | CLASS I — original HVAC / revalidation
+// templates have no such footer line.
 
 // Third line (Page Number - Right aligned)
 $canvas->page_text(
@@ -2878,6 +2922,15 @@ public function revalidationProtocols(Request $request)
 public function requalificationProtocols(Request $request)
 {
     return $this->renderProtocolList($request, 'Requalification', 'requalification');
+}
+
+public function newEquipmentQualificationProtocols(Request $request)
+{
+    return $this->renderProtocolList(
+        $request,
+        'New Equipment Qualification',
+        'new_equipment_qualification'
+    );
 }
 
 private function renderProtocolList(Request $request, string $protocolListTitle, ?string $importSource = null)

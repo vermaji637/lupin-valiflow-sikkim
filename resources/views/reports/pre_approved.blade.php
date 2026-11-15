@@ -105,6 +105,7 @@
                             $status = strtoupper($r->status);
 
                             $badgeClass = match($r->status) {
+                                'post_setup'   => 'badge bg-warning text-dark',
                                 'pre_pending'  => 'badge bg-warning text-dark',
                                 'post_pending' => 'badge bg-info text-dark',
                                 'pre_approved' => 'badge bg-primary text-light',
@@ -195,6 +196,11 @@
                                     @elseif($r->status === 'pre_approved')
                                         <a href="{{ route('reports.docx-import.fill-form', $r) }}" class="btn btn-sm btn-primary">
                                             Fill Execution &amp; Submit
+                                        </a>
+                                    @elseif(($r->import_source ?? '') === 'new_equipment_qualification'
+                                        && ($r->status === 'post_setup' || ($r->docx_import_status === 'pending' && $r->stage === 'post')))
+                                        <a href="{{ route('reports.docx-import.fill-form', $r) }}" class="btn btn-sm btn-primary">
+                                            Fill &amp; Submit for Approval
                                         </a>
                                     @else
                                         <a href="{{ route('reports.show', $r) }}" class="btn btn-sm btn-secondary">

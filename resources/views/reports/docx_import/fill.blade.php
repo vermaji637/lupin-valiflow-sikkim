@@ -154,12 +154,15 @@ body.premium-app #docxFillForm .docx-preview-wrapper {
     page-break-after: always;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    /* Keep body growing into free space. space-between left a blank band
+       between content and footer, so pull-back thought the page was full. */
+    justify-content: flex-start;
     overflow: hidden; /* Page height NEVER expands */
 }
 
 .docx-page-body {
-    flex: 1 1 auto;
+    flex: 1 1 0;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -267,6 +270,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper .docx-summary-header-card t
     font-size: 10px;
     font-weight: 600;
     color: #475569;
+    flex: 0 0 auto;
     flex-shrink: 0;
 }
 
@@ -548,6 +552,45 @@ body.premium-app #docxFillForm .docx-preview-wrapper table.header-table input[ty
     vertical-align: baseline;
 }
 
+/*
+ * NEQ-only: yellow letterhead value inputs must not overflow into the next
+ * label cell (e.g. "Equipment /system ID No." was hidden under equipment name).
+ * Requalification / revalidation keep the rules above unchanged.
+ */
+body.premium-app #docxFillForm.docx-import-neq .docx-preview-wrapper .docx-page-official-header table.header-table td {
+    overflow: hidden !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+    white-space: normal !important;
+}
+body.premium-app #docxFillForm.docx-import-neq .docx-preview-wrapper .docx-page-official-header table.header-table input[type="text"].docx-input,
+body.premium-app #docxFillForm.docx-import-neq .docx-preview-wrapper table.header-table input[type="text"].docx-input {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+/* NEQ-only: tighten empty paras / letterhead→approval spacing to match Word. */
+body.premium-app #docxFillForm.docx-import-neq .docx-preview-wrapper .docx-page-official-header {
+    margin-bottom: 4px !important;
+}
+body.premium-app #docxFillForm.docx-import-neq .docx-preview-wrapper .docx-page-body > p.docx-para:empty {
+    margin: 2px 0 !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+    line-height: 1.1 !important;
+}
+body.premium-app #docxFillForm.docx-import-neq .docx-preview-wrapper .docx-page-body > table.docx-table {
+    margin-top: 4px;
+    margin-bottom: 8px;
+}
+body.premium-app #docxFillForm.docx-import-neq .docx-preview-wrapper td.docx-cell.locked.readonly,
+body.premium-app #docxFillForm.docx-import-neq .docx-preview-wrapper td.docx-cell.locked {
+    background: transparent !important;
+}
+
 body.premium-app #docxFillForm .docx-preview-wrapper input[type="text"].docx-input:focus,
 body.premium-app #docxFillForm .docx-preview-wrapper input[type="text"].docx-input-inline:focus,
 body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-input:focus {
@@ -765,7 +808,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
         </div>
     @endif
 
-    @if(($importSource ?? '') === 'requalification' && empty($requalFillLocked))
+    @if(empty($requalFillLocked) && in_array(($importSource ?? ''), ['requalification', 'new_equipment_qualification'], true))
         <div id="docxEsignDock" aria-label="E-Sign">
             <button type="button" class="btn btn-light" id="btnEsignStamp"
                     title="Click a cell, then stamp your name and today's date">
@@ -815,7 +858,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                 @elseif(in_array(($importSource ?? ''), ['requalification', 'revalidation'], true) && ($report->status ?? '') === 'pre_approved')
                                     Pre-approval complete! Protocol structure is locked. Fill observed values, pass/fail results, and submit for Post-Approval.
                                 @elseif(($importSource ?? '') === 'new_equipment_qualification')
-                                    Fill New Equipment Qualification — empty cells are editable; pre-approved content stays locked.
+                                    Fill New Equipment Qualification — draft fields stay editable until you submit for approval. Use E-Sign to stamp name and date.
                                 @elseif(!empty($useTablePreview))
                                     Document table layout — empty cells are editable, filled cells are read-only.
                                 @else
@@ -837,7 +880,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                     </div>
                 </div>
 
-                <form action="{{ route('reports.docx-import.fill', $report) }}" method="POST" id="docxFillForm" class="esign-required {{ (!empty($requalFillLocked) && empty($isPreApprovalMode)) ? 'requal-fill-locked' : '' }}" enctype="multipart/form-data">
+                <form action="{{ route('reports.docx-import.fill', $report) }}" method="POST" id="docxFillForm" class="esign-required {{ (!empty($requalFillLocked) && empty($isPreApprovalMode)) ? 'requal-fill-locked' : '' }}{{ (($importSource ?? '') === 'new_equipment_qualification') ? ' docx-import-neq' : '' }}" enctype="multipart/form-data">
                     @csrf
                     <input type="hidden" name="password">
                     <input type="hidden" name="table_ops" id="docxTableOpsInput" value="{{ json_encode($report->data['table_ops'] ?? []) }}">
@@ -1022,11 +1065,14 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                         @php
                             $presentApproverRoles = $presentApproverRoles ?? [];
                             $hasApproverFields = count($presentApproverRoles) > 0;
+                            $isNeqFill = (($importSource ?? '') === 'new_equipment_qualification');
                         @endphp
 
-                        {{-- POST approver IDs: only for roles that exist in this report's parsed DOCX fields. --}}
+                        {{-- POST approver IDs: filled from Name dropdowns inside the document preview. --}}
                         @if($hasApproverFields)
-                            @php $draftApprovers = $draftApprovers ?? []; @endphp
+                            @php
+                                $draftApprovers = $draftApprovers ?? [];
+                            @endphp
                             @if(in_array('post_prepared_by_name', $presentApproverRoles, true))
                                 <input type="hidden" name="post_prepared_by_name" id="post_prepared_by_name_value"
                                        value="{{ old('post_prepared_by_name', $draftApprovers['post_prepared_by_name'] ?? auth()->id()) }}">
@@ -1045,7 +1091,8 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                             @endforeach
                         @endif
 
-                        @if(!empty($usesApprovalPage) && $hasApproverFields)
+                        {{-- Requal/reval: keep legacy guidance. NEQ: in-document Name dropdowns only. --}}
+                        @if(empty($isNeqFill) && !empty($usesApprovalPage) && $hasApproverFields)
                             <div class="alert alert-info mb-4">
                                 <i class="fas fa-user-check mr-1"></i>
                                 <strong>Approval Page:</strong> Select <strong>Performed By</strong>,
@@ -1054,7 +1101,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                 <strong>Performed By</strong> defaults to you
                                 ({{ trim((auth()->user()->first_name ?? '') . ' ' . (auth()->user()->last_name ?? '')) ?: 'Current user' }}).
                             </div>
-                        @elseif($hasApproverFields)
+                        @elseif(empty($isNeqFill) && $hasApproverFields)
                             <div class="alert alert-info mb-4">
                                 <i class="fas fa-user-check mr-1"></i>
                                 Select approvers in the <strong>Prepared By</strong>, <strong>Checked By</strong>, and
@@ -1338,6 +1385,27 @@ document.addEventListener('DOMContentLoaded', function () {
     let selectedRow = null;
     let selectedTable = null;
 
+    // Draft can accumulate identical insert ops (1 Add → many). Keep one per content fingerprint.
+    (function collapseDuplicateTableOps() {
+        if (!Array.isArray(tableOps) || !tableOps.length) return;
+        const out = [];
+        const seenContent = new Set();
+        tableOps.forEach(function (op) {
+            if (!op || op.op !== 'insert') {
+                out.push(op);
+                return;
+            }
+            const vals = Array.isArray(op.values)
+                ? op.values.map(function (v) { return String(v || '').replace(/\s+/g, ' ').trim().toLowerCase(); }).join('|')
+                : '';
+            const key = String(op.table) + '#' + vals;
+            if (vals && seenContent.has(key)) return;
+            if (vals) seenContent.add(key);
+            out.push(op);
+        });
+        tableOps = out;
+    })();
+
     function createNewA4Page(sourcePage, tIdx, sourceTable) {
         const newPage = document.createElement('div');
         newPage.className = 'docx-a4-page';
@@ -1379,8 +1447,19 @@ document.addEventListener('DOMContentLoaded', function () {
         return div;
     }
 
+    function previewA4Pages() {
+        const preview = document.querySelector('.docx-preview-wrapper .docx-preview')
+            || document.querySelector('.docx-preview')
+            || document.querySelector('.docx-preview-wrapper');
+        if (!preview) {
+            return [];
+        }
+        return Array.from(preview.querySelectorAll('.docx-a4-page'));
+    }
+
     function updateAllPageNumbers() {
-        const allPages = Array.from(document.querySelectorAll('.docx-a4-page'));
+        // Only number sheets inside the live preview — never reuse a cloned "17 of 17" header.
+        const allPages = previewA4Pages();
         const total = allPages.length;
 
         allPages.forEach(function (page, idx) {
@@ -1388,42 +1467,54 @@ document.addEventListener('DOMContentLoaded', function () {
             page.setAttribute('data-page-number', String(pNum));
             page.id = 'docxPage' + pNum;
 
-            // Update Header page numbers
-            const headerTbl = page.querySelector('.docx-page-official-header');
-            if (headerTbl) {
-                headerTbl.querySelectorAll('.current-page-num').forEach(function (el) {
-                    el.textContent = String(pNum);
-                });
-                headerTbl.querySelectorAll('.total-pages-count').forEach(function (el) {
-                    el.textContent = String(total);
-                });
-                headerTbl.querySelectorAll('td').forEach(function (td) {
-                    if (/page\s*\d+\s*of\s*\d+/i.test(td.textContent)) {
-                        td.innerHTML = 'Page <span class="current-page-num">' + pNum + '</span> of <span class="total-pages-count">' + total + '</span>';
-                    }
-                });
-            }
+            // Update every marker on this sheet (header + footer).
+            page.querySelectorAll('.current-page-num').forEach(function (el) {
+                el.textContent = String(pNum);
+            });
+            page.querySelectorAll('.total-pages-count').forEach(function (el) {
+                el.textContent = String(total);
+            });
 
-            // Update Footer page numbers
+            // Plain-text / broken markup fallback (continuation clones often keep "Page 17 of 17").
+            page.querySelectorAll('.docx-page-official-header td').forEach(function (td) {
+                const text = (td.textContent || '').replace(/\s+/g, ' ').trim();
+                if (!/page\s*\d+\s*of\s*\d+/i.test(text)) {
+                    return;
+                }
+                if (td.querySelector('.current-page-num') && td.querySelector('.total-pages-count')) {
+                    return;
+                }
+                const keepLabel = /page\s*no\.?/i.test(text);
+                td.innerHTML = (keepLabel ? 'PAGE NO.<br>' : '')
+                    + 'Page <span class="current-page-num">' + pNum
+                    + '</span> of <span class="total-pages-count">' + total + '</span>';
+            });
+
             const footerEl = page.querySelector('.docx-page-official-footer');
             if (footerEl) {
-                const pageSpan = footerEl.querySelector('.docx-footer-page');
-                if (pageSpan) {
-                    pageSpan.innerHTML = 'Page <span class="current-page-num">' + pNum + '</span> of <span class="total-pages-count">' + total + '</span>';
+                let pageSpan = footerEl.querySelector('.docx-footer-page');
+                if (!pageSpan) {
+                    pageSpan = footerEl;
+                }
+                if (!pageSpan.querySelector('.current-page-num')) {
+                    pageSpan.innerHTML = 'Page <span class="current-page-num">' + pNum
+                        + '</span> of <span class="total-pages-count">' + total + '</span>';
                 }
             }
         });
 
-        // Update Dividers
-        const dividers = Array.from(document.querySelectorAll('.docx-page-break-indicator'));
-        dividers.forEach(function (div, idx) {
+        // Dividers sit between sheets: first divider = start of page 2.
+        const previewRoot = document.querySelector('.docx-preview-wrapper .docx-preview')
+            || document.querySelector('.docx-preview')
+            || document.querySelector('.docx-preview-wrapper')
+            || document;
+        Array.from(previewRoot.querySelectorAll('.docx-page-break-indicator')).forEach(function (div, idx) {
             const badge = div.querySelector('.docx-page-break-badge');
             if (badge) {
                 badge.innerHTML = '<i class="fas fa-file-alt mr-1"></i> Page ' + (idx + 2);
             }
         });
 
-        // Update Page Jump selector
         const selectJump = document.getElementById('docxSelectPageJump');
         if (selectJump) {
             const curr = selectJump.value || '1';
@@ -1461,9 +1552,42 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (lastRow.offsetHeight + 12 >= pageBody.clientHeight && last.rows.length <= 2 && pageBody.childElementCount === 1) {
                     break;
                 }
+                // Keep Sr.No 1 visible: if only header+one data row remain and still
+                // overfull, move the whole leftover table instead of clipping row 1.
+                if (last.rows.length <= 2) {
+                    const nextPage = followingA4Page(page) || createContinuationPage(page);
+                    const nextBody = nextPage.querySelector('.docx-page-body');
+                    const tIdx = last.getAttribute('data-table-index') || '';
+                    const existing = tIdx
+                        ? nextBody.querySelector('table.docx-table[data-table-index="' + tIdx + '"]')
+                        : null;
+                    if (existing && existing !== last) {
+                        const dataRows = Array.from(last.rows).slice(1);
+                        const hostHeader = existing.rows[0];
+                        dataRows.reverse().forEach(function (r) {
+                            if (hostHeader) hostHeader.after(r);
+                            else existing.insertBefore(r, existing.rows[0] || null);
+                        });
+                        last.remove();
+                    } else {
+                        nextBody.insertBefore(last, nextBody.firstChild);
+                    }
+                    continue;
+                }
                 const before = lastRow.previousElementSibling;
-                placeRowAtStart(continuationTable(page, last), lastRow);
+                const cont = continuationTable(page, last);
+                placeRowAtStart(cont, lastRow);
                 if (last.contains(lastRow) || (before && before.nextElementSibling === lastRow)) break;
+                if (last.rows.length === 2) {
+                    const maybeFirst = last.rows[1];
+                    if (maybeFirst && maybeFirst.getAttribute('data-row-index') === '1') {
+                        const hostRow2 = Array.from(cont.rows).find(function (r) {
+                            return r.getAttribute('data-row-index') === '2';
+                        });
+                        if (hostRow2) cont.insertBefore(maybeFirst, hostRow2);
+                        else placeRowAtStart(cont, maybeFirst);
+                    }
+                }
                 continue;
             }
 
@@ -1545,6 +1669,14 @@ document.addEventListener('DOMContentLoaded', function () {
         return next;
     }
 
+    function precedingA4Page(page) {
+        let prev = page ? page.previousElementSibling : null;
+        while (prev && !prev.classList.contains('docx-a4-page')) {
+            prev = prev.previousElementSibling;
+        }
+        return prev;
+    }
+
     function createContinuationPage(sourcePage) {
         const newPage = document.createElement('div');
         newPage.className = 'docx-a4-page';
@@ -1570,6 +1702,8 @@ document.addEventListener('DOMContentLoaded', function () {
         const divider = createPageBreakIndicator();
         sourcePage.after(divider);
         divider.after(newPage);
+        // Cloned header still says e.g. "Page 17 of 17" — renumber immediately.
+        updateAllPageNumbers();
         return newPage;
     }
 
@@ -1590,7 +1724,13 @@ document.addEventListener('DOMContentLoaded', function () {
         table.className = sourceTable.className;
         if (tIdx !== '') table.setAttribute('data-table-index', tIdx);
         const header = sourceTable.rows[0];
-        if (header && header.querySelector('th')) {
+        const headerIsHeader = header && (
+            header.querySelector('th')
+            || header.getAttribute('data-row-index') === '0'
+            || header.classList.contains('docx-table-header')
+            || !!header.querySelector('.docx-table-header')
+        );
+        if (headerIsHeader) {
             const clonedHeader = header.cloneNode(true);
             clonedHeader.classList.remove('docx-selected-row');
             clonedHeader.querySelectorAll('input, textarea, select').forEach(function (el) {
@@ -1625,6 +1765,12 @@ document.addEventListener('DOMContentLoaded', function () {
         if (last.classList.contains('docx-toc-card')) {
             const lines = last.querySelectorAll(':scope > .docx-toc-line');
             if (lines.length > 1) {
+                // Avoid creating a near-empty TOC sheet for a single leftover line
+                // when overflow is only slight — keep the line on this page.
+                const overflow = Math.max(0, body.scrollHeight - body.clientHeight);
+                if (lines.length === 2 && overflow > 0 && overflow <= 40) {
+                    return false;
+                }
                 const line = lines[lines.length - 1];
                 const card = continuationTocCard(page);
                 const firstLine = card.querySelector('.docx-toc-line');
@@ -1636,13 +1782,50 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (last.matches('table.docx-table') && !last.classList.contains('header-table') && last.rows.length > 1) {
             const row = last.rows[last.rows.length - 1];
+            // Unbreakable: one data row taller than the whole sheet.
             if (row.offsetHeight + 12 >= body.clientHeight && last.rows.length <= 2 && body.childElementCount === 1) {
                 return false;
+            }
+            // Header + last data row still overfull (tall mitigation header): move the
+            // whole leftover table so Sr.No 1 is not clipped under overflow:hidden.
+            if (last.rows.length <= 2 && (pageIsOverfull(body) || contentOverflows(body))) {
+                const nextPage = followingA4Page(page) || createContinuationPage(page);
+                const nextBody = nextPage.querySelector('.docx-page-body');
+                const tIdx = last.getAttribute('data-table-index') || '';
+                const existing = tIdx
+                    ? nextBody.querySelector('table.docx-table[data-table-index="' + tIdx + '"]')
+                    : null;
+                if (existing && existing !== last) {
+                    // Merge remaining data rows before the continuation's first data row.
+                    const dataRows = Array.from(last.rows).slice(1);
+                    const hostHeader = existing.rows[0];
+                    dataRows.reverse().forEach(function (r) {
+                        if (hostHeader) hostHeader.after(r);
+                        else existing.insertBefore(r, existing.rows[0] || null);
+                    });
+                    last.remove();
+                } else {
+                    nextBody.insertBefore(last, nextBody.firstChild);
+                }
+                return true;
             }
             const table = continuationTable(page, last);
             const header = table.rows[0];
             if (header && header !== row) header.after(row);
             else table.appendChild(row);
+            // If only header + Sr.No 1 remain on this sheet, move "1" with the
+            // spilled block so it is not clipped under overflow:hidden.
+            if (last.rows.length === 2) {
+                const maybeFirst = last.rows[1];
+                if (maybeFirst && maybeFirst.getAttribute('data-row-index') === '1') {
+                    const hostRow2 = Array.from(table.rows).find(function (r) {
+                        return r.getAttribute('data-row-index') === '2';
+                    });
+                    if (hostRow2) table.insertBefore(maybeFirst, hostRow2);
+                    else if (table.rows[0]) table.rows[0].after(maybeFirst);
+                    else table.appendChild(maybeFirst);
+                }
+            }
             return true;
         }
 
@@ -1673,7 +1856,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function contentOverflows(pageBody) {
         if (!pageBody) return false;
-        return pageEdge(pageBody) > pageBody.getBoundingClientRect().bottom + 6;
+        const box = pageBody.getBoundingClientRect();
+        const limit = box.top + Math.max(pageBody.clientHeight || 0, box.height || 0) + 6;
+        return pageEdge(pageBody) > limit;
     }
 
     function pageEdge(pageBody) {
@@ -1689,14 +1874,30 @@ document.addEventListener('DOMContentLoaded', function () {
         return last.getBoundingClientRect().bottom;
     }
 
+    function pageContentUsed(pageBody) {
+        if (!pageBody) return 0;
+        const last = pageBody.lastElementChild;
+        if (!last) return 0;
+        const top = pageBody.getBoundingClientRect().top;
+        return Math.max(0, pageEdge(pageBody) - top);
+    }
+
     function pageFreeSpace(pageBody) {
         if (!pageBody) return 0;
-        return pageBody.getBoundingClientRect().bottom - 8 - pageEdge(pageBody);
+        // Use the real body box on the A4 sheet, not content-sized height.
+        const box = pageBody.getBoundingClientRect();
+        const height = Math.max(pageBody.clientHeight || 0, box.height || 0);
+        if (height < 40) {
+            return 0;
+        }
+        return height - pageContentUsed(pageBody) - 8;
     }
 
     function pageIsOverfull(pageBody) {
         if (!pageBody) return false;
-        return pageEdge(pageBody) > pageBody.getBoundingClientRect().bottom - 2;
+        const box = pageBody.getBoundingClientRect();
+        const limit = box.top + Math.max(pageBody.clientHeight || 0, box.height || 0) - 2;
+        return pageEdge(pageBody) > limit;
     }
 
     function rowLabel(row) {
@@ -1734,12 +1935,35 @@ document.addEventListener('DOMContentLoaded', function () {
         return true;
     }
 
+    function isSparseBannerTable(table) {
+        if (!table || !table.rows || table.rows.length > 3) {
+            return false;
+        }
+        const text = (table.innerText || table.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        return /major\s*components|mechanical\s*adjustment|machine\s*performance|general\s*checks/i.test(text);
+    }
+
     function pullTableRowBack(body, sourceTable) {
-        const head = sourceTable.rows[0] && sourceTable.rows[0].querySelector('th') ? sourceTable.rows[0] : null;
+        const head = sourceTable.rows[0] && (
+            sourceTable.rows[0].querySelector('th')
+            || (sourceTable.rows[0].getAttribute('data-row-index') === '0')
+        ) ? sourceTable.rows[0] : null;
         const row = head ? sourceTable.rows[1] : sourceTable.rows[0];
         if (!row) {
             if (!sourceTable.querySelector('[name]')) sourceTable.remove();
             return true;
+        }
+        // Never pull Sr.No 1 back onto the previous sheet when 2+ already
+        // live on this continuation — that clips "1" under overflow:hidden.
+        const pullIdx = row.getAttribute('data-row-index') || '';
+        if (pullIdx === '1') {
+            const hasLater = Array.from(sourceTable.rows || []).some(function (r) {
+                const n = parseInt(r.getAttribute('data-row-index') || '-1', 10);
+                return n >= 2;
+            });
+            if (hasLater) {
+                return false;
+            }
         }
         const last = body.lastElementChild;
         const same = last && last.matches && last.matches('table.docx-table')
@@ -1748,7 +1972,8 @@ document.addEventListener('DOMContentLoaded', function () {
             row.remove();
             return true;
         }
-        if (!same && sourceTable.offsetHeight + 6 < pageFreeSpace(body)) {
+        // Prefer moving whole table when it fits the free band on this sheet.
+        if (!same && sourceTable.offsetHeight + 6 <= pageFreeSpace(body)) {
             return pullBlockBack(body, sourceTable.parentNode, sourceTable);
         }
         let target = same ? last : null;
@@ -1769,7 +1994,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         const marker = row.nextSibling;
         target.appendChild(row);
-        if (pageIsOverfull(body)) {
+        if (pageIsOverfull(body) || pageFreeSpace(body) < -4) {
             if (marker) sourceTable.insertBefore(row, marker);
             else sourceTable.appendChild(row);
             if (created) target.remove();
@@ -1780,20 +2005,57 @@ document.addEventListener('DOMContentLoaded', function () {
         return true;
     }
 
+    function pageHasTocCard(page) {
+        if (!page || !page.querySelector) {
+            return false;
+        }
+        return !!page.querySelector('.docx-page-body .docx-toc-card, .docx-page-body .docx-toc-line');
+    }
+
+    function isBodySectionBlock(el) {
+        if (!el) {
+            return false;
+        }
+        if (el.classList && el.classList.contains('docx-toc-card')) {
+            return false;
+        }
+        const text = (el.dataset && el.dataset.headingText)
+            || (el.innerText || el.textContent || '');
+        const flat = String(text).replace(/\s+/g, ' ').trim();
+        // 1.0 OBJECTIVE / 6.0 PRE-REQUISITES must stay off the TOC sheet.
+        return /^\d+(?:\.\d+)+\s+\S/.test(flat);
+    }
+
     function pullOneBack(page) {
         const body = page.querySelector('.docx-page-body');
         const next = followingA4Page(page);
-        if (!body || !next || pageFreeSpace(body) < 28) return false;
+        if (!body || !next || pageFreeSpace(body) < 36) return false;
         const nextBody = next.querySelector('.docx-page-body');
         const first = nextBody && nextBody.firstElementChild;
         if (!first) return false;
+        // Never pull protocol body onto the Table of Contents page.
+        if (pageHasTocCard(page) && !first.classList.contains('docx-toc-card')) {
+            return false;
+        }
         if (first.matches('table.docx-table') && !first.classList.contains('header-table')) {
             return pullTableRowBack(body, first);
         }
         if (first.classList.contains('docx-toc-card')) {
-            const line = first.querySelector('.docx-toc-line');
             const last = body.lastElementChild;
-            if (line && last && last.classList.contains('docx-toc-card') && first.offsetHeight + 6 >= pageFreeSpace(body)) {
+            if (last && last.classList.contains('docx-toc-card')) {
+                // Whole continuation card fits — pull it back.
+                if (first.offsetHeight + 6 <= pageFreeSpace(body)) {
+                    return pullBlockBack(body, nextBody, first);
+                }
+                // Otherwise pull one TOC line at a time into the previous card.
+                const line = first.querySelector(':scope > .docx-toc-line');
+                if (!line) {
+                    first.remove();
+                    return true;
+                }
+                if (line.offsetHeight + 6 > pageFreeSpace(body)) {
+                    return false;
+                }
                 const marker = line.nextSibling;
                 last.appendChild(line);
                 if (pageIsOverfull(body)) {
@@ -1805,22 +2067,305 @@ document.addEventListener('DOMContentLoaded', function () {
                 return true;
             }
         }
-        return pullBlockBack(body, nextBody, first);
+        if (isBodySectionBlock(first) && pageHasTocCard(page)) {
+            return false;
+        }
+        // Do not leave a short title alone when the next block still fits.
+        if (first.offsetHeight + 6 <= pageFreeSpace(body)) {
+            return pullBlockBack(body, nextBody, first);
+        }
+        return false;
+    }
+
+    function isPureTocPage(page) {
+        const body = page && page.querySelector('.docx-page-body');
+        if (!body || !pageHasTocCard(page)) {
+            return false;
+        }
+        const kids = Array.from(body.children);
+        if (!kids.length) {
+            return false;
+        }
+        return kids.every(function (el) {
+            return el.classList && el.classList.contains('docx-toc-card');
+        });
+    }
+
+    function tocPageIsSparse(page) {
+        if (!isPureTocPage(page)) {
+            return false;
+        }
+        const body = page.querySelector('.docx-page-body');
+        const lines = body.querySelectorAll('.docx-toc-line');
+        // One leftover TOC row (e.g. "10.0 post approval") must not own a whole A4 sheet.
+        if (!(lines.length > 0 && lines.length <= 4)) {
+            return false;
+        }
+        // Only fold continuation orphans — never crush the first TOC page.
+        const prev = precedingA4Page(page);
+        return !!(prev && pageHasTocCard(prev));
+    }
+
+    function lastTocCardOn(page) {
+        const body = page && page.querySelector('.docx-page-body');
+        if (!body) {
+            return null;
+        }
+        const cards = body.querySelectorAll('.docx-toc-card');
+        return cards.length ? cards[cards.length - 1] : null;
+    }
+
+    function pageOverflowPx(pageBody) {
+        if (!pageBody) {
+            return 0;
+        }
+        const box = pageBody.getBoundingClientRect();
+        const limit = box.top + Math.max(pageBody.clientHeight || 0, box.height || 0);
+        return Math.max(0, pageEdge(pageBody) - limit);
+    }
+
+    function compactOrphanTocPages() {
+        // Fold near-empty TOC continuation sheets back onto the previous TOC page.
+        // Body content must never fill a TOC sheet, so orphans otherwise stay blank.
+        let safety = 0;
+        let changed = true;
+        while (changed && safety < 24) {
+            changed = false;
+            safety++;
+            const pages = Array.from(document.querySelectorAll('.docx-preview .docx-a4-page'));
+            for (let i = 1; i < pages.length; i++) {
+                const page = pages[i];
+                if (!tocPageIsSparse(page)) {
+                    continue;
+                }
+                const prev = precedingA4Page(page);
+                if (!prev || !pageHasTocCard(prev)) {
+                    continue;
+                }
+                const prevBody = prev.querySelector('.docx-page-body');
+                const body = page.querySelector('.docx-page-body');
+                const target = lastTocCardOn(prev);
+                if (!target || !prevBody || !body) {
+                    continue;
+                }
+
+                const lines = Array.from(body.querySelectorAll('.docx-toc-line'));
+                if (!lines.length) {
+                    dropEmptySheet(page);
+                    changed = true;
+                    break;
+                }
+
+                lines.forEach(function (line) {
+                    target.appendChild(line);
+                });
+                Array.from(body.querySelectorAll('.docx-toc-card')).forEach(function (card) {
+                    if (!card.querySelector('.docx-toc-line')) {
+                        card.remove();
+                    }
+                });
+
+                // Prefer a slightly tight previous TOC page over a blank continuation sheet.
+                const softLimit = 52;
+                let guard = 0;
+                while (pageOverflowPx(prevBody) > softLimit && guard < 40) {
+                    guard++;
+                    const kept = target.querySelectorAll(':scope > .docx-toc-line');
+                    if (kept.length <= 1) {
+                        break;
+                    }
+                    const lastLine = kept[kept.length - 1];
+                    let card = body.querySelector('.docx-toc-card');
+                    if (!card) {
+                        card = document.createElement('div');
+                        card.className = 'docx-toc-card';
+                        card.setAttribute('data-toc-cont', '1');
+                        body.appendChild(card);
+                    }
+                    card.insertBefore(lastLine, card.firstChild);
+                }
+
+                if (!body.querySelector('.docx-toc-line')) {
+                    dropEmptySheet(page);
+                    changed = true;
+                    break;
+                }
+
+                // Widow/orphan: 1–2 leftover TOC lines must not own a blank A4 sheet.
+                const leftover = body.querySelectorAll('.docx-toc-line').length;
+                if (leftover > 0 && leftover <= 2) {
+                    Array.from(body.querySelectorAll('.docx-toc-line')).forEach(function (line) {
+                        target.appendChild(line);
+                    });
+                    Array.from(body.querySelectorAll('.docx-toc-card')).forEach(function (card) {
+                        card.remove();
+                    });
+                    dropEmptySheet(page);
+                    changed = true;
+                    break;
+                }
+            }
+        }
     }
 
     function fillPageGaps() {
         let page = document.querySelector('.docx-preview .docx-a4-page');
         let pulls = 0;
-        while (page && pulls < 700) {
+        while (page && pulls < 1200) {
             const next = followingA4Page(page);
             if (!next) break;
-            if (pageFreeSpace(page.querySelector('.docx-page-body')) < 28 || !pullOneBack(page)) {
+            const body = page.querySelector('.docx-page-body');
+            const free = pageFreeSpace(body);
+            if (free < 36 || !pullOneBack(page)) {
+                // Sparse title pages (Major components :) must keep pulling rows.
+                const last = body && body.lastElementChild;
+                if (
+                    free >= 60
+                    && last
+                    && last.matches
+                    && last.matches('table.docx-table')
+                    && isSparseBannerTable(last)
+                ) {
+                    const cont = next.querySelector(
+                        '.docx-page-body table.docx-table[data-table-index="'
+                        + (last.getAttribute('data-table-index') || '') + '"]'
+                    ) || next.querySelector('.docx-page-body > table.docx-table');
+                    if (cont && pullTableRowBack(body, cont)) {
+                        pulls++;
+                        dropEmptySheet(next);
+                        continue;
+                    }
+                }
                 page = next;
                 continue;
             }
             pulls++;
             dropEmptySheet(next);
         }
+    }
+
+    function moveBodyOffTocPages() {
+        // 1.0 OBJECTIVE (and later sections) must start after the TOC sheet.
+        Array.from(document.querySelectorAll('.docx-preview .docx-a4-page')).forEach(function (page) {
+            if (!pageHasTocCard(page)) {
+                return;
+            }
+            const body = page.querySelector('.docx-page-body');
+            if (!body) {
+                return;
+            }
+            const movers = Array.from(body.children).filter(function (el) {
+                if (el.classList && el.classList.contains('docx-toc-card')) {
+                    return false;
+                }
+                if (el.querySelector && el.querySelector('.docx-toc-line, .docx-toc-card')) {
+                    return false;
+                }
+                return true;
+            });
+            if (!movers.length) {
+                return;
+            }
+            const next = followingA4Page(page) || createContinuationPage(page);
+            const nextBody = next.querySelector('.docx-page-body');
+            const frag = document.createDocumentFragment();
+            movers.forEach(function (el) {
+                frag.appendChild(el);
+            });
+            nextBody.insertBefore(frag, nextBody.firstChild);
+        });
+    }
+
+    function tableRowIndexes(table) {
+        return Array.from(table.rows || []).map(function (r) {
+            return parseInt(r.getAttribute('data-row-index') || '-1', 10);
+        });
+    }
+
+    function repairSplitTableFirstDataRows() {
+        const tablesByIndex = {};
+        document.querySelectorAll('.docx-preview table.docx-table[data-table-index]').forEach(function (table) {
+            if (table.classList.contains('header-table')) return;
+            const tIdx = table.getAttribute('data-table-index') || '';
+            if (!tIdx) return;
+            if (!tablesByIndex[tIdx]) tablesByIndex[tIdx] = [];
+            tablesByIndex[tIdx].push(table);
+        });
+
+        Object.keys(tablesByIndex).forEach(function (tIdx) {
+            const parts = tablesByIndex[tIdx];
+            if (!parts.length) return;
+
+            const rowMap = {};
+            parts.forEach(function (table) {
+                Array.from(table.rows || []).forEach(function (row) {
+                    const ri = row.getAttribute('data-row-index');
+                    if (ri === null || ri === '') return;
+                    if (!rowMap[ri]) rowMap[ri] = [];
+                    rowMap[ri].push({ table: table, row: row });
+                });
+            });
+
+            // Host = fragment that shows 2+ but is missing 1 (classic clipped split).
+            let host = null;
+            parts.forEach(function (table) {
+                const indexes = tableRowIndexes(table);
+                if (indexes.indexOf(2) !== -1 && indexes.indexOf(1) === -1) {
+                    host = table;
+                }
+            });
+            if (!host) {
+                parts.forEach(function (table) {
+                    if (tableRowIndexes(table).indexOf(2) !== -1) host = table;
+                });
+            }
+
+            // Case A: header+only-row1 stuck on previous sheet while 2+ are on next.
+            parts.forEach(function (table) {
+                const indexes = tableRowIndexes(table);
+                const onlyFirstData = indexes.filter(function (n) { return n > 0; });
+                if (!(indexes.indexOf(0) !== -1 && onlyFirstData.length === 1 && onlyFirstData[0] === 1)) {
+                    return;
+                }
+                const page = table.closest('.docx-a4-page');
+                const next = page ? followingA4Page(page) : null;
+                const cont = next
+                    ? next.querySelector('.docx-page-body table.docx-table[data-table-index="' + tIdx + '"]')
+                    : null;
+                if (!cont || cont === table) return;
+                const contIndexes = tableRowIndexes(cont);
+                if (contIndexes.indexOf(2) === -1) return;
+                host = cont;
+            });
+
+            if (!host) return;
+
+            const firstData = rowMap['1'] && rowMap['1'][0];
+            if (!firstData) return;
+            if (firstData.table === host) {
+                const row2 = Array.from(host.rows).find(function (r) {
+                    return r.getAttribute('data-row-index') === '2';
+                });
+                if (row2 && firstData.row.nextElementSibling !== row2) {
+                    host.insertBefore(firstData.row, row2);
+                }
+                return;
+            }
+
+            const row2 = Array.from(host.rows).find(function (r) {
+                return r.getAttribute('data-row-index') === '2';
+            });
+            if (row2) host.insertBefore(firstData.row, row2);
+            else {
+                const hostHeader = host.rows[0];
+                if (hostHeader) hostHeader.after(firstData.row);
+                else host.insertBefore(firstData.row, host.rows[0] || null);
+            }
+
+            if (firstData.table.rows.length <= 1 && !firstData.table.querySelector('[name]')) {
+                firstData.table.remove();
+            }
+        });
     }
 
     function paginateDocxPreview() {
@@ -1833,13 +2378,17 @@ document.addEventListener('DOMContentLoaded', function () {
         const firstBody = first.querySelector('.docx-page-body');
         if (!firstBody || firstBody.clientHeight < 80) return;
 
+        // Keep protocol body off the TOC page before measuring free space.
+        moveBodyOffTocPages();
+
+        // Pull content into empty bands first.
         fillPageGaps();
 
         let page = document.querySelector('.docx-preview .docx-a4-page');
         let moves = 0;
         while (page && moves < 250) {
             const pageBody = page.querySelector('.docx-page-body');
-            if (!contentOverflows(pageBody)) {
+            if (!contentOverflows(pageBody) && !pageIsOverfull(pageBody)) {
                 page = followingA4Page(page);
                 continue;
             }
@@ -1852,10 +2401,23 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             moves++;
             const rowStillHere = beforeRow && pageBody.contains(beforeRow);
-            if (contentOverflows(pageBody) && rowStillHere && pageBody.scrollHeight >= before) {
+            if ((contentOverflows(pageBody) || pageIsOverfull(pageBody)) && rowStillHere && pageBody.scrollHeight >= before) {
                 page = followingA4Page(page);
             }
         }
+
+        // Spill can leave blank lower halves. Fill those before numbering.
+        fillPageGaps();
+        // Reunite Sr.No 1 before more pull-back can clip it again.
+        repairSplitTableFirstDataRows();
+        fillPageGaps();
+        // Fold orphan TOC rows (e.g. lone "10.0 post approval") off empty sheets.
+        compactOrphanTocPages();
+        repairSplitTableFirstDataRows();
+        fillPageGaps();
+        moveBodyOffTocPages();
+        // Final pass: Sr.No 1 must sit with 2/3/4 after all pull/spill settles.
+        repairSplitTableFirstDataRows();
 
         document.querySelectorAll('.docx-preview .docx-a4-page').forEach(function (sheet) {
             const sheetBody = sheet.querySelector('.docx-page-body');
@@ -1868,7 +2430,19 @@ document.addEventListener('DOMContentLoaded', function () {
                 : null;
             if (moved && moved.rows.length > 1 && !tail.querySelector('[name]')) tail.remove();
         });
+
+        // Drop pages left with only a break / empty body after pull-back.
+        Array.from(document.querySelectorAll('.docx-preview .docx-a4-page')).forEach(function (sheet) {
+            dropEmptySheet(sheet);
+        });
+        repairSplitTableFirstDataRows();
         updateAllPageNumbers();
+        if (typeof window.dedupeIdenticalAddedRows === 'function') {
+            window.dedupeIdenticalAddedRows();
+        }
+        if (typeof window.syncTocPageNumbers === 'function') {
+            window.syncTocPageNumbers(true);
+        }
     }
 
     window.paginateDocxPreview = paginateDocxPreview;
@@ -1902,11 +2476,21 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     let paginateFrame = null;
+    let tocAfterPaginateTimer = null;
     function scheduleDocxPaginate() {
         if (paginateFrame) cancelAnimationFrame(paginateFrame);
         paginateFrame = requestAnimationFrame(function () {
             unlockDeviationColumns();
             paginateDocxPreview();
+            // Keep TOC in sync whenever layout changes (Add Row, typing, etc.).
+            if (tocAfterPaginateTimer) clearTimeout(tocAfterPaginateTimer);
+            tocAfterPaginateTimer = setTimeout(function () {
+                if (typeof window.prepareDocxTocForSave === 'function') {
+                    window.prepareDocxTocForSave();
+                } else if (typeof window.syncTocPageNumbers === 'function') {
+                    window.syncTocPageNumbers(true);
+                }
+            }, 80);
         });
     }
     window.scheduleDocxPaginate = scheduleDocxPaginate;
@@ -1947,9 +2531,75 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
 
+        function rowContentFingerprint(row) {
+            if (!row) return '';
+            return Array.from(row.cells || []).map(function (cell) {
+                const inp = cell.querySelector('input:not([type="file"]):not([type="hidden"]), textarea, select');
+                if (inp) {
+                    return String(inp.value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+                }
+                return String(cell.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            }).filter(Boolean).join('|');
+        }
+
+        // One Add click must never leave duplicate identical rows (seen: 7.1/test × 3).
+        function dedupeIdenticalAddedRows() {
+            const tables = Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table:not(.header-table)'));
+            const byIdx = {};
+            tables.forEach(function (table) {
+                const idx = table.getAttribute('data-table-index');
+                const key = idx === null ? ('auto:' + tables.indexOf(table)) : String(idx);
+                (byIdx[key] = byIdx[key] || []).push(table);
+            });
+            Object.keys(byIdx).forEach(function (key) {
+                const seen = new Map();
+                byIdx[key].forEach(function (table) {
+                    Array.from(table.rows).forEach(function (row) {
+                        if (row.querySelector('th')) return;
+                        if (row.getAttribute('data-is-added-row') !== '1') return;
+                        const fp = rowContentFingerprint(row);
+                        if (!fp || fp.length < 2) return;
+                        if (seen.has(fp)) {
+                            tableOps = tableOps.filter(function (op) { return op._rowEl !== row; });
+                            row.remove();
+                            return;
+                        }
+                        seen.set(fp, row);
+                    });
+                });
+            });
+            // Collapse same-index table fragments that landed on one sheet.
+            document.querySelectorAll('.docx-preview .docx-a4-page').forEach(function (page) {
+                const body = page.querySelector('.docx-page-body');
+                if (!body) return;
+                const firstByIdx = {};
+                Array.from(body.children).forEach(function (el) {
+                    if (!el.matches || !el.matches('table.docx-table')) return;
+                    const idx = el.getAttribute('data-table-index');
+                    if (idx === null || idx === '') return;
+                    if (!firstByIdx[idx]) {
+                        firstByIdx[idx] = el;
+                        return;
+                    }
+                    const keep = firstByIdx[idx];
+                    Array.from(el.rows).forEach(function (row) {
+                        if (row.querySelector('th')) return;
+                        keep.appendChild(row);
+                    });
+                    el.remove();
+                });
+            });
+            if (typeof syncTableOpsInput === 'function') {
+                syncTableOpsInput();
+            }
+        }
+        window.dedupeIdenticalAddedRows = dedupeIdenticalAddedRows;
+
         // Add Row
+        let addRowBusy = false;
         if (btnAddRow) {
             btnAddRow.addEventListener('click', function () {
+                if (addRowBusy) return;
                 if (!selectedTable || !selectedRow) {
                     const firstTable = document.querySelector('.docx-preview-wrapper table.docx-table:not(.header-table)');
                     if (!firstTable) {
@@ -1961,6 +2611,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     selectedRow = rows[rows.length - 1];
                     selectedRow.classList.add('docx-selected-row');
                 }
+
+                addRowBusy = true;
+                btnAddRow.disabled = true;
 
                 let templateRow = selectedRow;
                 if (templateRow.querySelector('th')) {
@@ -1984,6 +2637,18 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                     if (inp.type !== 'file') {
                         inp.name = 'fields[' + token + ']';
+                    } else {
+                        // Fresh attachment slot — never reuse the source row's location name.
+                        inp.name = 'attachments[' + token + ']';
+                        const hiddenName = inp.parentElement && inp.parentElement.querySelector('.attachment-name-field');
+                        if (hiddenName) {
+                            hiddenName.value = '';
+                            hiddenName.setAttribute('data-attachment-location', token);
+                            hiddenName.name = 'attachment_names[' + token + ']';
+                        }
+                        if (inp.parentElement && inp.parentElement.getAttribute) {
+                            inp.parentElement.setAttribute('data-attachment-location', token);
+                        }
                     }
                     inp.removeAttribute('readonly');
                     inp.disabled = false;
@@ -2029,20 +2694,33 @@ document.addEventListener('DOMContentLoaded', function () {
                 });
                 newRow.classList.add('docx-selected-row');
                 selectedRow = newRow;
+                selectedTable = newRow.closest('table');
 
                 syncTableOpsInput();
+                dedupeIdenticalAddedRows();
 
-                reflowPageOverflow(selectedRow.closest('.docx-a4-page'));
-                const addedPage = newRow.closest('.docx-a4-page');
-                if (addedPage && addedPage !== selectedRow.closest('.docx-a4-page')) {
-                    reflowPageOverflow(addedPage);
-                }
+                reflowPageOverflow(newRow.closest('.docx-a4-page'));
+                // Single paginate + TOC sync (avoid double prepare which re-ran layout thrice).
+                setTimeout(function () {
+                    if (typeof window.paginateDocxPreview === 'function') {
+                        window.paginateDocxPreview();
+                    }
+                    dedupeIdenticalAddedRows();
+                    if (typeof window.syncTocPageNumbers === 'function') {
+                        window.syncTocPageNumbers(true);
+                    }
+                    if (rowInfo) {
+                        rowInfo.innerHTML = '<span class="text-success font-weight-bold">Row Added!</span> TOC page numbers updated.';
+                    }
+                    addRowBusy = false;
+                    btnAddRow.disabled = false;
+                }, 80);
                 newRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
 
                 if (rowInfo) {
                     rowInfo.innerHTML = '<span class="text-success font-weight-bold">Row Added!</span> Type text into the new cells.';
                 }
-                const firstInput = newRow.querySelector('input, textarea');
+                const firstInput = newRow.querySelector('input:not([type="file"]), textarea');
                 if (firstInput) firstInput.focus();
             });
         }
@@ -2118,8 +2796,16 @@ document.addEventListener('DOMContentLoaded', function () {
                     updateAllPageNumbers();
                 }
 
+                setTimeout(function () {
+                    if (typeof window.prepareDocxTocForSave === 'function') {
+                        window.prepareDocxTocForSave();
+                    } else if (typeof window.paginateDocxPreview === 'function') {
+                        window.paginateDocxPreview();
+                    }
+                }, 60);
+
                 if (rowInfo) {
-                    rowInfo.textContent = 'Row deleted. Click any cell to select another row.';
+                    rowInfo.textContent = 'Row deleted. TOC page numbers updated.';
                 }
             });
         }
@@ -2177,10 +2863,19 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    /** Active users for signature-table approver dropdowns (same labels as fill_docx.blade.php). */
-    const docxUsers = @json(
-        $users->map(fn ($u) => ['id' => $u->id, 'label' => $u->display_name])->values()
-    );
+    /** Active users for signature-table / Att01 training approver dropdowns. */
+    @php
+        $docxUsersPayload = $users->map(static function ($u) {
+            return [
+                'id' => $u->id,
+                'label' => $u->display_name,
+                'name' => $u->full_name ?? $u->display_name,
+                'designation' => $u->designation ?? '',
+                'department' => $u->department_label ?? '',
+            ];
+        })->values();
+    @endphp
+    const docxUsers = @json($docxUsersPayload);
 
     const approverHiddenByRole = {
         post_prepared_by_name: document.getElementById('post_prepared_by_name_value'),
@@ -2191,6 +2886,21 @@ document.addEventListener('DOMContentLoaded', function () {
         post_approved_by_quality_name: document.getElementById('post_approved_by_quality_name_value'),
     };
 
+    /** Copy Name dropdown selections from the document into hidden POST approver inputs. */
+    const syncDocxApproverHiddens = function () {
+        document.querySelectorAll('.docx-preview-wrapper select.approver-field').forEach(function (previewSel) {
+            if (previewSel.dataset.isPreApprover === '1') return;
+            const role = previewSel.dataset.approverRole
+                || inferApproverRoleFromApprovalPageTable(previewSel)
+                || inferApproverRoleFromReportApprovalTable(previewSel)
+                || inferApproverRoleFromRow(previewSel);
+            if (!role || !approverHiddenByRole[role]) return;
+            if (previewSel.value) {
+                approverHiddenByRole[role].value = previewSel.value;
+            }
+        });
+    };
+
     /**
      * Infer POST approver role from Veeva approval-page tables (Role | Name | Signature | Date).
      */
@@ -2199,7 +2909,12 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!row) return '';
         const roleCell = row.querySelector('td:first-child');
         const roleText = (roleCell ? roleCell.textContent : '').toLowerCase();
-        if (roleText.includes('performed') || roleText.includes('recorded') || roleText.includes('complied')) {
+        if (
+            roleText.includes('performed')
+            || roleText.includes('recorded')
+            || roleText.includes('complied')
+            || roleText.includes('identified')
+        ) {
             return 'post_prepared_by_name';
         }
         if (roleText.includes('checked') || roleText.includes('reviewed')) {
@@ -2465,22 +3180,121 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
-    /** Hydrate signature-table approver placeholders with user options from DB. */
+    /**
+     * NEQ APPROVAL PAGE (Role | Name | Signature | Date): only Name is a user dropdown.
+     * Signature / Date must stay locked stamps until the selected user approves.
+     */
+    const lockNeqApprovalStampColumns = function () {
+        const form = document.getElementById('docxFillForm');
+        if (!form || !form.classList.contains('docx-import-neq')) return;
+        document.querySelectorAll('.docx-preview-wrapper table.docx-table').forEach(function (table) {
+            const header = table.querySelector('tr');
+            if (!header) return;
+            const headers = Array.from(header.children).map(function (cell) {
+                return (cell.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            });
+            if (headers.length < 4) return;
+            if (headers[0] !== 'role' || headers[1].indexOf('name') < 0) return;
+            if (headers[2].indexOf('signature') < 0 || headers[3].indexOf('date') < 0) return;
+
+            Array.from(table.querySelectorAll('tr')).forEach(function (row, rowIndex) {
+                if (rowIndex === 0) return;
+                const cells = Array.from(row.children);
+                [2, 3].forEach(function (colIdx) {
+                    const cell = cells[colIdx];
+                    if (!cell) return;
+                    const rogue = cell.querySelector('select.approver-field, input.docx-input:not([type="hidden"]), textarea.docx-input');
+                    if (!rogue && cell.classList.contains('approval-stamp-cell')) return;
+                    const locMatch = (rogue && (rogue.getAttribute('data-field-location') || rogue.getAttribute('name') || ''))
+                        .match(/table_\d+_row_\d+_col_\d+/);
+                    const loc = locMatch
+                        ? locMatch[0]
+                        : ((cell.getAttribute('data-field') || '') || '');
+                    cell.className = 'docx-cell locked approval-stamp-cell';
+                    cell.style.background = '#f0f0f0';
+                    cell.style.color = '#555';
+                    cell.innerHTML = '<span class="docx-approval-pending">—</span>'
+                        + (loc
+                            ? '<input type="hidden" name="fields[' + loc + ']" value="">'
+                            : '');
+                });
+            });
+        });
+    };
+
+    /** Att01: Name select → auto-fill Department + Signature on the same row. */
+    const syncTrainingPersonnelFromName = function (sel) {
+        const role = sel.dataset.approverRole || '';
+        if (role !== 'training_personnel_name') return;
+        const userId = sel.value;
+        const selected = docxUsers.find(function (u) { return String(u.id) === String(userId); });
+        const deptLoc = sel.getAttribute('data-department-location') || '';
+        const sigLoc = sel.getAttribute('data-signature-location') || '';
+        const deptInput = deptLoc
+            ? document.querySelector('.docx-preview-wrapper [name="fields[' + deptLoc + ']"]')
+            : null;
+        const sigInput = sigLoc
+            ? document.querySelector('.docx-preview-wrapper [name="fields[' + sigLoc + ']"]')
+            : null;
+        if (deptInput) {
+            deptInput.value = selected ? (selected.department || selected.designation || '') : '';
+            deptInput.dispatchEvent(new Event('input', { bubbles: true }));
+            deptInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (sigInput) {
+            sigInput.value = selected ? (selected.name || selected.label || '') : '';
+            sigInput.dispatchEvent(new Event('input', { bubbles: true }));
+            sigInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    };
+
+    /** Hydrate signature-table / Att01 approver placeholders with user options from DB. */
     const hydrateApproverFields = function () {
+        const isNeqImport = !!(document.getElementById('docxFillForm')
+            && document.getElementById('docxFillForm').classList.contains('docx-import-neq'));
         document.querySelectorAll('select.approver-field').forEach(function (sel) {
             if (sel.dataset.isPreApprover === '1') return;
-            if (/^table_[123]_row_\d+_col_\d+$/.test(sel.dataset.fieldLocation || '')) return;
+            // Requal HVAC pre-sig tables are often table_1/2/3 — skip those only.
+            // NEQ Att11 APPROVAL PAGE is also table_3 and must receive user options.
+            if (
+                !isNeqImport
+                && /^table_[123]_row_\d+_col_\d+$/.test(sel.dataset.fieldLocation || '')
+            ) {
+                return;
+            }
+            let role = sel.dataset.approverRole || '';
+            const isTrainingSelect = role === 'training_personnel_name'
+                || role === 'training_imparted_by_name';
+            // Never hydrate Signature/Date columns on Role|Name|Signature|Date approval pages.
+            // Att01 "Training Imparted by" is also col_3 — allow that through.
+            if (!isTrainingSelect && /_col_[23]$/.test(sel.dataset.fieldLocation || '')) {
+                const table = sel.closest('table');
+                const header = table ? table.querySelector('tr') : null;
+                const headers = header
+                    ? Array.from(header.children).map(function (c) {
+                        return (c.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+                    })
+                    : [];
+                const isApprovalPage = headers[0] === 'role'
+                    && (headers[1] || '').indexOf('name') >= 0
+                    && (headers[2] || '').indexOf('signature') >= 0;
+                if (isApprovalPage || !role) return;
+            }
             if (preApproverRoles.includes(sel.dataset.approverRole || '')) return;
             if (sel.dataset.hydrated === '1') return;
             sel.dataset.hydrated = '1';
 
-            // Post-approval selects must never be required during pre-approval mode
-            if (isPreApprovalMode || document.querySelector('input[name="requal_pre_submit"]')) {
+            // Att01 table Name / Training Imparted by are never mandatory.
+            // Post-approval selects must never be required during pre-approval mode.
+            if (
+                isTrainingSelect
+                || isPreApprovalMode
+                || document.querySelector('input[name="requal_pre_submit"]')
+            ) {
                 sel.removeAttribute('required');
                 sel.required = false;
             }
 
-            let role = sel.dataset.approverRole || '';
             if (!role) {
                 role = inferApproverRoleFromApprovalPageTable(sel);
             }
@@ -2493,14 +3307,27 @@ document.addEventListener('DOMContentLoaded', function () {
                     sel.dataset.approverRole = role;
                 }
             }
-            if (!role) return;
+            // Training / Validation selects already carry approver_role from Python.
+            if (!role && !isTrainingSelect) return;
+            if (!role) role = sel.dataset.approverRole || '';
 
             const hiddenId = approverHiddenByRole[role] ? approverHiddenByRole[role].value : '';
+            const savedName = (sel.parentElement
+                && sel.parentElement.querySelector('input.approver-name-field')
+                    ? sel.parentElement.querySelector('input.approver-name-field').value
+                    : '') || '';
             docxUsers.forEach(function (user) {
                 const opt = document.createElement('option');
                 opt.value = user.id;
                 opt.textContent = user.label;
+                opt.setAttribute('data-name', user.name || user.label || '');
+                opt.setAttribute('data-department', user.department || '');
+                opt.setAttribute('data-designation', user.designation || '');
                 if (String(hiddenId) === String(user.id)) {
+                    opt.selected = true;
+                } else if (!hiddenId && savedName && (
+                    savedName === user.label || savedName === user.name
+                )) {
                     opt.selected = true;
                 }
                 sel.appendChild(opt);
@@ -2510,7 +3337,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 const userId = sel.value;
                 const fieldLoc = sel.dataset.fieldLocation || '';
 
-                if (role && approverHiddenByRole[role]) {
+                // Only real POST workflow roles write hidden IDs; never clear from empty table rows.
+                if (role && approverHiddenByRole[role] && userId) {
                     approverHiddenByRole[role].value = userId;
                 }
 
@@ -2520,11 +3348,13 @@ document.addEventListener('DOMContentLoaded', function () {
                     )
                     : null;
                 const selected = docxUsers.find(function (u) { return String(u.id) === String(userId); });
-                if (nameHidden && selected) {
-                    nameHidden.value = selected.label;
+                if (nameHidden) {
+                    nameHidden.value = selected
+                        ? (selected.name || selected.label || '')
+                        : '';
                 }
 
-                // Date fields stay empty until the user picks a date or an approver stamps on approval.
+                syncTrainingPersonnelFromName(sel);
             });
 
             if (sel.value) {
@@ -2636,7 +3466,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     lockPreApprovedCells();
     setupPreApproverSync();
+    lockNeqApprovalStampColumns();
     hydrateApproverFields();
+    lockNeqApprovalStampColumns();
+    syncDocxApproverHiddens();
     lockPreApprovedCells();
     ensureAttachmentFileInputs();
     prepareDateTimeInputs(false);
@@ -2650,13 +3483,20 @@ document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('select.approver-field').forEach(function (sel) {
                 sel.dispatchEvent(new Event('change'));
             });
+            syncDocxApproverHiddens();
 
-            if (form.querySelector('input[name="requal_pre_submit"]')) {
-                document.querySelectorAll('.docx-preview-wrapper select.approver-field').forEach(function (sel) {
+            // Never block submit on optional Att01 table Name / Training Imparted by.
+            document.querySelectorAll('.docx-preview-wrapper select.approver-field').forEach(function (sel) {
+                const r = sel.dataset.approverRole || '';
+                if (
+                    r === 'training_personnel_name'
+                    || r === 'training_imparted_by_name'
+                    || form.querySelector('input[name="requal_pre_submit"]')
+                ) {
                     sel.removeAttribute('required');
                     sel.required = false;
-                });
-            }
+                }
+            });
         };
 
         const applySubmittingUi = function () {
@@ -2676,6 +3516,9 @@ document.addEventListener('DOMContentLoaded', function () {
         };
 
         form.addEventListener('submit', function () {
+            if (typeof window.prepareDocxTocForSave === 'function') {
+                window.prepareDocxTocForSave();
+            }
             preparePreSubmitFields();
             // Do not lock #btnSubmit before #esignModal confirms; esign:confirmed locks it right before POST.
             if (!form.classList.contains('esign-required')) {
@@ -2684,6 +3527,9 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         form.addEventListener('esign:confirmed', function () {
+            if (typeof window.prepareDocxTocForSave === 'function') {
+                window.prepareDocxTocForSave();
+            }
             preparePreSubmitFields();
             applySubmittingUi();
         });
@@ -2839,10 +3685,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const syncLetterheadCells = function (letterheadKey, value) {
         if (!letterheadKey) return;
-        const text = value == null ? '' : String(value).trim();
+        const text = value == null ? '' : String(value);
         document
             .querySelectorAll('.docx-page-official-header td[data-letterhead-field="' + letterheadKey + '"]')
             .forEach(function (td) {
+                // Keep yellow letterhead inputs fillable — never wipe them with textContent.
+                const input = td.querySelector('input.docx-input, textarea.docx-input, select.docx-input');
+                if (input) {
+                    if (input.value !== text) {
+                        input.value = text;
+                    }
+                    return;
+                }
                 td.textContent = text;
             });
     };
@@ -2899,33 +3753,105 @@ document.addEventListener('DOMContentLoaded', function () {
         propagate(mapping ? mapping.value : (header ? header.value : initial), null);
     };
 
-    syncMappingToHeader(
-        'fill_equipment_name',
-        'header_equipment_name',
-        ['header_0_row_2_col_4', coverLocations.equipment_name],
-        'equipment_name'
-    );
-    syncMappingToHeader(
-        'fill_equipment_id',
-        'header_equipment_id',
-        ['header_0_row_3_col_4', coverLocations.equipment_id],
-        'equipment_id'
-    );
-    syncMappingToHeader(
-        'fill_protocol_document_no',
-        'header_doc_number',
-        ['header_0_row_4_col_2', coverLocations.document_no],
-        'document_no'
-    );
-    syncMappingToHeader(
-        'fill_reference_protocol_no',
-        'header_ref_protocol',
-        ['header_ref_protocol', coverLocations.reference_protocol_no],
-        'reference_protocol_no'
-    );
+    const isNeqLetterhead = !!(document.getElementById('docxFillForm')
+        && document.getElementById('docxFillForm').classList.contains('docx-import-neq'));
+    const uniqLocs = function (locs) {
+        return (Array.isArray(locs) ? locs : [locs]).filter(function (loc, idx, arr) {
+            return !!loc && arr.indexOf(loc) === idx;
+        });
+    };
+
+    if (isNeqLetterhead) {
+        // Att11/Att14 Word letterhead locations — never cross-wire equipment ↔ facility.
+        // Att11: row2=Reference, row3=Equipment name/ID, row4=Facility.
+        syncMappingToHeader(
+            'fill_equipment_name',
+            'header_equipment_name',
+            uniqLocs([coverLocations.equipment_name, 'header_0_row_3_col_2']),
+            'equipment_name'
+        );
+        syncMappingToHeader(
+            'fill_equipment_id',
+            'header_equipment_id',
+            uniqLocs([coverLocations.equipment_id, 'header_0_row_3_col_4']),
+            'equipment_id'
+        );
+        syncMappingToHeader(
+            'fill_facility_section',
+            null,
+            uniqLocs([coverLocations.facility_section, 'header_0_row_4_col_2']),
+            'facility_section'
+        );
+        syncMappingToHeader(
+            'fill_reference_protocol_no',
+            'header_ref_protocol',
+            uniqLocs([
+                coverLocations.reference_protocol_no,
+                coverLocations.reference_document_no,
+                'header_0_row_2_col_2',
+                'header_ref_protocol',
+            ]),
+            'reference_protocol_no'
+        );
+        syncMappingToHeader(
+            'fill_protocol_document_no',
+            'header_doc_number',
+            uniqLocs([coverLocations.document_no]),
+            'document_no'
+        );
+        // Do not map document_title onto header_0_row_3_col_2 (that cell is Equipment Name).
+        if (coverLocations.document_title) {
+            syncMappingToHeader(
+                'fill_document_title',
+                null,
+                uniqLocs([coverLocations.document_title]),
+                'document_title'
+            );
+        }
+    } else {
+        syncMappingToHeader(
+            'fill_equipment_name',
+            'header_equipment_name',
+            ['header_0_row_4_col_2', 'header_0_row_2_col_4', coverLocations.equipment_name],
+            'equipment_name'
+        );
+        syncMappingToHeader(
+            'fill_equipment_id',
+            'header_equipment_id',
+            ['header_0_row_4_col_4', 'header_0_row_3_col_4', coverLocations.equipment_id],
+            'equipment_id'
+        );
+        syncMappingToHeader(
+            'fill_protocol_document_no',
+            'header_doc_number',
+            [coverLocations.document_no, 'header_0_row_4_col_2'].filter(function (loc, idx, arr) {
+                return !!loc && arr.indexOf(loc) === idx;
+            }),
+            'document_no'
+        );
+        syncMappingToHeader(
+            'fill_reference_protocol_no',
+            'header_ref_protocol',
+            ['header_0_row_2_col_2', 'header_ref_protocol', coverLocations.reference_protocol_no],
+            'reference_protocol_no'
+        );
+        syncMappingToHeader(
+            'fill_document_title',
+            null,
+            ['header_0_row_3_col_2', coverLocations.document_title],
+            'document_title'
+        );
+        syncMappingToHeader(
+            'fill_facility_section',
+            null,
+            ['header_0_row_5_col_2', coverLocations.facility_section],
+            'facility_section'
+        );
+    }
 
     const headerFacilityHidden = document.getElementById('header_facility_hidden');
-    if (headerFacilityHidden && headerFacilityHidden.value.trim() !== '') {
+    // Requal only: hidden facility uses header_0_row_2_col_2. NEQ Att11 uses that cell for Reference No.
+    if (!isNeqLetterhead && headerFacilityHidden && headerFacilityHidden.value.trim() !== '') {
         syncLetterheadCells('facility_section', headerFacilityHidden.value);
     }
     const headerVersionHidden = document.getElementById('header_version_hidden');
@@ -3028,6 +3954,7 @@ document.addEventListener('DOMContentLoaded', function () {
             named.value = String(hidden.value);
         }
     });
+    syncDocxApproverHiddens();
 
     // ── Autosave / resume draft (no e-sign, no approval start) ──
     const draftSaveUrl = @json(route('reports.docx-import.draft', $report));
@@ -3090,6 +4017,10 @@ document.addEventListener('DOMContentLoaded', function () {
             draftPending = true;
             draftDirty = true;
             return Promise.resolve(false);
+        }
+        // TOC page numbers must match the final A4 layout before save/approval.
+        if (typeof window.prepareDocxTocForSave === 'function') {
+            window.prepareDocxTocForSave();
         }
         draftSaving = true;
         draftDirty = false;
@@ -3191,11 +4122,18 @@ document.addEventListener('DOMContentLoaded', function () {
             if (draftTimer) {
                 clearTimeout(draftTimer);
             }
+            // Freeze TOC to the same pages the 2nd approver will see.
+            if (typeof window.prepareDocxTocForSave === 'function') {
+                window.prepareDocxTocForSave();
+            }
             if (!form.classList.contains('esign-required')) {
                 finalSubmitting = true;
             }
         });
         form.addEventListener('esign:confirmed', function () {
+            if (typeof window.prepareDocxTocForSave === 'function') {
+                window.prepareDocxTocForSave();
+            }
             finalSubmitting = true;
             if (draftTimer) {
                 clearTimeout(draftTimer);
@@ -3228,12 +4166,107 @@ document.addEventListener('DOMContentLoaded', function () {
 
     /* ── Table of Contents (TOC) Auto-Sync Page Numbers ── */
     (function () {
+        function headingTextOf(el) {
+            if (!el) return '';
+            const prefixEl = el.querySelector && el.querySelector(':scope > .docx-num-prefix, .docx-num-prefix');
+            const prefix = prefixEl ? (prefixEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+            const fromData = (el.dataset && el.dataset.headingText || '').replace(/\s+/g, ' ').trim();
+            let fromDom = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            // Prefer short heading title; avoid swallowing an entire table cell.
+            if (fromDom.length > 180 && fromData) {
+                fromDom = fromData;
+            }
+            if (prefix && !new RegExp('^' + prefix.replace(/\./g, '\\.') + '\\b').test(fromDom)) {
+                return (prefix + ' ' + (fromData || fromDom)).replace(/\s+/g, ' ').trim();
+            }
+            if (/\d+(?:\.\d+)/.test(fromDom)) {
+                return fromDom;
+            }
+            if (fromData && fromDom && fromData.toUpperCase() !== fromDom.toUpperCase()) {
+                return (fromData + ' ' + fromDom).replace(/\s+/g, ' ').trim();
+            }
+            return fromDom || fromData;
+        }
+
+        function pageNumberFromSheet(page, pages) {
+            if (!page) {
+                return 0;
+            }
+            // Same digit the sheet header/footer shows ("Page 18 of 19").
+            const stamped = page.querySelector(
+                '.docx-page-official-header .current-page-num, .docx-page-official-footer .current-page-num, .current-page-num'
+            );
+            if (stamped) {
+                const n = parseInt((stamped.textContent || '').replace(/\D+/g, ''), 10);
+                if (!isNaN(n) && n > 0) {
+                    return n;
+                }
+            }
+            const attr = parseInt(page.getAttribute('data-page-number') || '', 10);
+            if (!isNaN(attr) && attr > 0) {
+                return attr;
+            }
+            const list = pages || (typeof previewA4Pages === 'function'
+                ? previewA4Pages()
+                : Array.from(document.querySelectorAll('.docx-preview .docx-a4-page')));
+            const index = list.indexOf(page);
+            return index >= 0 ? (index + 1) : 0;
+        }
+
+        function realPageNumberOf(el) {
+            if (!el || !el.closest) {
+                return 0;
+            }
+            const pages = typeof previewA4Pages === 'function'
+                ? previewA4Pages()
+                : Array.from(document.querySelectorAll('.docx-preview .docx-a4-page'));
+
+            // After pagination, the owning A4 sheet is ground truth (fixes 15.0 → 17 while
+            // the visible Revision History heading lives on stamped page 18).
+            const domPage = el.closest('.docx-a4-page');
+            if (domPage && el.closest('.docx-page-body')) {
+                const domNum = pageNumberFromSheet(domPage, pages);
+                if (domNum > 0) {
+                    return domNum;
+                }
+            }
+
+            // Geometry fallback: best-fit sheet (not first hit) for mid-reflow orphans.
+            if (pages.length) {
+                const rect = el.getBoundingClientRect();
+                const y = rect.top + Math.min(8, Math.max(1, rect.height / 2));
+                let best = null;
+                let bestEdge = -1;
+                for (let i = 0; i < pages.length; i++) {
+                    const box = pages[i].getBoundingClientRect();
+                    if (y < box.top - 2 || y > box.bottom + 2) {
+                        continue;
+                    }
+                    const edge = Math.min(y - box.top, box.bottom - y);
+                    if (edge > bestEdge) {
+                        bestEdge = edge;
+                        best = pages[i];
+                    }
+                }
+                if (best) {
+                    return pageNumberFromSheet(best, pages);
+                }
+            }
+            return pageNumberFromSheet(domPage, pages);
+        }
+
+        function extractSecNum(text) {
+            const m = String(text || '').trim().match(/^(\d+(?:\.\d+)+)\b/);
+            return m ? m[1] : '';
+        }
+
         function syncTocPageNumbers(silent) {
             const preview = document.querySelector('.docx-preview-wrapper') || document.querySelector('.docx-preview');
             if (!preview) return;
 
-            const tocInputs = Array.from(document.querySelectorAll('.docx-toc-page-input'));
-            if (tocInputs.length === 0) return;
+            const tocInputs = Array.from(preview.querySelectorAll('.docx-toc-page-input'));
+            const tocSpans = Array.from(preview.querySelectorAll('.docx-toc-line .toc-page'));
+            if (tocInputs.length === 0 && tocSpans.length === 0) return;
 
             const syncBtn = document.getElementById('btnAutoSyncToc');
             if (syncBtn && !silent) {
@@ -3243,80 +4276,270 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             try {
-                // Find potential section headings in preview DOM
-                const candidates = Array.from(
-                    preview.querySelectorAll('.docx-heading-target, p.docx-para, th.docx-cell, td.docx-cell, h1, h2, h3, h4, h5')
-                ).filter(function (el) {
-                    return !el.closest('.docx-toc-card') && !el.closest('.docx-toc-line') && !el.classList.contains('docx-toc-page-input');
-                });
+                // Keep A4 sheet numbers current before reading them.
+                if (typeof updateAllPageNumbers === 'function') {
+                    updateAllPageNumbers();
+                }
 
-                const previewRect = preview.getBoundingClientRect();
-                const previewTop = previewRect.top + window.scrollY;
+                const a4Pages = Array.from(preview.querySelectorAll('.docx-a4-page'));
+                const totalPages = a4Pages.length;
 
-                // An A4 page at 96 DPI has standard height ~1123px.
-                // With top/bottom margins, body content height is approx 1000px to 1080px.
-                const previewWidth = preview.clientWidth || 800;
-                const pageHeight = Math.max(880, Math.round(previewWidth * 1.30));
+                function isTocContext(el) {
+                    return !!(el && el.closest && (
+                        el.closest('.docx-toc-card')
+                        || el.closest('.docx-toc-line')
+                        || el.closest('.docx-page-official-header, .docx-page-official-footer, header, footer')
+                    ));
+                }
 
-                // Find Section 1.0 (OBJECTIVE) as anchor for Page 3
-                let firstHeading = null;
-                for (let i = 0; i < candidates.length; i++) {
-                    const h = candidates[i];
-                    const txt = (h.dataset.headingText || h.textContent || '').trim().toUpperCase();
-                    if (/^(1\.0\s+)?OBJECTIVE\b/.test(txt)) {
-                        firstHeading = h;
-                        break;
+                function hostForPrefix(prefixEl) {
+                    return prefixEl.closest(
+                        'p.docx-para, p.docx-heading-target, .docx-heading-target, .docx-para-edit-wrapper, h1, h2, h3, h4, h5, td.docx-cell, th.docx-cell'
+                    ) || prefixEl.parentElement;
+                }
+
+                // Collect ALL section candidates; pick best by title when resolving TOC rows.
+                // First-wins caused 3.0 RESPONSIBILITY to stick on page 3 after Add Row moved it to 5.
+                const anchors = [];
+                const seen = new Set();
+                // secNum → latest stamped sheet (walk pages top→bottom so 13.0 REFERENCES on 17 wins over stale 15).
+                const sectionPageMap = {};
+
+                function pushAnchor(secNum, el, text) {
+                    if (!secNum || !el || isTocContext(el)) return;
+                    const pageNo = realPageNumberOf(el);
+                    const pageEl = el.closest('.docx-a4-page');
+                    if (pageEl && pageEl.querySelector('.docx-page-body .docx-toc-card, .docx-page-body .docx-toc-line')) {
+                        return;
+                    }
+                    if (pageNo <= 1 && /^\d+\.0$/.test(secNum)) {
+                        return;
+                    }
+                    const flat = String(text || '').replace(/\s+/g, ' ').trim();
+                    const key = secNum + '::' + pageNo + '::' + flat.slice(0, 60);
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    const anchor = {
+                        secNum: secNum,
+                        el: el,
+                        text: flat,
+                        page: pageNo
+                    };
+                    anchors.push(anchor);
+                    if (/^\d+\.0$/.test(secNum) && pageNo > 0) {
+                        const prev = sectionPageMap[secNum];
+                        const titled = /^\d+\.0\s+\S/i.test(flat);
+                        if (!prev || pageNo > prev.page || (pageNo === prev.page && titled)) {
+                            sectionPageMap[secNum] = anchor;
+                        }
                     }
                 }
 
-                // Lupin documents start Section 1.0 on Page 3 (Page 1 = Cover/Pre-approval, Page 2 = TOC)
-                const basePage = 3;
-                const anchorTop = firstHeading
-                    ? (firstHeading.getBoundingClientRect().top + window.scrollY - previewTop)
-                    : (pageHeight * 2);
+                Array.from(preview.querySelectorAll('.docx-heading-target, p.docx-para.docx-heading-target, h1, h2, h3, h4, h5')).forEach(function (el) {
+                    const text = headingTextOf(el);
+                    if (text.length > 160) return;
+                    pushAnchor(extractSecNum(text), el, text);
+                });
 
-                tocInputs.forEach(function (input) {
-                    const secNum = (input.dataset.tocSec || '').trim();
-                    const secTitle = (input.dataset.tocTitle || '').trim().toUpperCase();
-                    const cleanTitle = secTitle.replace(/^\d+(?:\.\d+)*\s*/, '').replace(/[\.\:\-_]+/g, ' ').trim();
-                    const words = cleanTitle.split(/\s+/).filter(function (w) {
-                        return w.length > 2 && !['AND', 'THE', 'FOR', 'ANY'].includes(w);
-                    });
-
-                    let matchedEl = null;
-
-                    // Pass 1: exact section number match (e.g. "1.0", "3.2", "16.0")
-                    if (secNum) {
-                        const secRegex = new RegExp('^' + secNum.replace(/\./g, '\\.') + '(\\s|$|\\:)');
-                        matchedEl = candidates.find(function (h) {
-                            const txt = (h.dataset.headingText || h.textContent || '').trim();
-                            return secRegex.test(txt);
-                        });
+                Array.from(preview.querySelectorAll('.docx-num-prefix')).forEach(function (prefixEl) {
+                    const sec = (prefixEl.textContent || '').replace(/\s+/g, ' ').trim();
+                    if (!/^\d+(?:\.\d+)+$/.test(sec)) return;
+                    // Major TOC sections only from bare list prefixes (avoid 3.1 checklist noise).
+                    if (!/^\d+\.0$/.test(sec)) return;
+                    const host = hostForPrefix(prefixEl);
+                    if (!host || isTocContext(host)) return;
+                    // Attachment grid "7.0 / 7.1" cells must not become TOC section anchors.
+                    if (host.closest && host.closest('table.docx-table') && !host.classList.contains('docx-heading-target')) {
+                        return;
                     }
+                    const text = headingTextOf(host);
+                    if (text.length > 160 && !host.classList.contains('docx-heading-target')) return;
+                    pushAnchor(sec, host, text || sec);
+                });
 
-                    // Pass 2: keyword match if section number not in heading text
-                    if (!matchedEl && words.length > 0) {
-                        matchedEl = candidates.find(function (h) {
-                            const txt = (h.dataset.headingText || h.textContent || '').trim().toUpperCase();
-                            const matchCount = words.filter(function (kw) {
-                                return txt.includes(kw);
-                            }).length;
-                            return matchCount >= Math.min(2, words.length);
-                        });
+                Array.from(preview.querySelectorAll('.docx-page-body p.docx-para, .docx-page-body .docx-para-edit-wrapper')).forEach(function (el) {
+                    if (isTocContext(el)) return;
+                    // Never treat attachment/table grid rows (7.0 Calibration…) as TOC section anchors.
+                    if (el.closest('table.docx-table')) return;
+                    const text = headingTextOf(el);
+                    if (text.length > 140) return;
+                    const sec = extractSecNum(text);
+                    if (!sec || !/^\d+\.0$/.test(sec)) return;
+                    if (!/^\d+\.0\s+\S/.test(text)) return;
+                    pushAnchor(sec, el, text);
+                });
+
+                function normalizeTitle(s) {
+                    return String(s || '').toUpperCase().replace(/[\.\:\-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+                }
+
+                function scoreAnchorForToc(anchor, words) {
+                    const raw = anchor.text || '';
+                    const txt = normalizeTitle(raw);
+                    let score = 0;
+                    // Real section title: "3.0 RESPONSIBILITY"
+                    if (/^\d+\.0\s+\S/i.test(raw)) score += 50;
+                    if (anchor.el && anchor.el.classList && anchor.el.classList.contains('docx-heading-target')) {
+                        score += 35;
                     }
+                    if (words && words.length) {
+                        const hit = words.filter(function (kw) { return txt.includes(kw); }).length;
+                        score += hit * 30;
+                        // Bare "3.0" without the TOC title loses to the real heading.
+                        if (hit === 0) score -= 40;
+                    }
+                    if (raw.length <= 90) score += 12;
+                    if (raw.length <= 50) score += 8;
+                    if (raw.length < 8) score -= 20;
+                    return score;
+                }
 
-                    if (matchedEl) {
-                        const elTop = matchedEl.getBoundingClientRect().top + window.scrollY - previewTop;
-                        let calculatedPage = basePage + Math.floor((elTop - anchorTop + 40) / pageHeight);
-                        if (calculatedPage < 1) calculatedPage = 1;
-
-                        const curVal = parseInt(input.value, 10);
-                        if (isNaN(curVal) || curVal !== calculatedPage) {
-                            input.value = calculatedPage;
-                            input.dispatchEvent(new Event('input', { bubbles: true }));
-                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                function findAnchor(secNum, words) {
+                    const major = secNum && /^\d+$/.test(secNum) ? (secNum + '.0') : secNum;
+                    // Prefer the latest stamped sheet for this section (REFERENCES on 17, not stale 15).
+                    if (major && sectionPageMap[major]) {
+                        const mapped = sectionPageMap[major];
+                        if (words && words.length) {
+                            const txt = normalizeTitle(mapped.text);
+                            const hit = words.some(function (kw) { return txt.includes(kw); });
+                            if (hit || /^\d+\.0\s+\S/i.test(mapped.text)) {
+                                return mapped;
+                            }
+                        } else {
+                            return mapped;
                         }
                     }
+
+                    const want = [];
+                    if (secNum) {
+                        anchors.forEach(function (a) {
+                            if (a.secNum === secNum) want.push(a);
+                        });
+                        if (!want.length && major) {
+                            anchors.forEach(function (a) {
+                                if (a.secNum === major) want.push(a);
+                            });
+                        }
+                    }
+                    if (want.length) {
+                        // Prefer titled matches (e.g. "13.0 REFERENCES") over bare "13.0".
+                        let pool = want;
+                        if (words && words.length) {
+                            const titled = want.filter(function (a) {
+                                const txt = normalizeTitle(a.text);
+                                return words.some(function (kw) { return txt.includes(kw); });
+                            });
+                            if (titled.length) {
+                                pool = titled;
+                            }
+                        }
+                        let best = pool[0];
+                        let bestScore = scoreAnchorForToc(best, words);
+                        let bestPage = realPageNumberOf(best.el) || best.page || 0;
+                        for (let i = 1; i < pool.length; i++) {
+                            const score = scoreAnchorForToc(pool[i], words);
+                            const page = realPageNumberOf(pool[i].el) || pool[i].page || 0;
+                            // Content only grows downward: later sheet wins when scores are close.
+                            if (page > bestPage && score >= bestScore - 40) {
+                                best = pool[i];
+                                bestScore = score;
+                                bestPage = page;
+                            } else if (score > bestScore && page >= bestPage) {
+                                best = pool[i];
+                                bestScore = score;
+                                bestPage = page;
+                            } else if (score > bestScore + 40) {
+                                best = pool[i];
+                                bestScore = score;
+                                bestPage = page;
+                            }
+                        }
+                        return best;
+                    }
+                    if (!words || !words.length) return null;
+                    let best = null;
+                    let bestScore = -1;
+                    let bestPage = 0;
+                    anchors.forEach(function (a) {
+                        if (a.text.length > 120) return;
+                        const score = scoreAnchorForToc(a, words);
+                        const need = Math.min(1, words.length);
+                        const hit = words.filter(function (kw) {
+                            return normalizeTitle(a.text).includes(kw);
+                        }).length;
+                        if (hit < need) return;
+                        const page = realPageNumberOf(a.el) || a.page || 0;
+                        if (score > bestScore || (score === bestScore && page > bestPage)) {
+                            bestScore = score;
+                            bestPage = page;
+                            best = a;
+                        }
+                    });
+                    return best;
+                }
+
+                function tocMetaFrom(el) {
+                    const line = el.closest ? el.closest('.docx-toc-line') : null;
+                    let secNum = ((el.dataset && el.dataset.tocSec) || (line && line.dataset.tocSec) || '').trim();
+                    let secTitle = ((el.dataset && el.dataset.tocTitle) || (line && line.dataset.tocTitle) || '').trim().toUpperCase();
+                    // Live title input may have been edited; prefer it for word matching.
+                    const titleInput = line && line.querySelector('.docx-toc-title-input');
+                    if (titleInput && titleInput.value) {
+                        const live = String(titleInput.value || '').replace(/\s+/g, ' ').trim();
+                        const m = live.match(/^(\d+(?:\.\d+)*)\s*(.*)$/);
+                        if (m) {
+                            if (!secNum) secNum = m[1];
+                            if (m[2]) secTitle = m[2].toUpperCase();
+                        } else if (live) {
+                            secTitle = live.toUpperCase();
+                        }
+                    }
+                    const cleanTitle = normalizeTitle(secTitle.replace(/^\d+(?:\.\d+)*\s*/, ''));
+                    const words = cleanTitle.split(/\s+/).filter(function (w) {
+                        return w.length > 2 && !['AND', 'THE', 'FOR', 'ANY', 'OF'].includes(w);
+                    });
+                    return { secNum: secNum, words: words };
+                }
+
+                function applyPage(node, pageNo, isInput) {
+                    if (!pageNo || pageNo < 1) return;
+                    if (totalPages > 0 && pageNo > totalPages) pageNo = totalPages;
+                    if (isInput) {
+                        const curVal = parseInt(node.value, 10);
+                        if (isNaN(curVal) || curVal !== pageNo) {
+                            node.value = String(pageNo);
+                            if (!silent) {
+                                node.dispatchEvent(new Event('input', { bubbles: true }));
+                                node.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }
+                    } else {
+                        node.textContent = String(pageNo);
+                    }
+                }
+
+                // Walk TOC in order so page numbers stay monotonic like the original Word TOC.
+                const tocNodes = tocInputs.length
+                    ? tocInputs.map(function (input) { return { node: input, input: true }; })
+                    : tocSpans.map(function (span) { return { node: span, input: false }; });
+
+                let lastPage = 0;
+                tocNodes.forEach(function (item) {
+                    const meta = tocMetaFrom(item.node);
+                    const anchor = findAnchor(meta.secNum, meta.words);
+                    // Always re-read the stamped sheet number for the heading's owning page.
+                    let pageNo = anchor ? realPageNumberOf(anchor.el) : 0;
+                    if (pageNo < 1 && anchor) {
+                        pageNo = anchor.page || 0;
+                    }
+                    if (pageNo < 1) {
+                        return;
+                    }
+                    if (lastPage > 0 && pageNo < lastPage) {
+                        pageNo = lastPage;
+                    }
+                    lastPage = pageNo;
+                    applyPage(item.node, pageNo, item.input);
                 });
 
                 if (syncBtn && !silent) {
@@ -3336,22 +4559,75 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
 
+        window.syncTocPageNumbers = syncTocPageNumbers;
+
+        // Paginate twice so signature/select height is included, then write TOC.
+        window.prepareDocxTocForSave = function () {
+            const runPass = function () {
+                if (typeof window.paginateDocxPreview === 'function') {
+                    window.paginateDocxPreview();
+                } else if (typeof window.updateAllPageNumbers === 'function') {
+                    window.updateAllPageNumbers();
+                }
+                if (typeof updateAllPageNumbers === 'function') {
+                    updateAllPageNumbers();
+                }
+                syncTocPageNumbers(true);
+            };
+            runPass();
+            // Force layout, then recompute — fixes 15.0 showing 16 while content is on 17.
+            const preview = document.querySelector('.docx-preview-wrapper, .docx-preview');
+            if (preview) {
+                void preview.offsetHeight;
+            }
+            runPass();
+            return true;
+        };
+
         // Attach to sync button clicks
         document.addEventListener('click', function (e) {
             const btn = e.target.closest('#btnAutoSyncToc, .btn-sync-toc');
             if (btn) {
                 e.preventDefault();
-                syncTocPageNumbers(false);
+                if (typeof window.prepareDocxTocForSave === 'function') {
+                    window.prepareDocxTocForSave();
+                }
+                // Late pass after selects/fonts finish affecting page breaks.
+                setTimeout(function () {
+                    if (typeof window.prepareDocxTocForSave === 'function') {
+                        window.prepareDocxTocForSave();
+                    } else {
+                        syncTocPageNumbers(false);
+                    }
+                }, 320);
             }
         });
 
-        // Auto-run once on load after layout is complete
+        function scheduleTocPrepare(delay) {
+            setTimeout(function () {
+                if (typeof window.prepareDocxTocForSave === 'function') {
+                    window.prepareDocxTocForSave();
+                } else {
+                    syncTocPageNumbers(true);
+                }
+            }, delay);
+        }
+
+        // Auto-run after layout/pagination is complete (and again after selects settle).
         window.addEventListener('DOMContentLoaded', function () {
-            setTimeout(function () { syncTocPageNumbers(true); }, 800);
+            if (typeof window.dedupeIdenticalAddedRows === 'function') {
+                window.dedupeIdenticalAddedRows();
+            }
+            scheduleTocPrepare(1200);
+            scheduleTocPrepare(2200);
         });
 
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
-            setTimeout(function () { syncTocPageNumbers(true); }, 800);
+            if (typeof window.dedupeIdenticalAddedRows === 'function') {
+                window.dedupeIdenticalAddedRows();
+            }
+            scheduleTocPrepare(1200);
+            scheduleTocPrepare(2200);
         }
 
         // Optional debounce auto-sync when dynamic textareas or tables grow
@@ -3359,12 +4635,18 @@ document.addEventListener('DOMContentLoaded', function () {
         document.addEventListener('input', function (e) {
             if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.classList.contains('docx-para-content'))) {
                 clearTimeout(tocDebounce);
-                tocDebounce = setTimeout(function () { syncTocPageNumbers(true); }, 1500);
+                tocDebounce = setTimeout(function () {
+                    if (typeof window.paginateDocxPreview === 'function') {
+                        window.paginateDocxPreview();
+                    } else {
+                        syncTocPageNumbers(true);
+                    }
+                }, 1500);
             }
         });
     })();
 
-    @if(($importSource ?? '') === 'requalification' && empty($requalFillLocked))
+    @if(empty($requalFillLocked) && in_array(($importSource ?? ''), ['requalification', 'new_equipment_qualification'], true))
     (function () {
         const btnEsignStamp = document.getElementById('btnEsignStamp');
         const esignStatusEl = document.getElementById('docxEsignStatus');
@@ -3515,33 +4797,29 @@ document.addEventListener('DOMContentLoaded', function () {
             window.paginateDocxPreview();
         }
         const pageList = function () {
-            return Array.from(document.querySelectorAll('.docx-a4-page'));
+            if (typeof previewA4Pages === 'function') {
+                return previewA4Pages();
+            }
+            return Array.from(document.querySelectorAll('.docx-preview .docx-a4-page, .docx-a4-page'));
         };
-        const pages = pageList();
 
-        if (!pages.length) {
+        if (!pageList().length) {
             navEl.style.display = 'none';
             return;
         }
 
-        const totalPages = pages.length;
         if (selectJump) {
-            selectJump.innerHTML = '';
-            pages.forEach(function (page, idx) {
-                const pageNum = idx + 1;
-                const opt = document.createElement('option');
-                opt.value = String(pageNum);
-                opt.textContent = 'Page ' + pageNum + ' of ' + totalPages;
-                selectJump.appendChild(opt);
-            });
-
             selectJump.addEventListener('change', function () {
+                const pagesNow = pageList();
                 const targetNum = parseInt(selectJump.value, 10);
-                const targetPage = document.getElementById('docxPage' + targetNum) || pages[targetNum - 1];
+                const targetPage = document.getElementById('docxPage' + targetNum) || pagesNow[targetNum - 1];
                 if (targetPage) {
                     targetPage.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
             });
+        }
+        if (typeof window.updateAllPageNumbers === 'function') {
+            window.updateAllPageNumbers();
         }
 
         const getCurrentPageIndex = function () {

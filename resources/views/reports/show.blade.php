@@ -328,38 +328,7 @@
         </div>
     @endif
 
-    {{-- ================= UPLOADED ATTACHMENTS (visible during POST approval + final) ================= --}}
-    @if($userAttachments->count() > 0)
-        <div class="card mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <strong><i class="fas fa-paperclip mr-1"></i> Report Attachments</strong>
-                @if($isFinalApproved)
-                    <a href="{{ route('reports.downloadFolderZip', $report->id) }}" class="btn btn-sm btn-outline-primary">
-                        Download All (ZIP)
-                    </a>
-                @endif
-            </div>
-            <div class="card-body py-2">
-                <ul class="list-group list-group-flush">
-                    @foreach($userAttachments as $att)
-                        @php
-                            $attIndex = (int) ($att['index'] ?? 0);
-                            $attLabel = $att['original_name'] ?? $att['name'] ?? ('Attachment #' . $attIndex);
-                        @endphp
-                        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-                            <span class="text-break mr-3">{{ $attLabel }}</span>
-                            <a href="{{ route('reports.attachments.download', ['report' => $report->id, 'index' => $attIndex]) }}"
-                               class="btn btn-sm btn-outline-primary flex-shrink-0"
-                               target="_blank">
-                                <i class="fas fa-external-link-alt mr-1"></i> Open
-                            </a>
-                        </li>
-                    @endforeach
-                </ul>
-            </div>
-        </div>
-    @endif
-
+    {{-- Report Attachments list removed: use "Download Attachments ZIP" above. --}}
 
     {{-- Report body: DOCX table preview, async fetch, or HTML template --}}
     @php
@@ -409,11 +378,13 @@
         page-break-after: always;
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
+        /* Match fill preview: free space must stay measurable for pull-back. */
+        justify-content: flex-start;
         overflow: hidden;
     }
     body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-page-body {
-        flex: 1 1 auto;
+        flex: 1 1 0;
+        min-height: 0;
         overflow: hidden;
         display: flex;
         flex-direction: column;
@@ -600,7 +571,25 @@
 
     <div class="card mb-4">
         <div class="card-body" id="reportReadonlyBody">
-            @if(!empty($report->docx_import_path) && !empty($docxReadonlyHtml))
+            @if(!empty($docxPdfPreviewUrl ?? null))
+                {{-- Embed only: no Open PDF / print / download chrome on the viewer. --}}
+                <div id="docxPdfPreviewShell" style="position:relative;min-height:70vh;background:#525659;border-radius:6px;overflow:hidden;">
+                    <div id="docxPdfPreviewLoading" class="text-center text-white-50 py-5" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:1;">
+                        <div>
+                            <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+                            <div>Loading preview…</div>
+                            <div class="small mt-2">First load may take a few seconds</div>
+                        </div>
+                    </div>
+                    <iframe
+                        id="docxPdfPreviewFrame"
+                        src="{{ $docxPdfPreviewUrl }}#toolbar=0&navpanes=1&view=FitH"
+                        title="{{ $report->displayCode() }}.docx"
+                        style="width:100%;height:85vh;border:0;background:#525659;"
+                        onload="var el=document.getElementById('docxPdfPreviewLoading'); if(el) el.style.display='none';"
+                    ></iframe>
+                </div>
+            @elseif(!empty($report->docx_import_path) && !empty($docxReadonlyHtml))
                 {{-- Server-rendered DOCX table preview from buildShowPreviewHtml --}}
                 <div class="docx-preview-wrapper overflow-auto">
                     {!! $docxReadonlyHtml !!}
@@ -851,7 +840,7 @@
                                 @if(!empty($step->user->designation))
                                     <div class="small text-muted">{{ $step->user->designation }}</div>
                                 @endif
-                                @if($stampedName)
+                                @if(($step->approved_at || $step->rejected_at) && $stampedName)
                                     <div class="small text-muted mt-1">
                                         Stamped: {{ $stampedName }}
                                     </div>
@@ -869,10 +858,10 @@
                                 @endif
                             </td>
                             <td>
-                                @if($stampedDate)
-                                    {{ $stampedDate }}
+                                @if($step->approved_at || $step->rejected_at)
+                                    {{ $stampedDate ?: ($step->approved_at ?? $step->rejected_at ?? '-') }}
                                 @else
-                                    {{ $step->approved_at ?? $step->rejected_at ?? '-' }}
+                                    -
                                 @endif
                             </td>
                         </tr>
@@ -966,6 +955,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const wrap = document.getElementById('reportReadonlyBody');
     if (!wrap) return;
 
+    // Fill/download TOC map (Word/Python). Prefer these over soft A4 estimate so view matches DOCX.
+    window.__docxStoredTocPages = @json($docxTocPageMap ?? ['by_index' => [], 'by_sec' => [], 'max' => 0]);
+
     wrap.querySelectorAll('[contenteditable]').forEach(function (el) {
         el.setAttribute('contenteditable', 'false');
     });
@@ -982,24 +974,78 @@ document.addEventListener('DOMContentLoaded', function () {
         return next;
     }
 
+    function previewPages() {
+        return Array.from(wrap.querySelectorAll('.docx-preview .docx-a4-page, .docx-a4-page'));
+    }
+
     function updatePageNumbers() {
-        const pages = Array.from(wrap.querySelectorAll('.docx-a4-page'));
-        const total = pages.length;
+        const pages = previewPages();
+        const storedMax = parseInt(String((window.__docxStoredTocPages && window.__docxStoredTocPages.max) || 0), 10) || 0;
+        // Prefer live soft sheet count after reflow; never show fewer than Word/fill TOC max.
+        const total = Math.max(pages.length, storedMax);
         pages.forEach(function (page, idx) {
             const num = idx + 1;
             page.id = 'docxPage' + num;
             page.setAttribute('data-page-number', String(num));
             page.querySelectorAll('.current-page-num').forEach(function (el) { el.textContent = String(num); });
             page.querySelectorAll('.total-pages-count').forEach(function (el) { el.textContent = String(total); });
+            page.querySelectorAll('.docx-page-official-header td').forEach(function (td) {
+                const text = (td.textContent || '').replace(/\s+/g, ' ').trim();
+                if (!/page\s*\d+\s*of\s*\d+/i.test(text)) return;
+                const keepLabel = /page\s*no\.?/i.test(text);
+                // Always rewrite so total tracks live page count (old "of 22" must not stick).
+                td.innerHTML = (keepLabel ? 'PAGE NO.<br>' : '')
+                    + 'Page <span class="current-page-num">' + num
+                    + '</span> of <span class="total-pages-count">' + total + '</span>';
+            });
+            const footer = page.querySelector('.docx-page-official-footer');
+            if (footer) {
+                const fText = (footer.textContent || '').replace(/\s+/g, ' ').trim();
+                if (/page\s*\d+\s*of\s*\d+/i.test(fText)) {
+                    footer.innerHTML = 'Page <span class="current-page-num">' + num
+                        + '</span> of <span class="total-pages-count">' + total + '</span>';
+                }
+            }
         });
         wrap.querySelectorAll('.docx-page-break-badge').forEach(function (badge, idx) {
-            badge.textContent = 'Page ' + (idx + 2);
+            badge.innerHTML = '<i class="fas fa-file-alt mr-1"></i> Page ' + (idx + 2);
         });
+    }
+
+    /**
+     * Python preview bakes Word soft page-breaks (~22 sheets) and packs later
+     * sections into one overflowing sheet (attachments clipped by overflow:hidden).
+     * Collapse into one flow first, then soft-paginate to match download length.
+     */
+    function collapseHardPageBreaks() {
+        const pages = previewPages();
+        if (pages.length <= 1) return;
+        const first = pages[0];
+        const firstBody = first.querySelector('.docx-page-body');
+        if (!firstBody) return;
+        for (let i = 1; i < pages.length; i++) {
+            const body = pages[i].querySelector('.docx-page-body');
+            if (body) {
+                while (body.firstChild) {
+                    firstBody.appendChild(body.firstChild);
+                }
+            }
+            const prev = pages[i].previousElementSibling;
+            if (prev && prev.classList.contains('docx-page-break-indicator')) {
+                prev.remove();
+            }
+            pages[i].remove();
+        }
     }
 
     function continuationPage(sourcePage) {
         const existing = followingPage(sourcePage);
-        if (existing) return existing;
+        // Reuse only an empty continuation sheet; never dump overflow onto a full later page.
+        if (existing) {
+            const existingBody = existing.querySelector('.docx-page-body');
+            const empty = existingBody && !existingBody.children.length;
+            if (empty) return existing;
+        }
         const page = document.createElement('div');
         page.className = 'docx-a4-page';
         const header = sourcePage.querySelector('.docx-page-official-header');
@@ -1020,8 +1066,21 @@ document.addEventListener('DOMContentLoaded', function () {
         const divider = document.createElement('div');
         divider.className = 'docx-page-break-indicator no-print';
         divider.innerHTML = '<div class="docx-page-break-line"></div><div class="docx-page-break-badge">Page</div><div class="docx-page-break-line"></div>';
-        sourcePage.after(divider);
-        divider.after(page);
+        // Insert immediately after the source page so document order stays correct.
+        if (existing) {
+            const prev = existing.previousElementSibling;
+            if (prev && prev.classList.contains('docx-page-break-indicator')) {
+                prev.before(divider);
+                divider.after(page);
+            } else {
+                existing.before(divider);
+                divider.after(page);
+            }
+        } else {
+            sourcePage.after(divider);
+            divider.after(page);
+        }
+        updatePageNumbers();
         return page;
     }
 
@@ -1100,7 +1159,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function contentOverflows(pageBody) {
         if (!pageBody) return false;
-        return pageEdge(pageBody) > pageBody.getBoundingClientRect().bottom + 6;
+        // scrollHeight catches clipped overflow that getBoundingClientRect can miss in flex layouts.
+        if ((pageBody.scrollHeight - pageBody.clientHeight) > 4) return true;
+        const box = pageBody.getBoundingClientRect();
+        const limit = box.top + Math.max(pageBody.clientHeight || 0, box.height || 0) + 6;
+        return pageEdge(pageBody) > limit;
     }
 
     function pageEdge(pageBody) {
@@ -1116,20 +1179,38 @@ document.addEventListener('DOMContentLoaded', function () {
         return last.getBoundingClientRect().bottom;
     }
 
+    function pageContentUsed(pageBody) {
+        if (!pageBody) return 0;
+        const last = pageBody.lastElementChild;
+        if (!last) return 0;
+        const top = pageBody.getBoundingClientRect().top;
+        return Math.max(0, pageEdge(pageBody) - top);
+    }
+
     function pageFreeSpace(pageBody) {
         if (!pageBody) return 0;
-        return pageBody.getBoundingClientRect().bottom - 8 - pageEdge(pageBody);
+        const box = pageBody.getBoundingClientRect();
+        const height = Math.max(pageBody.clientHeight || 0, box.height || 0);
+        if (height < 40) return 0;
+        return height - pageContentUsed(pageBody) - 8;
     }
 
     function pageIsOverfull(pageBody) {
         if (!pageBody) return false;
-        return pageEdge(pageBody) > pageBody.getBoundingClientRect().bottom - 2;
+        if ((pageBody.scrollHeight - pageBody.clientHeight) > 2) return true;
+        const box = pageBody.getBoundingClientRect();
+        const limit = box.top + Math.max(pageBody.clientHeight || 0, box.height || 0) - 2;
+        return pageEdge(pageBody) > limit;
     }
 
     function rowLabel(row) {
         return Array.from(row.cells || []).map(function (cell) {
             return (cell.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
         }).join('|');
+    }
+
+    function pageHasTocCard(page) {
+        return !!(page && page.querySelector && page.querySelector('.docx-page-body .docx-toc-card, .docx-page-body .docx-toc-line'));
     }
 
     function dropEmptySheet(page) {
@@ -1171,7 +1252,7 @@ document.addEventListener('DOMContentLoaded', function () {
             row.remove();
             return true;
         }
-        if (!same && sourceTable.offsetHeight + 6 < pageFreeSpace(body)) {
+        if (!same && sourceTable.offsetHeight + 6 <= pageFreeSpace(body)) {
             return pullBlockBack(body, sourceTable.parentNode, sourceTable);
         }
         let target = same ? last : null;
@@ -1192,7 +1273,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         const marker = row.nextSibling;
         target.appendChild(row);
-        if (pageIsOverfull(body)) {
+        if (pageIsOverfull(body) || pageFreeSpace(body) < -4) {
             if (marker) sourceTable.insertBefore(row, marker);
             else sourceTable.appendChild(row);
             if (created) target.remove();
@@ -1206,23 +1287,72 @@ document.addEventListener('DOMContentLoaded', function () {
     function pullOneBack(page) {
         const body = page.querySelector('.docx-page-body');
         const next = followingPage(page);
-        if (!body || !next || pageFreeSpace(body) < 28) return false;
+        if (!body || !next || pageFreeSpace(body) < 36) return false;
         const nextBody = next.querySelector('.docx-page-body');
         const first = nextBody && nextBody.firstElementChild;
         if (!first) return false;
+        // Never pull protocol body onto the Table of Contents page.
+        if (pageHasTocCard(page) && !(first.classList && first.classList.contains('docx-toc-card'))) {
+            return false;
+        }
         if (first.matches('table.docx-table') && !first.classList.contains('header-table')) {
             return pullTableRowBack(body, first);
         }
-        return pullBlockBack(body, nextBody, first);
+        if (first.classList.contains('docx-toc-card')) {
+            const last = body.lastElementChild;
+            if (last && last.classList.contains('docx-toc-card')) {
+                if (first.offsetHeight + 6 <= pageFreeSpace(body)) {
+                    return pullBlockBack(body, nextBody, first);
+                }
+                const line = first.querySelector(':scope > .docx-toc-line');
+                if (!line) {
+                    first.remove();
+                    return true;
+                }
+                if (line.offsetHeight + 6 > pageFreeSpace(body)) return false;
+                const marker = line.nextSibling;
+                last.appendChild(line);
+                if (pageIsOverfull(body)) {
+                    if (marker) first.insertBefore(line, marker);
+                    else first.appendChild(line);
+                    return false;
+                }
+                if (!first.querySelector('.docx-toc-line')) first.remove();
+                return true;
+            }
+        }
+        if (first.offsetHeight + 6 <= pageFreeSpace(body)) {
+            return pullBlockBack(body, nextBody, first);
+        }
+        return false;
+    }
+
+    function moveBodyOffTocPages() {
+        Array.from(wrap.querySelectorAll('.docx-preview .docx-a4-page')).forEach(function (page) {
+            if (!pageHasTocCard(page)) return;
+            const body = page.querySelector('.docx-page-body');
+            if (!body) return;
+            const movers = Array.from(body.children).filter(function (el) {
+                if (el.classList && el.classList.contains('docx-toc-card')) return false;
+                if (el.querySelector && el.querySelector('.docx-toc-line, .docx-toc-card')) return false;
+                return true;
+            });
+            if (!movers.length) return;
+            const next = followingPage(page) || continuationPage(page);
+            const nextBody = next.querySelector('.docx-page-body');
+            const frag = document.createDocumentFragment();
+            movers.forEach(function (el) { frag.appendChild(el); });
+            nextBody.insertBefore(frag, nextBody.firstChild);
+        });
     }
 
     function fillPageGaps() {
         let page = wrap.querySelector('.docx-preview .docx-a4-page');
         let pulls = 0;
-        while (page && pulls < 700) {
+        while (page && pulls < 1200) {
             const next = followingPage(page);
             if (!next) break;
-            if (pageFreeSpace(page.querySelector('.docx-page-body')) < 28 || !pullOneBack(page)) {
+            if (pageFreeSpace(page.querySelector('.docx-page-body')) < 36 || !pullOneBack(page)) {
                 page = next;
                 continue;
             }
@@ -1231,33 +1361,383 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function headingTextOf(el) {
+        if (!el) return '';
+        const prefixEl = el.querySelector && el.querySelector('.docx-num-prefix');
+        const prefix = prefixEl ? (prefixEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        const fromData = (el.dataset && el.dataset.headingText || '').replace(/\s+/g, ' ').trim();
+        let fromDom = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (fromDom.length > 180 && fromData) fromDom = fromData;
+        if (prefix && !new RegExp('^' + prefix.replace(/\./g, '\\.') + '\\b').test(fromDom)) {
+            return (prefix + ' ' + (fromData || fromDom)).replace(/\s+/g, ' ').trim();
+        }
+        if (/\d+(?:\.\d+)/.test(fromDom)) return fromDom;
+        if (fromData && fromDom && fromData.toUpperCase() !== fromDom.toUpperCase()) {
+            return (fromData + ' ' + fromDom).replace(/\s+/g, ' ').trim();
+        }
+        return fromDom || fromData;
+    }
+
+    function pageNumberFromSheet(page, pages) {
+        if (!page) return 0;
+        const stamped = page.querySelector(
+            '.docx-page-official-header .current-page-num, .docx-page-official-footer .current-page-num, .current-page-num'
+        );
+        if (stamped) {
+            const n = parseInt((stamped.textContent || '').replace(/\D+/g, ''), 10);
+            if (!isNaN(n) && n > 0) return n;
+        }
+        const attr = parseInt(page.getAttribute('data-page-number') || '', 10);
+        if (!isNaN(attr) && attr > 0) return attr;
+        const list = pages || Array.from(wrap.querySelectorAll('.docx-a4-page'));
+        const index = list.indexOf(page);
+        return index >= 0 ? (index + 1) : 0;
+    }
+
+    function realPageNumberOf(el) {
+        if (!el || !el.closest) return 0;
+        const pages = Array.from(wrap.querySelectorAll('.docx-a4-page'));
+        // Owning A4 sheet stamp is ground truth (Revision History on "Page 18 of 19").
+        const domPage = el.closest('.docx-a4-page');
+        if (domPage && el.closest('.docx-page-body')) {
+            const domNum = pageNumberFromSheet(domPage, pages);
+            if (domNum > 0) return domNum;
+        }
+        if (pages.length) {
+            const rect = el.getBoundingClientRect();
+            const y = rect.top + Math.min(8, Math.max(1, rect.height / 2));
+            let best = null;
+            let bestEdge = -1;
+            for (let i = 0; i < pages.length; i++) {
+                const box = pages[i].getBoundingClientRect();
+                if (y < box.top - 2 || y > box.bottom + 2) continue;
+                const edge = Math.min(y - box.top, box.bottom - y);
+                if (edge > bestEdge) {
+                    bestEdge = edge;
+                    best = pages[i];
+                }
+            }
+            if (best) return pageNumberFromSheet(best, pages);
+        }
+        return pageNumberFromSheet(domPage, pages);
+    }
+
+    function extractSecNum(text) {
+        const m = String(text || '').trim().match(/^(\d+(?:\.\d+)+)\b/);
+        return m ? m[1] : '';
+    }
+
+    function collectReadonlyTocPageNodes() {
+        const nodes = Array.from(wrap.querySelectorAll('.docx-toc-page-input, .docx-toc-line .toc-page'));
+        if (nodes.length) return nodes;
+        // Fallback: edit→readonly conversion left plain numeric spans without .toc-page.
+        return Array.from(wrap.querySelectorAll('.docx-toc-line')).map(function (line) {
+            const spans = Array.from(line.querySelectorAll('span.docx-readonly-value, span'));
+            for (let i = spans.length - 1; i >= 0; i--) {
+                const txt = (spans[i].textContent || '').replace(/\s+/g, '').trim();
+                if (/^\d{1,3}$/.test(txt)) {
+                    spans[i].classList.add('toc-page');
+                    return spans[i];
+                }
+            }
+            return null;
+        }).filter(Boolean);
+    }
+
+    function applyStoredTocPageNumbers() {
+        const stored = window.__docxStoredTocPages || {};
+        const byIndex = stored.by_index || {};
+        const bySec = stored.by_sec || {};
+        const keys = Object.keys(byIndex);
+        if (!keys.length && !Object.keys(bySec).length) return false;
+
+        const lines = Array.from(wrap.querySelectorAll('.docx-toc-line'));
+        if (!lines.length) return false;
+
+        let applied = 0;
+        lines.forEach(function (line, idx) {
+            let page = byIndex[idx] || byIndex[String(idx)] || '';
+            if (!page) {
+                const sec = (line.getAttribute('data-toc-sec') || '').trim();
+                if (sec && bySec[sec]) page = bySec[sec];
+            }
+            if (!page) return;
+            const node = line.querySelector('.docx-toc-page-input, .toc-page')
+                || collectReadonlyTocPageNodes().find(function (n) { return line.contains(n); });
+            if (!node) return;
+            if (node.tagName === 'INPUT') node.value = String(page);
+            else node.textContent = String(page);
+            node.setAttribute('data-toc-source', 'fill');
+            applied++;
+        });
+        return applied > 0;
+    }
+
+    function syncReadonlyTocPageNumbers() {
+        const softCount = wrap.querySelectorAll('.docx-a4-page').length;
+        const storedMax = parseInt(String((window.__docxStoredTocPages && window.__docxStoredTocPages.max) || 0), 10) || 0;
+        // Use fill/download TOC when it is at least as large as soft A4 sheets (Word truth).
+        // Template-default TOC (often ~17) stays below soft count so live soft sync can recalculate.
+        if (storedMax > 0 && storedMax >= softCount && applyStoredTocPageNumbers()) {
+            return;
+        }
+
+        const tocNodes = collectReadonlyTocPageNodes();
+        if (!tocNodes.length) return;
+
+        const totalPages = Math.max(softCount, storedMax);
+        const anchors = [];
+        const seen = new Set();
+        const sectionPageMap = {};
+
+        function isTocContext(el) {
+            return !!(el && el.closest && (
+                el.closest('.docx-toc-card')
+                || el.closest('.docx-toc-line')
+                || el.closest('.docx-page-official-header, .docx-page-official-footer, header, footer')
+            ));
+        }
+
+        function pushAnchor(secNum, el, text) {
+            if (!secNum || !el || isTocContext(el)) return;
+            const pageNo = realPageNumberOf(el);
+            const pageEl = el.closest('.docx-a4-page');
+            if (pageEl && pageEl.querySelector('.docx-page-body .docx-toc-card, .docx-page-body .docx-toc-line')) {
+                return;
+            }
+            if (pageNo <= 1 && /^\d+\.0$/.test(secNum)) {
+                return;
+            }
+            const flat = String(text || '').replace(/\s+/g, ' ').trim();
+            const pageKey = secNum + '::' + pageNo + '::' + flat.slice(0, 60);
+            if (seen.has(pageKey)) return;
+            seen.add(pageKey);
+            const anchor = {
+                secNum: secNum,
+                el: el,
+                text: flat,
+                page: pageNo
+            };
+            anchors.push(anchor);
+            if (/^\d+\.0$/.test(secNum) && pageNo > 0) {
+                const prev = sectionPageMap[secNum];
+                const titled = /^\d+\.0\s+\S/i.test(flat);
+                if (!prev || pageNo > prev.page || (pageNo === prev.page && titled)) {
+                    sectionPageMap[secNum] = anchor;
+                }
+            }
+        }
+
+        Array.from(wrap.querySelectorAll('.docx-heading-target, h1, h2, h3, h4, h5')).forEach(function (el) {
+            const text = headingTextOf(el);
+            if (text.length > 160) return;
+            pushAnchor(extractSecNum(text), el, text);
+        });
+
+        Array.from(wrap.querySelectorAll('.docx-num-prefix')).forEach(function (prefixEl) {
+            const sec = (prefixEl.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!/^\d+(?:\.\d+)+$/.test(sec)) return;
+            if (!/^\d+\.0$/.test(sec)) return;
+            const host = prefixEl.closest(
+                'p.docx-para, .docx-heading-target, .docx-para-edit-wrapper, h1, h2, h3, h4, h5, td.docx-cell, th.docx-cell'
+            ) || prefixEl.parentElement;
+            if (!host || isTocContext(host)) return;
+            if (host.closest && host.closest('table.docx-table') && !(host.classList && host.classList.contains('docx-heading-target'))) {
+                return;
+            }
+            const text = headingTextOf(host);
+            if (text.length > 160 && !(host.classList && host.classList.contains('docx-heading-target'))) return;
+            pushAnchor(sec, host, text || sec);
+        });
+
+        Array.from(wrap.querySelectorAll('.docx-page-body p.docx-para, .docx-page-body .docx-para-edit-wrapper')).forEach(function (el) {
+            if (el.closest('table.docx-table')) return;
+            const text = headingTextOf(el);
+            if (text.length > 140) return;
+            const sec = extractSecNum(text);
+            if (!sec || !/^\d+\.0$/.test(sec)) return;
+            if (!/^\d+\.0\s+\S/.test(text)) return;
+            pushAnchor(sec, el, text);
+        });
+
+        function normalizeTitle(s) {
+            return String(s || '').toUpperCase().replace(/[\.\:\-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+        }
+
+        function scoreAnchorForToc(anchor, words) {
+            const raw = anchor.text || '';
+            const txt = normalizeTitle(raw);
+            let score = 0;
+            if (/^\d+\.0\s+\S/i.test(raw)) score += 50;
+            if (anchor.el && anchor.el.classList && anchor.el.classList.contains('docx-heading-target')) {
+                score += 35;
+            }
+            if (words && words.length) {
+                const hit = words.filter(function (kw) { return txt.includes(kw); }).length;
+                score += hit * 30;
+                if (hit === 0) score -= 40;
+            }
+            if (raw.length <= 90) score += 12;
+            if (raw.length <= 50) score += 8;
+            if (raw.length < 8) score -= 20;
+            return score;
+        }
+
+        function findAnchor(secNum, words) {
+            const major = secNum && /^\d+$/.test(secNum) ? (secNum + '.0') : secNum;
+            if (major && sectionPageMap[major]) {
+                const mapped = sectionPageMap[major];
+                if (words && words.length) {
+                    const txt = normalizeTitle(mapped.text);
+                    const hit = words.some(function (kw) { return txt.includes(kw); });
+                    if (hit || /^\d+\.0\s+\S/i.test(mapped.text)) {
+                        return mapped;
+                    }
+                } else {
+                    return mapped;
+                }
+            }
+
+            const want = [];
+            if (secNum) {
+                anchors.forEach(function (a) {
+                    if (a.secNum === secNum) want.push(a);
+                });
+                if (!want.length && major) {
+                    anchors.forEach(function (a) {
+                        if (a.secNum === major) want.push(a);
+                    });
+                }
+            }
+            if (want.length) {
+                let pool = want;
+                if (words && words.length) {
+                    const titled = want.filter(function (a) {
+                        const txt = normalizeTitle(a.text);
+                        return words.some(function (kw) { return txt.includes(kw); });
+                    });
+                    if (titled.length) pool = titled;
+                }
+                let best = pool[0];
+                let bestScore = scoreAnchorForToc(best, words);
+                let bestPage = realPageNumberOf(best.el) || best.page || 0;
+                for (let i = 1; i < pool.length; i++) {
+                    const score = scoreAnchorForToc(pool[i], words);
+                    const page = realPageNumberOf(pool[i].el) || pool[i].page || 0;
+                    if (page > bestPage && score >= bestScore - 40) {
+                        best = pool[i];
+                        bestScore = score;
+                        bestPage = page;
+                    } else if (score > bestScore && page >= bestPage) {
+                        best = pool[i];
+                        bestScore = score;
+                        bestPage = page;
+                    } else if (score > bestScore + 40) {
+                        best = pool[i];
+                        bestScore = score;
+                        bestPage = page;
+                    }
+                }
+                return best;
+            }
+            if (!words.length) return null;
+            let best = null;
+            let bestHit = 0;
+            let bestPage = 0;
+            anchors.forEach(function (a) {
+                if (a.text.length > 120) return;
+                const txt = normalizeTitle(a.text);
+                const hit = words.filter(function (kw) { return txt.includes(kw); }).length;
+                if (hit < Math.min(1, words.length)) return;
+                const page = realPageNumberOf(a.el) || a.page || 0;
+                if (hit > bestHit || (hit === bestHit && page > bestPage)) {
+                    bestHit = hit;
+                    bestPage = page;
+                    best = a;
+                }
+            });
+            return best;
+        }
+
+        let lastPage = 0;
+        tocNodes.forEach(function (node) {
+            const line = node.closest('.docx-toc-line');
+            const secNum = ((node.dataset && node.dataset.tocSec) || (line && line.dataset.tocSec) || '').trim();
+            const secTitle = ((node.dataset && node.dataset.tocTitle) || (line && line.dataset.tocTitle) || '').trim().toUpperCase();
+            const cleanTitle = normalizeTitle(secTitle.replace(/^\d+(?:\.\d+)*\s*/, ''));
+            const words = cleanTitle.split(/\s+/).filter(function (w) {
+                return w.length > 2 && !['AND', 'THE', 'FOR', 'ANY', 'OF'].includes(w);
+            });
+            const anchor = findAnchor(secNum, words);
+            if (!anchor) return;
+            let pageNo = realPageNumberOf(anchor.el) || anchor.page || 0;
+            if (pageNo < 1) return;
+            if (totalPages > 0 && pageNo > totalPages) pageNo = totalPages;
+            if (lastPage > 0 && pageNo < lastPage) pageNo = lastPage;
+            lastPage = pageNo;
+            if (node.tagName === 'INPUT') node.value = String(pageNo);
+            else node.textContent = String(pageNo);
+        });
+    }
+
     window.paginateReadonlyPreview = function () {
         const first = wrap.querySelector('.docx-preview .docx-a4-page');
         if (!first) return;
         const firstBody = first.querySelector('.docx-page-body');
         if (!firstBody || firstBody.clientHeight < 80) return;
-        fillPageGaps();
-        let page = wrap.querySelector('.docx-preview .docx-a4-page');
-        let moves = 0;
-        while (page && moves < 250) {
-            const pageBody = page.querySelector('.docx-page-body');
-            if (!contentOverflows(pageBody)) {
-                page = followingPage(page);
-                continue;
-            }
-            const before = pageBody.scrollHeight;
-            const beforeLast = pageBody.lastElementChild;
-            const beforeRow = beforeLast && beforeLast.rows ? beforeLast.rows[beforeLast.rows.length - 1] : null;
-            if (!spillOne(page)) {
-                page = followingPage(page);
-                continue;
-            }
-            moves++;
-            const rowStillHere = beforeRow && pageBody.contains(beforeRow);
-            if (contentOverflows(pageBody) && rowStillHere && pageBody.scrollHeight >= before) {
-                page = followingPage(page);
-            }
+
+        // One-time: flatten Python hard breaks so attachment/trailing sections are not clipped.
+        if (!wrap.getAttribute('data-docx-flow-collapsed')) {
+            collapseHardPageBreaks();
+            wrap.setAttribute('data-docx-flow-collapsed', '1');
         }
+
+        moveBodyOffTocPages();
+
+        let moves = 0;
+        const maxMoves = 2500;
+        // Keep spilling until every sheet fits (attachments + sections 12–16 become their own pages).
+        for (let pass = 0; pass < 8 && moves < maxMoves; pass++) {
+            let page = wrap.querySelector('.docx-preview .docx-a4-page');
+            let spilledThisPass = 0;
+            while (page && moves < maxMoves) {
+                const pageBody = page.querySelector('.docx-page-body');
+                if (!contentOverflows(pageBody) && !pageIsOverfull(pageBody)) {
+                    page = followingPage(page);
+                    continue;
+                }
+                const before = pageBody.scrollHeight;
+                const beforeLast = pageBody.lastElementChild;
+                const beforeRow = beforeLast && beforeLast.rows
+                    ? beforeLast.rows[beforeLast.rows.length - 1]
+                    : null;
+                if (!spillOne(page)) {
+                    // Force-move last block onto a fresh sheet when normal spill gives up.
+                    if (beforeLast && pageBody.childElementCount > 1) {
+                        const nextBody = continuationPage(page).querySelector('.docx-page-body');
+                        nextBody.insertBefore(beforeLast, nextBody.firstChild);
+                        moves++;
+                        spilledThisPass++;
+                        continue;
+                    }
+                    page = followingPage(page);
+                    continue;
+                }
+                moves++;
+                spilledThisPass++;
+                const rowStillHere = beforeRow && pageBody.contains(beforeRow);
+                if ((contentOverflows(pageBody) || pageIsOverfull(pageBody))
+                    && rowStillHere
+                    && pageBody.scrollHeight >= before) {
+                    page = followingPage(page);
+                }
+            }
+            if (!spilledThisPass) break;
+        }
+
+        // Light pull-back only — avoid re-packing clipped overflow onto earlier sheets.
+        fillPageGaps();
+        moveBodyOffTocPages();
         wrap.querySelectorAll('.docx-a4-page').forEach(function (sheet) {
             const sheetBody = sheet.querySelector('.docx-page-body');
             const tail = sheetBody && sheetBody.lastElementChild;
@@ -1267,11 +1747,20 @@ document.addEventListener('DOMContentLoaded', function () {
             const moved = next ? next.querySelector('table.docx-table[data-table-index="' + tIdx + '"]') : null;
             if (moved && moved.rows.length > 1 && !tail.querySelector('[name]')) tail.remove();
         });
+        Array.from(wrap.querySelectorAll('.docx-a4-page')).forEach(function (sheet) {
+            dropEmptySheet(sheet);
+        });
         updatePageNumbers();
+        syncReadonlyTocPageNumbers();
+        void wrap.offsetHeight;
+        updatePageNumbers();
+        syncReadonlyTocPageNumbers();
     };
 
     window.paginateReadonlyPreview();
-    setTimeout(window.paginateReadonlyPreview, 300);
+    setTimeout(window.paginateReadonlyPreview, 400);
+    setTimeout(window.paginateReadonlyPreview, 1400);
+    setTimeout(window.paginateReadonlyPreview, 2800);
 });
 </script>
 

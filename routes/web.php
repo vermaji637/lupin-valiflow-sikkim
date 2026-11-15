@@ -4,8 +4,6 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\OfferController;
-use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\ProtocolTypeController;
 
 use App\Http\Controllers\GoogleAuthController;
@@ -26,7 +24,6 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Admin\SecurityPolicyController;
 use App\Http\Controllers\EquipmentController;
 use App\Http\Controllers\Admin\AuditLogController;
-use App\Models\company;
 use App\Http\Controllers\Admin\RolePermissionController;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Http\Request;
@@ -84,8 +81,6 @@ Route::middleware(['auth'])->group(function () {
     Route::resource('equipment', EquipmentController::class);
     Route::resource('roles', App\Http\Controllers\RolesController::class);
     Route::resource('permissions', App\Http\Controllers\PermissionsController::class);
-    Route::resource('companies',  App\Http\Controllers\CompanyController::class);
-    Route::resource('customers', CustomerController::class);
     Route::resource('documents', DocumentController::class);
     Route::resource('templates', TemplateController::class);
 
@@ -95,14 +90,6 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/workflow/{workflow}/complete', [ProtocolController::class, 'completeStep'])->name('workflow.complete');
     Route::get('/my-tasks', [DashboardController::class, 'myTasks'])->name('dashboard.tasks');
     Route::get('/protocollist', [ReportController::class, 'approveList'])->name('reports.approveList');
-
-    // Offer Routes
-    Route::get('offer', [OfferController::class, 'showForm'])->name('offer');
-    Route::post('offer', [OfferController::class, 'createForm'])->name('createoffer');
-    Route::post('offer/generate', [OfferController::class, 'generateOffer']);
-    Route::get('listoffers', [OfferController::class, 'index'])->name('listoffers');
-    Route::get('/offers/{id}/edit', [OfferController::class,'edit'])->name('offers.edit');
-    Route::put('/offers/{id}', [OfferController::class,'update'])->name('offers.update');
 
     // Activity Logs
     Route::get('/activity-logs', [ActivityLogController::class, 'index'])->name('activity-logs');
@@ -218,6 +205,12 @@ Route::middleware(['auth'])->group(function () {
         ->middleware('permission:protocol-requalification|protocol-all')
         ->name('protocol.requalification');
 
+    // NEQ fill → POST approve → show (same Report list UX as requal/reval)
+    Route::get('/protocol/new-equipment-qualification/reports',
+        [ReportController::class, 'newEquipmentQualificationProtocols'])
+        ->middleware('permission:protocol-fill-new-equipment|protocol-new-equipment|protocol-neq-view|protocol-neq-download|protocol-all')
+        ->name('protocol.new-equipment-qualification.reports');
+
     // Protocol DOCX import — create a report from an uploaded Word document
     Route::get('/protocol/docx-import', [DocxImportController::class, 'createFromProtocol'])
         ->middleware('permission:protocol-fill-new-equipment|protocol-revalidation|protocol-requalification')
@@ -226,7 +219,7 @@ Route::middleware(['auth'])->group(function () {
         ->middleware('permission:protocol-fill-new-equipment|protocol-revalidation|protocol-requalification')
         ->name('protocol.docx-import.store');
 
-    // New Equipment Qualification — upload, preview, edit, and save DOCX files
+    // New Equipment Qualification — legacy template edit workspace (optional)
     Route::get('/protocol/new-equipment-qualification', [NewEquipmentQualificationController::class, 'index'])
         ->middleware('permission:protocol-new-equipment|protocol-fill-new-equipment')
         ->name('protocol.new-equipment-qualification.index');
@@ -275,6 +268,10 @@ Route::middleware(['auth'])->group(function () {
         ->name('reports.preview-html');
     Route::get('/reports/{report}/docx-import/download-pdf', [DocxImportController::class, 'downloadFilledPdf'])
         ->name('reports.docx-import.download-pdf')
+        ->where(['report' => '[0-9]+']);
+    // Inline PDF for show view — same filled DOCX as download (real Word/LO page count).
+    Route::get('/reports/{report}/docx-import/preview-pdf', [DocxImportController::class, 'previewFilledPdf'])
+        ->name('reports.docx-import.preview-pdf')
         ->where(['report' => '[0-9]+']);
 
     Route::get('/reports/{report}/after-preapproval', [ReportController::class, 'reportfillAfterPreaAprove'])->name('reports.preapprovalfill');

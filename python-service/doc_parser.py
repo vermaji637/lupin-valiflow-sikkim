@@ -562,6 +562,7 @@ def has_paragraph_blank(text: str) -> bool:
         if cleaned.lower() in (
             "methodology",
             "report approval",
+            "approval page",
             "objective",
             "scope",
             "responsibility",
@@ -572,6 +573,8 @@ def has_paragraph_blank(text: str) -> bool:
             "observation/results and evaluation",
             "list of attachment",
             "list of attachments",
+            "list of sops identified",
+            "verification of draft sops",
         ):
             return False
         if len(cleaned) < 50 and len(cleaned.split()) <= 6:
@@ -972,6 +975,8 @@ def is_approval_page_table(table) -> bool:
                 "performed by",
                 "recorded by",
                 "complied by",
+                "identified",
+                "verified by",
                 "checked by",
                 "reviewed by",
                 "approved by",
@@ -985,7 +990,8 @@ def is_approval_page_table(table) -> bool:
 def resolve_approval_page_role(row_label: str) -> str | None:
     """Map APPROVAL PAGE role row labels to POST workflow data keys."""
     rl = (row_label or "").strip().lower()
-    if "performed" in rl or "recorded" in rl or "complied" in rl:
+    # Att11: "Identified and Verified By" is the first selectable Name row.
+    if "identified" in rl or "performed" in rl or "recorded" in rl or "complied" in rl:
         return "post_prepared_by_name"
     if "checked" in rl or "reviewed" in rl:
         return "post_checked_by_engineering_name"
@@ -996,9 +1002,9 @@ def resolve_approval_page_role(row_label: str) -> str | None:
 
 # True for Performed/Recorded/Complied rows on the Veeva approval-page table.
 def is_approval_page_performer_row(row_label: str) -> bool:
-    """True for Performed/Recorded/Complied rows on the Veeva approval-page table."""
+    """True for Performed/Recorded/Complied/Identified rows on the approval-page table."""
     rl = (row_label or "").strip().lower()
-    return any(kw in rl for kw in ("performed", "recorded", "complied"))
+    return any(kw in rl for kw in ("performed", "recorded", "complied", "identified"))
 
 
 # Rows where the Name column is a user dropdown at fill time (signature/date stamp on approval).
@@ -1010,6 +1016,8 @@ def is_approval_page_selectable_name_row(row_label: str) -> bool:
             "performed",
             "recorded",
             "complied",
+            "identified",
+            "verified",
             "checked",
             "reviewed",
             "approved",
@@ -1279,6 +1287,9 @@ def is_repeated_column_header_row(row, col_headers: list[str] | None = None) -> 
 
 def is_equipment_section_banner_row(row) -> bool:
     """True for AHU / Dust Extractor / Equipment full-width section banners."""
+    # Att07 signature footers are merged like banners but must stay fillable for e-sign.
+    if is_verified_by_sign_row(row):
+        return False
     texts: list[str] = []
     seen: set[int] = set()
     for cell in row.cells:
@@ -1381,19 +1392,32 @@ def resolve_component_section_sl_no_rows(table) -> dict[int, int]:
 def resolve_signature_date_col_index(col_headers: list, report_approval_block: bool) -> int:
     """
     Column index for the Signature & Date (or Date-only) stamp cell on a signature row.
-    Report-approval mini-tables use col 2; department tables may use col 2 or 3.
+    Prefer real Signature/Date header; fall back to last data column (often col 2).
     """
-    if report_approval_block:
-        return 2
     for idx, label in enumerate(col_headers):
         if is_signature_date_column(label):
             return idx
     for idx, label in enumerate(col_headers):
         if (label or "").strip().lower() == "date":
             return idx
+    if report_approval_block:
+        # 2-col Name|Signature → col 1; 3-col Dept|Name|Signature → col 2
+        return 2 if len(col_headers) > 2 else max(len(col_headers) - 1, 0)
     if len(col_headers) > 3:
         return 3
     return 2
+
+
+def _is_junk_signature_placeholder(value: str) -> bool:
+    """True for template leftovers like a lone 'S' — not a real e-sign stamp."""
+    text = (value or "").strip()
+    if not text:
+        return False
+    if len(text) <= 1:
+        return True
+    if len(text) <= 2 and not any(ch.isdigit() for ch in text):
+        return True
+    return False
 
 
 def resolve_signature_section_title(header_row: list) -> str:
@@ -1486,6 +1510,7 @@ _LOCKED_SECTION_TITLES_EXACT = {
     "qualification history",
     "methodology",
     "report approval",
+    "approval page",
     "table of contents",
     "observation / results and evaluation",
     "observation/results and evaluation",
@@ -1493,6 +1518,8 @@ _LOCKED_SECTION_TITLES_EXACT = {
     "summary & conclusion",
     "list of attachment",
     "list of attachments",
+    "list of sops identified",
+    "verification of draft sops",
 }
 # Longer lead-in sentences that are still headings, not fill lines.
 _LOCKED_SECTION_TITLE_LONG_PREFIXES = ()
@@ -1513,9 +1540,12 @@ _LOCKED_SECTION_TITLE_PREFIXES = (
     "general checks",
     "operational qualification checks",
     "list of attachment",
+    "list of sops identified",
+    "verification of draft sops",
     "revision history",
     "methodology",
     "report approval",
+    "approval page",
     "observation / results",
     "observation/results",
 )
@@ -1664,8 +1694,10 @@ def _scan_header_tables(doc, fillable_fields: list) -> None:
 # Lock signature rows that already have Signature & Date text in the source DOCX.
 def _mark_prefilled_signature_rows(fillable_fields: list) -> list:
     """
-    Signature rows that already contain Signature & Date text in the source DOCX
+    Signature rows that already contain a real Signature & Date stamp in the source DOCX
     (e.g. vijay_19-06-2026 11:09 AM) must never be re-stamped by the app.
+
+    Lone template placeholders like "S" are cleared and stay stamp-eligible.
     """
     by_row: dict[str, dict[int, int]] = {}
     for idx, field in enumerate(fillable_fields):
@@ -1683,11 +1715,19 @@ def _mark_prefilled_signature_rows(fillable_fields: list) -> list:
             val = (field.get("value") or "").strip()
             if not val:
                 continue
-            if is_signature_date_column(label) or (
-                "signature" in label.lower() and "date" in label.lower()
+            if not (
+                is_signature_date_column(label)
+                or ("signature" in label.lower() and "date" in label.lower())
             ):
-                prefilled_sig_date = True
-                break
+                continue
+            if _is_junk_signature_placeholder(val):
+                field["value"] = ""
+                field["locked"] = False
+                field["prefilled"] = False
+                field["stamp_eligible"] = True
+                continue
+            prefilled_sig_date = True
+            break
 
         if not prefilled_sig_date:
             continue
@@ -1760,6 +1800,9 @@ def parse_docx(file_path: str) -> dict:
                 result["fillable_fields"],
                 set(),
             )
+        # Skip horizontally/vertically merged duplicate tc cells (one field per Word cell).
+        # Hold tc element objects — bare id() ints are unsafe across rows (GC reuse).
+        table_emitted_tc_els: set = set()
 
         for row_index, row in enumerate(table.rows):
             cells = row.cells
@@ -1967,8 +2010,46 @@ def parse_docx(file_path: str) -> dict:
                 if is_repeated_column_header_row(row, col_headers or header_row):
                     continue
 
+                # Att07 / Att3: merged "Verified by sign and date :" footer — one e-sign field.
+                if is_verified_by_sign_row(row):
+                    seen_verified_tc: set = set()
+                    for col_index, cell in enumerate(cells):
+                        tc_el = cell._tc
+                        if tc_el in seen_verified_tc or tc_el in table_emitted_tc_els:
+                            continue
+                        seen_verified_tc.add(tc_el)
+                        table_emitted_tc_els.add(tc_el)
+                        raw = dedupe_colon_label(cell.text.strip()) or "Verified by sign and date :"
+                        label = re.sub(r":\s*$", ":", raw).strip() or "Verified by sign and date :"
+                        if not label.lower().endswith(":"):
+                            label = label.rstrip() + " :"
+                        result["fillable_fields"].append({
+                            "label": label,
+                            "value": "",
+                            "locked": False,
+                            "type": "table_multicol",
+                            "location": (
+                                f"table_{table_index}_row_{row_index}_col_{col_index}"
+                            ),
+                            "widget": "text",
+                            "stamp_eligible": True,
+                        })
+                        break
+                    continue
+
                 row_label = cells[0].text.strip() if cells else ""
+                seen_row_tc_els: set = set()
                 for col_index, cell in enumerate(cells):
+                    tc_el = cell._tc
+                    # Horizontal merge: python-docx repeats the same tc across columns.
+                    if tc_el in seen_row_tc_els:
+                        continue
+                    seen_row_tc_els.add(tc_el)
+                    # Vertical merge: same tc already emitted on an earlier row (Sr. No. span).
+                    if tc_el in table_emitted_tc_els:
+                        continue
+                    table_emitted_tc_els.add(tc_el)
+
                     cell_text = cell.text.strip()
                     if cell_text and re.fullmatch(
                         r"report\s*no\.?|approval\s*date",
@@ -1985,6 +2066,21 @@ def parse_docx(file_path: str) -> dict:
                         header_label, cell_text, row_label
                     )
                     combined_label = widget_label or header_label or row_label
+                    # Composite Main Body / Components tables use a section banner as row 0,
+                    # not real column headers — do not use "Main Body" as the cell label.
+                    if is_composite_component_table(table) and is_component_section_header_row(
+                        table.rows[0]
+                    ):
+                        section_headers = {
+                            "main body",
+                            "mechanical components",
+                            "electrical components",
+                            "pneumatic components",
+                        }
+                        if col_index == 0 or is_sl_no_column_header(header_label):
+                            combined_label = "Sr. No."
+                        elif _normalize_header_compare(header_label) in section_headers:
+                            combined_label = " "
 
                     if not header_label and not report_approval_block:
                         continue
@@ -1997,22 +2093,32 @@ def parse_docx(file_path: str) -> dict:
                     if dept_signature and col_index == 0:
                         continue
 
-                    # Sl. No. column — always locked; auto-number rows 1, 2, 3… (TOC tables skipped above).
+                    # Sl. No. column: Word serials (1., 2.) stay locked; blank cells are fillable.
                     if sl_no_col is not None and col_index == sl_no_col:
                         if row_index == 0:
                             continue
-                        display_val = cell_text if cell_text else str(row_index)
-                        result["fillable_fields"].append({
-                            "label": combined_label or "Sl. No.",
-                            "value": display_val,
-                            "locked": True,
-                            "type": "table_sl_no",
-                            "location": (
-                                f"table_{table_index}_row_{row_index}_col_{col_index}"
-                            ),
-                            "widget": "text",
-                            "auto_serial": row_index,
-                        })
+                        if cell_text:
+                            result["fillable_fields"].append({
+                                "label": combined_label or "Sl. No.",
+                                "value": cell_text,
+                                "locked": True,
+                                "type": "table_sl_no",
+                                "location": (
+                                    f"table_{table_index}_row_{row_index}_col_{col_index}"
+                                ),
+                                "widget": "text",
+                            })
+                        else:
+                            result["fillable_fields"].append({
+                                "label": combined_label or "Sr. No.",
+                                "value": "",
+                                "locked": False,
+                                "type": "table_multicol",
+                                "location": (
+                                    f"table_{table_index}_row_{row_index}_col_{col_index}"
+                                ),
+                                "widget": "text",
+                            })
                         continue
 
                     # Main Body / Components tables: col 0 serial (1., 2., 3.) between section headers.
@@ -2023,7 +2129,7 @@ def parse_docx(file_path: str) -> dict:
                         else:
                             display_val = f"{serial}."
                         result["fillable_fields"].append({
-                            "label": combined_label or "Sl. No.",
+                            "label": "Sr. No.",
                             "value": display_val,
                             "locked": True,
                             "type": "table_sl_no",
@@ -2104,6 +2210,9 @@ def parse_docx(file_path: str) -> dict:
                             "location": f"table_{table_index}_row_{row_index}_col_{col_index}",
                             "widget": widget,
                         }
+                        # Word template text (e.g. "Checks for major components") stays locked.
+                        if locked and cell_text:
+                            field_entry["prefilled"] = True
                         if field_type == "approver":
                             if approver_role:
                                 field_entry["approver_role"] = approver_role

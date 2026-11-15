@@ -48,7 +48,7 @@
                             <td>{{ $offer->company }}</td>
                             <td>{{ $offer->equipment_name }}</td>
                             <td>{{ $offer->created_at }}</td>
-                            <td><a href="{{route('offers.edit',$offer->id)}}">EDIT</a>
+                            <td><a href="{{ route('reports.show', $offer->id) }}">View</a>
                               
                                 <!-- Add other action buttons if needed -->
                             </td>

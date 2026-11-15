@@ -49,12 +49,12 @@ return [
     'document-delete' => 'documents.delete',
     'document-list' => 'documents.list',
     
-    // Protocol Routes
-    'protocol-list' => 'listoffers',
-    'protocol-create' => 'offer',
-    'protocol-view' => 'listoffers',
-    'protocol-edit' => 'offer',
-    'protocol-delete' => 'offer',
+    // Protocol Routes (point at live report/protocol screens — not legacy offers)
+    'protocol-list' => 'protocol',
+    'protocol-create' => 'protocol',
+    'protocol-view' => 'protocol',
+    'protocol-edit' => 'protocol',
+    'protocol-delete' => 'protocol',
     'protocol-approve' => 'approved.protocols',
     'protocol-send-back' => 'protocol',
     'protocol-reject' => 'protocol',
@@ -91,8 +91,5 @@ return [
     'dashboard' => 'home',
     'home' => 'home',
     
-    // Offer Routes (Legacy - for backward compatibility)
-    'offer' => 'offer',
-    'listoffers' => 'listoffers',
     'approved.protocols' => 'approved.protocols',
 ];

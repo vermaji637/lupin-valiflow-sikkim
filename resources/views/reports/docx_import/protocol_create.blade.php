@@ -5,6 +5,8 @@
         ? $importSourceSectionTitle
         : (($importSourceLabel ?? '') !== '' ? $importSourceLabel : 'Pre-Approved DOCX (VIVA)');
     $isNeqFill = ($importSource ?? '') === 'new_equipment_qualification';
+    $backRoute = $isNeqFill ? 'protocol.new-equipment-qualification.reports' : 'protocol';
+    $backLabel = $isNeqFill ? 'Back to New Equipment Qualification' : 'Back to All Protocol';
 @endphp
 
 @section('title', $isNeqFill ? $sectionTitle : ('Import ' . $sectionTitle))
@@ -15,8 +17,8 @@
         <div class="col-lg-9 col-xl-8">
 
             <div class="mb-3">
-                <a href="{{ route('protocol') }}" class="text-decoration-none text-secondary">
-                    <i class="fas fa-arrow-left mr-1"></i> Back to All Protocol
+                <a href="{{ route($backRoute) }}" class="text-decoration-none text-secondary">
+                    <i class="fas fa-arrow-left mr-1"></i> {{ $backLabel }}
                 </a>
             </div>
 
@@ -128,7 +130,7 @@
                         </div>
 
                         <div class="d-flex justify-content-between mt-4">
-                            <a href="{{ route('protocol') }}" class="btn btn-light shadow-sm">
+                            <a href="{{ route($backRoute) }}" class="btn btn-light shadow-sm">
                                 <i class="fas fa-times mr-1"></i> Cancel
                             </a>
                             <button type="submit" class="btn btn-primary shadow-sm" id="btnUpload">

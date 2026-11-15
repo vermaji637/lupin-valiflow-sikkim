@@ -227,22 +227,15 @@
                 <a class="collapse-item" href="{{ route('reports.myPendingApprovals') }}">My Pending Approvals</a>
                 @endif
                 --}}
-                @if(\App\Services\SidebarPermissionService::userCan('protocol-new-equipment'))
-                <a class="collapse-item" href="{{ route('protocol.new-equipment-qualification.index') }}">New Equipment Qualification</a>
+                @if(\App\Services\SidebarPermissionService::userCanAny([
+                    'protocol-fill-new-equipment',
+                    'protocol-new-equipment',
+                    'protocol-neq-view',
+                    'protocol-neq-download',
+                    'protocol-all',
+                ]))
+                <a class="collapse-item" href="{{ route('protocol.new-equipment-qualification.reports') }}">New Equipment Qualification</a>
                 @endif
-                {{-- Fill / view / download roles without full NEQ menu permission --}}
-                @if((\App\Services\SidebarPermissionService::userCan('protocol-fill-new-equipment')
-                    || \App\Services\SidebarPermissionService::userCan('protocol-neq-view')
-                    || \App\Services\SidebarPermissionService::userCan('protocol-neq-download'))
-                    && !\App\Services\SidebarPermissionService::userCan('protocol-new-equipment'))
-                <a class="collapse-item" href="{{ route('protocol.new-equipment-qualification.index') }}">New Equipment Qualification</a>
-                @endif
-                {{-- Former separate Fill entry (merged into NEQ) --}}
-                {{--
-                @if(\App\Services\SidebarPermissionService::userCan('protocol-fill-new-equipment'))
-                <a class="collapse-item" href="{{ route('protocol.docx-import.create', ['source' => 'new_equipment_qualification']) }}">Fill New Equipment Qualification</a>
-                @endif
-                --}}
                 @if(\App\Services\SidebarPermissionService::userCan('protocol-revalidation'))
                 <a class="collapse-item" href="{{ route('protocol.revalidation') }}">Revalidation</a>
                 @endif
