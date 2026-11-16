@@ -1084,6 +1084,48 @@ document.addEventListener('DOMContentLoaded', function () {
         return page;
     }
 
+    // Att08: clone full 2-row header (Calibration details + Done On/Due On), not only rows[0].
+    function leadingHeaderRowCount(sourceTable) {
+        if (!sourceTable || !sourceTable.rows.length) return 0;
+        const row0 = sourceTable.rows[0];
+        // Always keep at least the first row (previous show.blade behavior).
+        let span = 1;
+        Array.from(row0.cells).forEach(function (cell) {
+            const rs = parseInt(cell.getAttribute('rowspan') || '1', 10);
+            if (!isNaN(rs) && rs > span) span = rs;
+        });
+        if (span < 2 && sourceTable.rows.length > 1) {
+            const row1 = sourceTable.rows[1];
+            const text = (row1.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            if (text.indexOf('done on') !== -1 || text.indexOf('due on') !== -1) span = 2;
+        }
+        const marked = parseInt(sourceTable.getAttribute('data-header-row-count') || '0', 10);
+        if (!isNaN(marked) && marked > span) span = marked;
+        return Math.max(1, Math.min(span, 3, sourceTable.rows.length - 1 || 1));
+    }
+
+    function appendClonedHeaderRows(targetTable, sourceTable) {
+        const n = leadingHeaderRowCount(sourceTable);
+        for (let i = 0; i < n; i++) {
+            const src = sourceTable.rows[i];
+            if (!src) break;
+            const clone = src.cloneNode(true);
+            clone.setAttribute('data-cont-header', '1');
+            clone.querySelectorAll('input, textarea, select').forEach(function (el) { el.removeAttribute('name'); });
+            targetTable.appendChild(clone);
+        }
+        targetTable.setAttribute('data-header-row-count', String(n));
+        return n;
+    }
+
+    function lastHeaderRow(table) {
+        const n = parseInt(table.getAttribute('data-header-row-count') || '0', 10);
+        if (n > 0 && table.rows[n - 1]) return table.rows[n - 1];
+        const computed = leadingHeaderRowCount(table);
+        if (computed > 0 && table.rows[computed - 1]) return table.rows[computed - 1];
+        return table.rows[0] || null;
+    }
+
     function continuationTable(page, sourceTable) {
         const next = continuationPage(page);
         const body = next.querySelector('.docx-page-body');
@@ -1095,11 +1137,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const table = document.createElement('table');
         table.className = sourceTable.className;
         if (tIdx !== '') table.setAttribute('data-table-index', tIdx);
-        if (sourceTable.rows[0]) {
-            const header = sourceTable.rows[0].cloneNode(true);
-            header.querySelectorAll('input, textarea, select').forEach(function (el) { el.removeAttribute('name'); });
-            table.appendChild(header);
-        }
+        appendClonedHeaderRows(table, sourceTable);
         body.insertBefore(table, body.firstChild);
         return table;
     }
@@ -1132,7 +1170,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const row = last.rows[last.rows.length - 1];
             if (row.offsetHeight + 12 >= body.clientHeight && last.rows.length <= 2 && body.childElementCount === 1) return false;
             const table = continuationTable(page, last);
-            const header = table.rows[0];
+            const header = lastHeaderRow(table);
             if (header && header !== row) header.after(row);
             else table.appendChild(row);
             return true;
@@ -1239,8 +1277,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function pullTableRowBack(body, sourceTable) {
-        const head = sourceTable.rows[0] && sourceTable.rows[0].querySelector('th') ? sourceTable.rows[0] : null;
-        const row = head ? sourceTable.rows[1] : sourceTable.rows[0];
+        // Att08: skip full 2-row header; first pullable data row is after Done On/Due On.
+        const hdrN = leadingHeaderRowCount(sourceTable);
+        const row = sourceTable.rows[hdrN] || null;
         if (!row) {
             if (!sourceTable.querySelector('[name]')) sourceTable.remove();
             return true;
@@ -1262,24 +1301,21 @@ document.addEventListener('DOMContentLoaded', function () {
             target.className = sourceTable.className;
             const tIdx = sourceTable.getAttribute('data-table-index') || '';
             if (tIdx) target.setAttribute('data-table-index', tIdx);
-            if (head) {
-                const clone = head.cloneNode(true);
-                clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
-                clone.querySelectorAll('[name]').forEach(function (el) { el.removeAttribute('name'); });
-                target.appendChild(clone);
-            }
+            appendClonedHeaderRows(target, sourceTable);
             body.appendChild(target);
             created = true;
         }
         const marker = row.nextSibling;
-        target.appendChild(row);
+        const hostHeader = lastHeaderRow(target);
+        if (hostHeader) hostHeader.after(row);
+        else target.appendChild(row);
         if (pageIsOverfull(body) || pageFreeSpace(body) < -4) {
             if (marker) sourceTable.insertBefore(row, marker);
             else sourceTable.appendChild(row);
             if (created) target.remove();
             return false;
         }
-        const leftoverHead = sourceTable.rows.length === 1 && sourceTable.rows[0].querySelector('th') && !sourceTable.querySelector('[name]');
+        const leftoverHead = sourceTable.rows.length <= hdrN && !sourceTable.querySelector('[name]');
         if (!sourceTable.rows.length || leftoverHead) sourceTable.remove();
         return true;
     }

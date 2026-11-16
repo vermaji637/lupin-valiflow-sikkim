@@ -596,12 +596,13 @@ class DocxImportController extends Controller
 
         // Workflow label on approval step maps to report.data key prefix for name/date/signature.
         $labelToPrefix = [
-            'POST_PREPARED'    => 'post_prepared_by',
-            'POST_ENGINEERING' => 'post_checked_by_engineering',
-            'POST_PRODUCTION'  => 'post_checked_by_production',
-            'POST_CHECKED_QA'  => 'post_checked_by_quality',
-            'POST_VALIDATION'  => 'post_checked_by_validation',
-            'POST_APPROVED_QA' => 'post_approved_by_quality',
+            'POST_PREPARED'      => 'post_prepared_by',
+            'POST_ENGINEERING'   => 'post_checked_by_engineering',
+            'POST_PRODUCTION'    => 'post_checked_by_production',
+            'POST_CHECKED_QA'    => 'post_checked_by_quality',
+            'POST_VALIDATION'    => 'post_checked_by_validation',
+            'POST_APPROVED_USER' => 'post_approved_by_user',
+            'POST_APPROVED_QA'   => 'post_approved_by_quality',
         ];
 
         foreach ($report->approvalSteps as $step) {
@@ -897,12 +898,13 @@ class DocxImportController extends Controller
         $approvedRoles = [];
         $report->loadMissing('approvalSteps');
         $labelToPrefix = [
-            'POST_PREPARED'    => 'post_prepared_by',
-            'POST_ENGINEERING' => 'post_checked_by_engineering',
-            'POST_PRODUCTION'  => 'post_checked_by_production',
-            'POST_CHECKED_QA'  => 'post_checked_by_quality',
-            'POST_VALIDATION'  => 'post_checked_by_validation',
-            'POST_APPROVED_QA' => 'post_approved_by_quality',
+            'POST_PREPARED'      => 'post_prepared_by',
+            'POST_ENGINEERING'   => 'post_checked_by_engineering',
+            'POST_PRODUCTION'    => 'post_checked_by_production',
+            'POST_CHECKED_QA'    => 'post_checked_by_quality',
+            'POST_VALIDATION'    => 'post_checked_by_validation',
+            'POST_APPROVED_USER' => 'post_approved_by_user',
+            'POST_APPROVED_QA'   => 'post_approved_by_quality',
         ];
         foreach ($report->approvalSteps as $step) {
             if ($step->stage !== 'post') {
@@ -1009,12 +1011,13 @@ class DocxImportController extends Controller
         $approvedRoles = [];
         $report->loadMissing('approvalSteps');
         $labelToPrefix = [
-            'POST_PREPARED'    => 'post_prepared_by',
-            'POST_ENGINEERING' => 'post_checked_by_engineering',
-            'POST_PRODUCTION'  => 'post_checked_by_production',
-            'POST_CHECKED_QA'  => 'post_checked_by_quality',
-            'POST_VALIDATION'  => 'post_checked_by_validation',
-            'POST_APPROVED_QA' => 'post_approved_by_quality',
+            'POST_PREPARED'      => 'post_prepared_by',
+            'POST_ENGINEERING'   => 'post_checked_by_engineering',
+            'POST_PRODUCTION'    => 'post_checked_by_production',
+            'POST_CHECKED_QA'    => 'post_checked_by_quality',
+            'POST_VALIDATION'    => 'post_checked_by_validation',
+            'POST_APPROVED_USER' => 'post_approved_by_user',
+            'POST_APPROVED_QA'   => 'post_approved_by_quality',
         ];
         foreach ($report->approvalSteps as $step) {
             if ($step->stage !== 'post') {
@@ -1086,7 +1089,7 @@ class DocxImportController extends Controller
         if (is_file($pdfPath)) {
             @unlink($pdfPath);
         }
-        foreach (['.layout_v1', '.layout_v2'] as $suffix) {
+        foreach (['.layout_v1', '.layout_v2', '.layout_v3', '.layout_v4'] as $suffix) {
             $marker = $docxPath . $suffix;
             if (is_file($marker)) {
                 @unlink($marker);
@@ -1167,7 +1170,30 @@ class DocxImportController extends Controller
     }
 
     /**
+     * Send-back entry: unlock stored DOCX fields and clear preview cache.
+     */
+    public function reopenDocxFieldsAfterSendBack(Report $report): void
+    {
+        if (! $report->docx_import_path || ! is_array($report->docx_import_fields)) {
+            return;
+        }
+
+        $report->docx_import_fields = $this->unlockDocxFieldsForReturnedEdit(
+            $report->docx_import_fields
+        );
+        if ($report->docx_import_status === 'completed') {
+            $report->docx_import_status = 'pending';
+        }
+        $report->save();
+        $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
+    }
+
+    /**
      * On returned resubmit, restore editable fill UX like a fresh import.
+     *
+     * First submit often marks typed cells as prefilled/locked. After send-back
+     * those must reopen (yellow inputs) — do not keep them locked just because
+     * prefilled=true. Python /preview also re-locks prefilled unless user_filled.
      *
      * @param  array<int, array<string, mixed>>  $fields
      * @return array<int, array<string, mixed>>
@@ -1179,69 +1205,125 @@ class DocxImportController extends Controller
                 continue;
             }
 
-            if ($this->isTocField($field)) {
-                $fields[$idx]['locked'] = true;
-
-                continue;
-            }
-
-            if ((string) ($field['type'] ?? '') === 'table_sl_no') {
-                $fields[$idx]['locked'] = true;
-
-                continue;
-            }
-
             $type = strtolower(trim((string) ($field['type'] ?? '')));
             $widget = strtolower(trim((string) ($field['widget'] ?? '')));
-            $isApprover = $type === 'approver' || $widget === 'approver';
-            $isChoiceField = in_array($type, ['paragraph_radio', 'paragraph_checkbox', 'table_radio', 'table_checkbox'], true)
-                || in_array($widget, ['radio', 'checkbox'], true);
-            $isDateEntry = $this->isDocxDateTimeEntryField($field);
-            $isUserEditable = $isApprover
-                || $isChoiceField
-                || $isDateEntry
-                || ! empty($field['auto_from_name'])
-                || ($field['draft_editable'] ?? false) === true
-                || ($field['user_filled'] ?? false) === true;
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $location = strtolower(trim((string) ($field['location'] ?? '')));
 
-            // User-entered / Att01 auto-filled / date cells were often mis-marked prefilled on first submit.
-            // After send-back they must reopen like a fresh fill.
-            if ($isUserEditable) {
-                $fields[$idx]['locked'] = false;
-                $fields[$idx]['draft_editable'] = true;
-                $fields[$idx]['user_filled'] = true;
-                $fields[$idx]['prefilled'] = false;
-                if ($isDateEntry) {
-                    $fields[$idx]['widget'] = 'datetime-local';
-                    // Fresh pick again after send-back (do not keep a locked calendar value).
-                    $fields[$idx]['value'] = '';
-                    $fields[$idx]['date_selected'] = false;
-                }
-
-                continue;
-            }
-
-            if (($field['prefilled'] ?? false) === true) {
+            if ($this->isTocField($field) || $type === 'toc_entry' || $type === 'table_2col_label') {
                 $fields[$idx]['locked'] = true;
 
                 continue;
             }
 
+            if ($type === 'table_sl_no') {
+                $fields[$idx]['locked'] = true;
+
+                continue;
+            }
+
+            $isBlankPart = $type === 'paragraph_blank_part'
+                || preg_match('/_blank_\d+$/', $location) === 1
+                || preg_match('/\(\s*blank\s*\d+\s*\)\s*$/i', (string) ($field['label'] ?? '')) === 1;
+            if ($isBlankPart) {
+                $fields[$idx]['type'] = 'paragraph_blank_part';
+                $fields[$idx]['widget'] = 'text';
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['prefilled'] = false;
+                continue;
+            }
+
+            if (
+                $this->isLockedSectionHeadingText($label)
+                || str_contains($label, 'approval page')
+                || str_contains($label, 'report approval')
+            ) {
+                $fields[$idx]['locked'] = true;
+
+                continue;
+            }
+
+            // Clear prior e-sign stamps so the next approval cycle can stamp again.
             if (str_starts_with($type, 'approval_stamp')) {
                 $fields[$idx]['locked'] = true;
+                $fields[$idx]['value'] = '';
+                $fields[$idx]['prefilled'] = false;
+                $fields[$idx]['user_filled'] = false;
 
                 continue;
             }
 
             if ($this->isPostApprovalStampField($field)) {
                 $fields[$idx]['locked'] = false;
-                $fields[$idx]['value']  = '';
+                $fields[$idx]['value'] = '';
+                $fields[$idx]['prefilled'] = false;
+                $fields[$idx]['draft_editable'] = true;
+                $fields[$idx]['user_filled'] = true;
 
                 continue;
             }
 
+            $isLetterhead = $type === 'header_cell'
+                || $type === 'protocol_cover'
+                || str_starts_with($location, 'header_')
+                || ($field['cover_field'] ?? '') !== ''
+                || ($field['protocol_cover'] ?? false) === true;
+
+            // Table column-header row (row 0) stays locked — same as fresh import.
+            if (
+                ! $isLetterhead
+                && preg_match('/^table_\d+_row_0_col_/', $location)
+            ) {
+                $fields[$idx]['locked'] = true;
+
+                continue;
+            }
+
+            // True Word structural labels stay locked (same as fresh NEQ import).
+            if (
+                ! $isLetterhead
+                && $this->looksLikeNeqStructuralLabelField($field)
+                && empty($field['draft_editable'])
+                && empty($field['user_filled'])
+                && empty($field['auto_from_name'])
+            ) {
+                $fields[$idx]['locked'] = true;
+
+                continue;
+            }
+
+            // Locked Word body paragraphs stay locked unless previously marked draft/user.
+            if (
+                $type === 'paragraph_content'
+                && empty($field['draft_editable'])
+                && empty($field['user_filled'])
+                && ! $isLetterhead
+            ) {
+                $fields[$idx]['locked'] = true;
+
+                continue;
+            }
+
+            $isDateEntry = $this->isDocxDateTimeEntryField($field);
+            if ($isDateEntry) {
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['draft_editable'] = true;
+                $fields[$idx]['user_filled'] = true;
+                $fields[$idx]['prefilled'] = false;
+                $fields[$idx]['widget'] = 'datetime-local';
+                // Fresh pick again after send-back.
+                $fields[$idx]['value'] = '';
+                $fields[$idx]['date_selected'] = false;
+
+                continue;
+            }
+
+            // Fill targets (observations, signs, letterhead, approvers, radios, comments…):
+            // force reopen even when a prior submit tagged them prefilled/locked.
             $fields[$idx]['locked'] = false;
             $fields[$idx]['draft_editable'] = true;
+            $fields[$idx]['user_filled'] = true;
+            $fields[$idx]['prefilled'] = false;
         }
 
         return $fields;
@@ -1435,6 +1517,7 @@ class DocxImportController extends Controller
         'post_checked_by_production_name',
         'post_checked_by_quality_name',
         'post_checked_by_validation_name',
+        'post_approved_by_user_name',
         'post_approved_by_quality_name',
     ];
 
@@ -1445,6 +1528,7 @@ class DocxImportController extends Controller
         'post_checked_by_production_name'  => 'POST_PRODUCTION',
         'post_checked_by_quality_name'     => 'POST_CHECKED_QA',
         'post_checked_by_validation_name'  => 'POST_VALIDATION',
+        'post_approved_by_user_name'       => 'POST_APPROVED_USER',
         'post_approved_by_quality_name'    => 'POST_APPROVED_QA',
     ];
 
@@ -1600,16 +1684,76 @@ class DocxImportController extends Controller
             if (! is_array($field)) {
                 continue;
             }
-            if ((string) ($field['type'] ?? '') !== 'attachment') {
+            $label = (string) ($field['label'] ?? '');
+            $type = (string) ($field['type'] ?? '');
+            $widget = strtolower(trim((string) ($field['widget'] ?? '')));
+
+            // Annexure No. keeps the Word ANNEX_* id — never a Choose File control.
+            if ($this->isAnnexureIdColumnLabel($label)) {
+                $fields[$idx]['type'] = 'table_multicol';
+                $fields[$idx]['widget'] = 'text';
+                $val = trim((string) ($field['value'] ?? ''));
+                if ($val !== '') {
+                    $fields[$idx]['locked'] = true;
+                    $fields[$idx]['prefilled'] = true;
+                } else {
+                    $fields[$idx]['locked'] = false;
+                }
                 continue;
             }
-            if (! $this->isCertificateNumberColumnLabel((string) ($field['label'] ?? ''))) {
+
+            if ($type !== 'attachment' && $widget !== 'file') {
+                continue;
+            }
+            if (! $this->isCertificateNumberColumnLabel($label)) {
                 continue;
             }
 
             $fields[$idx]['type']   = 'table_multicol';
             $fields[$idx]['widget'] = 'text';
             $fields[$idx]['locked'] = false;
+            $fields[$idx]['draft_editable'] = true;
+            unset($fields[$idx]['prefilled']);
+        }
+
+        return $fields;
+    }
+
+    /**
+     * NEQ instrument / contact tables: NA placeholders stay fillable text.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function upgradeNeqPlaceholderTableCells(array $fields): array
+    {
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if (! preg_match('/^table_\d+_row_[1-9]\d*_col_\d+$/', $loc)) {
+                continue;
+            }
+            $label = (string) ($field['label'] ?? '');
+            if ($this->isAnnexureIdColumnLabel($label)) {
+                continue;
+            }
+            $type = strtolower(trim((string) ($field['type'] ?? '')));
+            if (in_array($type, ['attachment', 'approver', 'table_sl_no'], true)
+                || str_starts_with($type, 'approval_stamp')
+            ) {
+                continue;
+            }
+            $val = (string) ($field['value'] ?? '');
+            if (! $this->isPlaceholderTableValue($val) && trim($val) !== '') {
+                continue;
+            }
+            $fields[$idx]['type'] = 'table_multicol';
+            $fields[$idx]['widget'] = 'text';
+            $fields[$idx]['locked'] = false;
+            $fields[$idx]['draft_editable'] = true;
+            unset($fields[$idx]['prefilled']);
         }
 
         return $fields;
@@ -1776,21 +1920,23 @@ class DocxImportController extends Controller
     // Tags protocol cover cells (Equipment ID, Effective Date, etc.) with cover_field keys for sync.
     private function upgradeProtocolCoverFieldMetadata(array $fields): array
     {
+        // Needles use the same a-z0-9 spacing as sanitized labels ("facility section").
         $labelToCover = [
             'reference protocol'    => 'reference_protocol_no',
             'reference document no' => 'reference_protocol_no',
             'reference document'    => 'reference_protocol_no',
+            'ref document no'       => 'reference_protocol_no',
+            'ref document'          => 'reference_protocol_no',
             'ref protocol'          => 'reference_protocol_no',
             'document number'       => 'document_no',
             'document no'           => 'document_no',
             'document title'        => 'document_title',
-            'equipment/system name' => 'equipment_name',
+            'equipment system name' => 'equipment_name',
             'equipment name'        => 'equipment_name',
-            'equipment/system id'   => 'equipment_id',
+            'equipment system id'   => 'equipment_id',
             'equipment id no'       => 'equipment_id',
             'equipment id'          => 'equipment_id',
-            'facility / section'    => 'facility_section',
-            'facility/section'      => 'facility_section',
+            'facility section'      => 'facility_section',
             'effective date'        => 'effective_date',
         ];
 
@@ -1798,33 +1944,398 @@ class DocxImportController extends Controller
             if (! is_array($field)) {
                 continue;
             }
-            if (! empty($field['cover_field'])) {
-                $fields[$idx]['type'] = 'protocol_cover';
-                continue;
-            }
             $label = strtolower(trim((string) ($field['label'] ?? '')));
             $label = trim(preg_replace('/[^a-z0-9]+/', ' ', $label) ?? $label);
             // Collapse duplicated "Effective Date Effective Date" labels from merged DOCX cells.
             $label = preg_replace('/\b(effective date)(?:\s+\1)+\b/', '$1', $label) ?? $label;
+
+            $resolved = null;
             if (in_array($label, ['version', 'version no'], true)) {
-                $fields[$idx]['cover_field'] = 'version';
-                $fields[$idx]['type'] = 'protocol_cover';
-                continue;
+                $resolved = 'version';
+            } else {
+                foreach ($labelToCover as $needle => $key) {
+                    // Word-boundary match so "equipment identification" does not become
+                    // cover_field=equipment_id (which opens a description box on bullets).
+                    $needlePattern = '/(?:^| )' . preg_quote($needle, '/') . '(?: |$)/';
+                    if (preg_match($needlePattern, ' ' . $label . ' ') !== 1) {
+                        continue;
+                    }
+                    // Avoid tagging "Reference Document No." / body "As per Document No." as protocol Document No.
+                    if (
+                        $key === 'document_no'
+                        && (
+                            str_contains($label, 'reference')
+                            || str_contains($label, 'ref ')
+                            || str_contains($label, 'as per')
+                        )
+                    ) {
+                        continue;
+                    }
+                    $resolved = $key;
+                    break;
+                }
             }
-            foreach ($labelToCover as $needle => $key) {
-                if (! str_contains($label, $needle)) {
-                    continue;
-                }
-                // Avoid tagging "Reference Document No." as plain Document No.
-                if ($key === 'document_no' && str_contains($label, 'reference')) {
-                    continue;
-                }
-                $fields[$idx]['cover_field'] = $key;
-                $fields[$idx]['type']        = 'protocol_cover';
-                if ($key === 'effective_date') {
+
+            if ($resolved !== null) {
+                // Always re-assert cover_field from the label so Att6 REF DOCUMENT
+                // is not left tagged as document_no from legacy HVAC mapping.
+                $fields[$idx]['cover_field'] = $resolved;
+                $fields[$idx]['type'] = 'protocol_cover';
+                if ($resolved === 'effective_date') {
                     $fields[$idx]['widget'] = 'date';
                 }
-                break;
+            } elseif (! empty($field['cover_field'])) {
+                $fields[$idx]['type'] = 'protocol_cover';
+            }
+        }
+
+        $fields = $this->repairAtt4InstrumentsLetterheadCoverRoles($fields);
+        $fields = $this->repairAtt12TrainingLetterheadCoverRoles($fields);
+
+        return $this->repairAtt6LetterheadCoverRoles($fields);
+    }
+
+    /**
+     * Att12 Training letterhead:
+     * Reference Document No. (Version No.) | value
+     * Equipment/system name | value | Equipment/system ID No. | value
+     * Facility / Section | value
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function repairAtt12TrainingLetterheadCoverRoles(array $fields): array
+    {
+        $byLoc = [];
+        foreach ($fields as $idx => $field) {
+            if (is_array($field) && ($field['location'] ?? '') !== '') {
+                $byLoc[(string) $field['location']] = $idx;
+            }
+        }
+
+        if (! isset($byLoc['header_0_row_2_col_2'], $byLoc['header_0_row_3_col_2'], $byLoc['header_0_row_4_col_2'])) {
+            return $fields;
+        }
+        // Att6 has VERSION at row_5_col_4; Att4 has Document Title at row_3 — skip those.
+        if (isset($byLoc['header_0_row_5_col_4']) || $this->isAtt4InstrumentsLetterhead($byLoc)) {
+            return $fields;
+        }
+
+        $refIdx = $byLoc['header_0_row_2_col_2'];
+        $refLabel = strtolower(trim((string) ($fields[$refIdx]['label'] ?? '')));
+        if (! str_contains($refLabel, 'reference') && ! str_contains($refLabel, 'ref document')) {
+            return $fields;
+        }
+
+        $fields[$refIdx]['cover_field'] = 'reference_protocol_no';
+        $fields[$refIdx]['label'] = 'Reference Document No. (Version No.)';
+        $fields[$refIdx]['type'] = 'protocol_cover';
+        $fields[$refIdx]['locked'] = false;
+        $fields[$refIdx]['draft_editable'] = true;
+
+        $fields[$byLoc['header_0_row_3_col_2']]['cover_field'] = 'equipment_name';
+        $fields[$byLoc['header_0_row_3_col_2']]['type'] = 'protocol_cover';
+        $fields[$byLoc['header_0_row_3_col_2']]['locked'] = false;
+        $fields[$byLoc['header_0_row_3_col_2']]['draft_editable'] = true;
+
+        if (isset($byLoc['header_0_row_3_col_4'])) {
+            $fields[$byLoc['header_0_row_3_col_4']]['cover_field'] = 'equipment_id';
+            $fields[$byLoc['header_0_row_3_col_4']]['type'] = 'protocol_cover';
+            $fields[$byLoc['header_0_row_3_col_4']]['locked'] = false;
+            $fields[$byLoc['header_0_row_3_col_4']]['draft_editable'] = true;
+        }
+
+        $facIdx = $byLoc['header_0_row_4_col_2'];
+        $fields[$facIdx]['cover_field'] = 'facility_section';
+        $fields[$facIdx]['label'] = 'Facility / Section';
+        $fields[$facIdx]['type'] = 'protocol_cover';
+        $fields[$facIdx]['locked'] = false;
+        $fields[$facIdx]['draft_editable'] = true;
+
+        return $fields;
+    }
+
+    /**
+     * Att4 Instruments letterhead:
+     * Document No. (Version No.) | value
+     * Document Title | value
+     * Equipment/system name | value | Equipment/system ID No. | value
+     * Facility /Section | value
+     *
+     * Must NOT run Att6 remap (that retags Document Title → Facility and
+     * Facility → Document No., which makes Title edits overwrite Facility).
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function repairAtt4InstrumentsLetterheadCoverRoles(array $fields): array
+    {
+        $byLoc = [];
+        foreach ($fields as $idx => $field) {
+            if (is_array($field) && ($field['location'] ?? '') !== '') {
+                $byLoc[(string) $field['location']] = $idx;
+            }
+        }
+
+        if (! $this->isAtt4InstrumentsLetterhead($byLoc)) {
+            return $fields;
+        }
+
+        $map = [
+            'header_0_row_2_col_2' => ['document_no', 'Document No. (Version No.)'],
+            'header_0_row_3_col_2' => ['document_title', 'Document Title'],
+            'header_0_row_4_col_2' => ['equipment_name', 'Equipment / System Name'],
+            'header_0_row_4_col_4' => ['equipment_id', 'Equipment / System ID No.'],
+            'header_0_row_5_col_2' => ['facility_section', 'Facility / Section'],
+        ];
+
+        foreach ($map as $loc => [$cover, $label]) {
+            if (! isset($byLoc[$loc])) {
+                continue;
+            }
+            $idx = $byLoc[$loc];
+            $fields[$idx]['cover_field'] = $cover;
+            $fields[$idx]['label'] = $label;
+            $fields[$idx]['type'] = 'protocol_cover';
+            $fields[$idx]['locked'] = false;
+            $fields[$idx]['draft_editable'] = true;
+        }
+
+        return $fields;
+    }
+
+    /**
+     * Att4 fingerprint: Doc No at row2, title at row3, equip at row4, facility at row5,
+     * and no Att6 VERSION cell at row5col4.
+     *
+     * @param  array<string, int>  $byLoc
+     */
+    private function isAtt4InstrumentsLetterhead(array $byLoc): bool
+    {
+        if (isset($byLoc['header_0_row_5_col_4'])) {
+            return false;
+        }
+        if (isset($byLoc['header_0_row_3_col_4'])) {
+            // Att6 has equipment name on the facility row (row3 col4).
+            return false;
+        }
+
+        return isset(
+            $byLoc['header_0_row_2_col_2'],
+            $byLoc['header_0_row_3_col_2'],
+            $byLoc['header_0_row_4_col_2'],
+            $byLoc['header_0_row_5_col_2']
+        );
+    }
+
+    /**
+     * Att6 letterhead grid (row 3/4/5):
+     * FACILITY|val|EQUIPMENT NAME|val
+     * REF. DOCUMENT NO.|val|EQUIPMENT ID.|val
+     * DOCUMENT No.|val|VERSION|val
+     * Legacy HVAC code forced row_4_col_2 = document_no — undo that when row_5 has Document No.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function repairAtt6LetterheadCoverRoles(array $fields): array
+    {
+        $byLoc = [];
+        foreach ($fields as $idx => $field) {
+            if (is_array($field) && ($field['location'] ?? '') !== '') {
+                $byLoc[(string) $field['location']] = $idx;
+            }
+        }
+
+        // Never apply Att6 grid remap to Att4 Instruments (Document Title / Facility rows).
+        if ($this->isAtt4InstrumentsLetterhead($byLoc)) {
+            return $fields;
+        }
+
+        // Att6 requires VERSION value cell at row_5_col_4.
+        if (! isset($byLoc['header_0_row_5_col_4'])) {
+            return $fields;
+        }
+
+        $hasDocAtRow5 = isset($byLoc['header_0_row_5_col_2']);
+        $refLoc = 'header_0_row_4_col_2';
+        $verLoc = 'header_0_row_5_col_4';
+        $facLoc = 'header_0_row_3_col_2';
+
+        if ($hasDocAtRow5 && isset($byLoc[$refLoc])) {
+            $idx = $byLoc[$refLoc];
+            $fields[$idx]['cover_field'] = 'reference_protocol_no';
+            $fields[$idx]['label'] = 'Reference Document No.';
+            $fields[$idx]['type'] = 'protocol_cover';
+            // Do not keep HVAC "Document Number" label on the REF cell.
+        }
+
+        if (isset($byLoc['header_0_row_5_col_2'])) {
+            $idx = $byLoc['header_0_row_5_col_2'];
+            $fields[$idx]['cover_field'] = 'document_no';
+            $fields[$idx]['label'] = 'Document No.';
+            $fields[$idx]['type'] = 'protocol_cover';
+            $fields[$idx]['locked'] = false;
+            // Clear value wrongly copied from REF. DOCUMENT into blank Document No.
+            $refVal = isset($byLoc[$refLoc])
+                ? trim((string) ($fields[$byLoc[$refLoc]]['value'] ?? ''))
+                : '';
+            $docVal = trim((string) ($fields[$idx]['value'] ?? ''));
+            if ($docVal !== '' && $refVal !== '' && $docVal === $refVal) {
+                $fields[$idx]['value'] = '';
+                $fields[$idx]['prefilled'] = false;
+            }
+        }
+
+        if (isset($byLoc[$verLoc])) {
+            $idx = $byLoc[$verLoc];
+            $fields[$idx]['cover_field'] = 'version';
+            $fields[$idx]['label'] = 'Version';
+            $fields[$idx]['type'] = 'protocol_cover';
+            $fields[$idx]['locked'] = false;
+            $fields[$idx]['draft_editable'] = true;
+            $val = trim((string) ($fields[$idx]['value'] ?? ''));
+            // Lone "." is a broken python-docx read of split runs "0"+"."+"2".
+            if ($val === '.' || $val === '0.' || $val === '.2') {
+                $fields[$idx]['value'] = '0.2';
+                $fields[$idx]['prefilled'] = true;
+            }
+        }
+
+        if (isset($byLoc[$facLoc])) {
+            $idx = $byLoc[$facLoc];
+            $fields[$idx]['cover_field'] = 'facility_section';
+            $fields[$idx]['label'] = 'Facility / Section';
+            $fields[$idx]['type'] = 'protocol_cover';
+            $fields[$idx]['locked'] = false;
+            $fields[$idx]['draft_editable'] = true;
+        }
+
+        // All Att6 letterhead value cells stay fillable (even when Word-prefilled).
+        foreach (['header_0_row_3_col_4', 'header_0_row_4_col_4', $refLoc, $verLoc, 'header_0_row_5_col_2', $facLoc] as $lhLoc) {
+            if (! isset($byLoc[$lhLoc])) {
+                continue;
+            }
+            $idx = $byLoc[$lhLoc];
+            $fields[$idx]['locked'] = false;
+            $fields[$idx]['draft_editable'] = true;
+            $fields[$idx]['type'] = 'protocol_cover';
+        }
+
+        if (isset($byLoc['header_0_row_3_col_4'])) {
+            $idx = $byLoc['header_0_row_3_col_4'];
+            $fields[$idx]['cover_field'] = 'equipment_name';
+            $fields[$idx]['type'] = 'protocol_cover';
+        }
+
+        if (isset($byLoc['header_0_row_4_col_4'])) {
+            $idx = $byLoc['header_0_row_4_col_4'];
+            $fields[$idx]['cover_field'] = 'equipment_id';
+            $fields[$idx]['type'] = 'protocol_cover';
+        }
+
+        return $fields;
+    }
+
+    /**
+     * When Att6 VERSION was stored as "." / cleared empty, re-read letterhead
+     * cover values from the Word template so fill shows "0.2" etc.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function restoreAtt6LetterheadFromWordIfNeeded(Report $report, array $fields): array
+    {
+        $byLoc = [];
+        foreach ($fields as $idx => $field) {
+            if (is_array($field) && ($field['location'] ?? '') !== '') {
+                $byLoc[(string) $field['location']] = $idx;
+            }
+        }
+
+        if (! isset($byLoc['header_0_row_5_col_2'], $byLoc['header_0_row_5_col_4'])) {
+            return $fields;
+        }
+
+        $verIdx = $byLoc['header_0_row_5_col_4'];
+        $verVal = trim((string) ($fields[$verIdx]['value'] ?? ''));
+        $needsVersion = ($verVal === '' || $verVal === '.' || $verVal === '0.' || $verVal === '.2');
+        if (! $needsVersion) {
+            return $fields;
+        }
+
+        $fileId = trim((string) ($report->docx_import_path ?? ''));
+        if ($fileId === '') {
+            return $fields;
+        }
+
+        $this->ensureDocxTemplateOnDisk($report);
+        $filePath = $this->getDocxTemplateAbsolutePath($fileId);
+        if ($filePath === null || ! is_file($filePath)) {
+            return $fields;
+        }
+
+        $freshFields = [];
+        try {
+            $pythonBin = base_path('python-service/venv/Scripts/python.exe');
+            if (! is_file($pythonBin)) {
+                $pythonBin = 'python';
+            }
+            $cliScript = base_path('python-service/cli.py');
+            $process = new Process([$pythonBin, $cliScript, 'parse', $filePath]);
+            $process->setTimeout(60);
+            $process->run();
+            $output = trim($process->getOutput());
+            $jsonStart = strpos($output, '{"status"');
+            if ($jsonStart !== false) {
+                $decoded = json_decode(substr($output, $jsonStart), true);
+                if (is_array($decoded) && ($decoded['status'] ?? '') === 'success') {
+                    $freshFields = $this->normalizeImportFields($decoded['fields'] ?? []);
+                    $freshFields = $this->upgradeProtocolCoverFieldMetadata($freshFields);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::info('Att6 letterhead Word restore skipped: ' . $e->getMessage());
+
+            return $fields;
+        }
+
+        if ($freshFields === []) {
+            return $fields;
+        }
+
+        $freshByCover = [];
+        foreach ($freshFields as $ff) {
+            if (! is_array($ff)) {
+                continue;
+            }
+            $ck = (string) ($ff['cover_field'] ?? '');
+            $val = trim((string) ($ff['value'] ?? ''));
+            if ($ck !== '' && $val !== '' && ! isset($freshByCover[$ck])) {
+                $freshByCover[$ck] = $val;
+            }
+        }
+
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $ck = (string) ($field['cover_field'] ?? '');
+            if ($ck === '' || ! isset($freshByCover[$ck])) {
+                continue;
+            }
+            $cur = trim((string) ($field['value'] ?? ''));
+            $broken = ($ck === 'version' && in_array($cur, ['', '.', '0.', '.2'], true));
+            $blankDoc = ($ck === 'document_no'); // never overwrite user text; only fill if we want — skip non-empty
+            if ($blankDoc) {
+                // Keep blank Document No. as blank even if fresh is blank.
+                continue;
+            }
+            if ($cur === '' || $broken) {
+                $fields[$idx]['value'] = $freshByCover[$ck];
+                $fields[$idx]['prefilled'] = true;
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['draft_editable'] = true;
             }
         }
 
@@ -1918,19 +2429,35 @@ class DocxImportController extends Controller
             return $this->findPrimaryEffectiveDateLocation($fields);
         }
 
+        $fallback = null;
         foreach ($fields as $field) {
             if (! is_array($field)) {
                 continue;
             }
-            if ((string) ($field['cover_field'] ?? '') === $coverField) {
-                $loc = (string) ($field['location'] ?? '');
-                if ($loc !== '') {
-                    return $loc;
-                }
+            if ((string) ($field['cover_field'] ?? '') !== $coverField) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if ($loc === '') {
+                continue;
+            }
+            // Att6 Document No. lives on row_5; row_4_col_2 is REF DOCUMENT.
+            if ($coverField === 'document_no' && $loc === 'header_0_row_5_col_2') {
+                return $loc;
+            }
+            if ($coverField === 'reference_protocol_no' && $loc === 'header_0_row_4_col_2') {
+                return $loc;
+            }
+            // Att12 Training: Reference Document No. (Version No.) value cell.
+            if ($coverField === 'reference_protocol_no' && $loc === 'header_0_row_2_col_2') {
+                return $loc;
+            }
+            if ($fallback === null) {
+                $fallback = $loc;
             }
         }
 
-        return null;
+        return $fallback;
     }
 
     /**
@@ -2365,9 +2892,8 @@ class DocxImportController extends Controller
         }
 
         // Always keep synthetic header keys used by the Lupin wrap header.
-        if (empty($map['protocol_document_no']) && empty($map['document_no'])) {
-            $map['protocol_document_no'] = 'header_0_row_4_col_2';
-        }
+        // Do NOT default Document No. onto header_0_row_4_col_2 — on Att12 that
+        // cell is Facility / Section and would overwrite the wrong letterhead value.
         if (empty($map['reference_protocol_no'])) {
             $map['reference_protocol_no'] = 'header_ref_protocol';
         }
@@ -2564,6 +3090,16 @@ class DocxImportController extends Controller
      */
     private function resolveProtocolDocumentNumber(Report $report, array $fields): string
     {
+        $fields = $this->upgradeProtocolCoverFieldMetadata($fields);
+        $docLoc = $this->findCoverFieldLocation($fields, 'document_no');
+        $fromFields = $this->extractCoverTextValue($fields, 'document_no');
+
+        // Att6: Document No. is row_5_col_2 and is often blank in Word.
+        // Never fill it from report.data / REF. DOCUMENT NO. leftovers.
+        if ($docLoc === 'header_0_row_5_col_2') {
+            return $fromFields;
+        }
+
         $data = $report->data ?? [];
         if (is_string($data)) {
             $data = json_decode($data, true) ?? [];
@@ -2577,7 +3113,6 @@ class DocxImportController extends Controller
             return $fromData;
         }
 
-        $fromFields = $this->extractCoverTextValue($fields, 'document_no');
         if ($fromFields !== '') {
             return $fromFields;
         }
@@ -2587,10 +3122,23 @@ class DocxImportController extends Controller
             return $identity['document_number'];
         }
 
-        foreach (['header_0_row_4_col_2', 'header_0_row_5_col_2'] as $hdrLoc) {
+        foreach (['header_0_row_5_col_2', 'header_0_row_4_col_2'] as $hdrLoc) {
+            if ($hdrLoc === 'header_0_row_4_col_2') {
+                foreach ($fields as $field) {
+                    if (! is_array($field)) {
+                        continue;
+                    }
+                    if ((string) ($field['location'] ?? '') !== $hdrLoc) {
+                        continue;
+                    }
+                    if ((string) ($field['cover_field'] ?? '') === 'reference_protocol_no') {
+                        continue 2;
+                    }
+                }
+            }
             $legacy = trim($this->fieldValueByLocation($fields, $hdrLoc, ''));
-        if ($legacy !== '' && ! ctype_digit($legacy)) {
-            return $legacy;
+            if ($legacy !== '' && ! ctype_digit($legacy)) {
+                return $legacy;
             }
         }
 
@@ -2646,8 +3194,18 @@ class DocxImportController extends Controller
         $ensure = function (string $location, string $label, string $coverKey, string $value) use (&$fields, &$byLoc): void {
             if (isset($byLoc[$location])) {
                 $idx = $byLoc[$location];
-                // Always apply mapping-card value (including clear) for these wrap-header slots.
-                $fields[$idx]['value'] = $value;
+                $existingCover = (string) ($fields[$idx]['cover_field'] ?? '');
+                // Never retag Att6 REF. DOCUMENT (reference_protocol_no) as document_no.
+                if (
+                    $existingCover !== ''
+                    && $existingCover !== $coverKey
+                    && in_array($existingCover, ['reference_protocol_no', 'equipment_id', 'equipment_name', 'facility_section', 'version'], true)
+                ) {
+                    return;
+                }
+                if ($value !== '') {
+                    $fields[$idx]['value'] = $value;
+                }
                 $fields[$idx]['cover_field'] = $fields[$idx]['cover_field'] ?? $coverKey;
                 $fields[$idx]['locked'] = false;
 
@@ -2664,8 +3222,36 @@ class DocxImportController extends Controller
             $byLoc[$location] = count($fields) - 1;
         };
 
-        $ensure('header_0_row_4_col_2', 'Document Number', 'document_no', $documentNumber);
-        $ensure('header_ref_protocol', 'Reference Protocol No', 'reference_protocol_no', $referenceProtocolNo);
+        // Prefer real Document No. cell (Att6 = header_0_row_5_col_2), never REF DOCUMENT.
+        $docLoc = $this->findCoverFieldLocation($fields, 'document_no');
+        if ($docLoc === 'header_0_row_4_col_2' && isset($byLoc['header_0_row_5_col_2'])) {
+            $docLoc = 'header_0_row_5_col_2';
+        }
+        if (
+            $docLoc === null
+            || $docLoc === ''
+        ) {
+            if (isset($byLoc['header_0_row_5_col_2'])) {
+                $docLoc = 'header_0_row_5_col_2';
+            } elseif (
+                isset($byLoc['header_0_row_4_col_2'])
+                && (string) ($fields[$byLoc['header_0_row_4_col_2']]['cover_field'] ?? '') !== 'reference_protocol_no'
+            ) {
+                $docLoc = 'header_0_row_4_col_2';
+            }
+        }
+        if (is_string($docLoc) && $docLoc !== '') {
+            $ensure($docLoc, 'Document No.', 'document_no', $documentNumber);
+        }
+
+        $refLoc = $this->findCoverFieldLocation($fields, 'reference_protocol_no');
+        if (! is_string($refLoc) || $refLoc === '') {
+            $refLoc = isset($byLoc['header_0_row_4_col_2'])
+                && (string) ($fields[$byLoc['header_0_row_4_col_2']]['cover_field'] ?? '') === 'reference_protocol_no'
+                ? 'header_0_row_4_col_2'
+                : 'header_ref_protocol';
+        }
+        $ensure($refLoc, 'Reference Document No.', 'reference_protocol_no', $referenceProtocolNo);
 
         return $fields;
     }
@@ -2684,16 +3270,32 @@ class DocxImportController extends Controller
         array $formFields,
         array $importFields
     ): array {
+        $docLoc = $this->findCoverFieldLocation($importFields, 'document_no');
+        $refLoc = $this->findCoverFieldLocation($importFields, 'reference_protocol_no');
+        // Att12: label-only fallback when cover_field was stripped by older normalizeImportFields.
+        if ($refLoc === null || $refLoc === '') {
+            $refLoc = $this->findReferenceDocumentLetterheadLocation($importFields);
+        }
+
         $docNo = trim((string) $request->input('protocol_document_no', ''));
         if ($docNo === '') {
-            $docNo = trim((string) ($formFields['protocol_document_no'] ?? $formFields['header_0_row_4_col_2'] ?? ''));
+            $docNo = trim((string) ($formFields['protocol_document_no'] ?? ''));
         }
-        if ($docNo === '' && ! $request->has('protocol_document_no') && ! array_key_exists('header_0_row_4_col_2', $formFields)) {
+        // Never treat Facility / Reference Document letterhead cells as Document No.
+        if ($docNo === '' && is_string($docLoc) && $docLoc !== '' && ! $this->isFacilityOrReferenceLetterheadLocation($importFields, $docLoc)) {
+            $docNo = trim((string) ($formFields[$docLoc] ?? ''));
+        }
+        if ($docNo === '' && ! $request->has('protocol_document_no')) {
             $docNo = trim((string) ($data['document_number'] ?? ''));
         }
+
         $refNo = trim((string) $request->input('reference_protocol_no', ''));
         if ($refNo === '') {
             $refNo = trim((string) ($formFields['reference_protocol_no'] ?? $formFields['header_ref_protocol'] ?? ''));
+        }
+        // Keep value typed into the letterhead "Reference Document No." cell.
+        if ($refNo === '' && is_string($refLoc) && $refLoc !== '') {
+            $refNo = trim((string) ($formFields[$refLoc] ?? ''));
         }
         if ($refNo === '' && ! $request->has('reference_protocol_no') && ! array_key_exists('header_ref_protocol', $formFields)) {
             $refNo = trim((string) ($data['reference_protocol_no'] ?? ''));
@@ -2711,19 +3313,80 @@ class DocxImportController extends Controller
 
         $formFields['protocol_document_no'] = $docNo;
         $formFields['reference_protocol_no'] = $refNo;
-        $formFields['header_0_row_4_col_2'] = $docNo;
         $formFields['header_ref_protocol'] = $refNo;
 
-        $docLoc = $this->findCoverFieldLocation($importFields, 'document_no');
-        if ($docLoc) {
+        if (is_string($docLoc) && $docLoc !== '' && $docNo !== ''
+            && ! $this->isFacilityOrReferenceLetterheadLocation($importFields, $docLoc)
+        ) {
             $formFields[$docLoc] = $docNo;
         }
-        $refLoc = $this->findCoverFieldLocation($importFields, 'reference_protocol_no');
-        if ($refLoc) {
-            $formFields[$refLoc] = $refNo;
+        if (is_string($refLoc) && $refLoc !== '') {
+            // Never blank out a letterhead value the user already typed.
+            if ($refNo !== '' || trim((string) ($formFields[$refLoc] ?? '')) === '') {
+                $formFields[$refLoc] = $refNo;
+            } elseif ($refNo === '' && trim((string) ($formFields[$refLoc] ?? '')) !== '') {
+                $refNo = trim((string) $formFields[$refLoc]);
+                $data['reference_protocol_no'] = $refNo;
+                $formFields['reference_protocol_no'] = $refNo;
+                $formFields['header_ref_protocol'] = $refNo;
+            }
         }
 
         return [$data, $formFields];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $fields
+     */
+    private function findReferenceDocumentLetterheadLocation(array $fields): ?string
+    {
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if ($loc === '' || ! str_starts_with($loc, 'header_')) {
+                continue;
+            }
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $label = trim(preg_replace('/[^a-z0-9]+/', ' ', $label) ?? $label);
+            if (
+                str_contains($label, 'reference document')
+                || str_contains($label, 'ref document')
+                || (str_contains($label, 'reference') && str_contains($label, 'document'))
+            ) {
+                return $loc;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $fields
+     */
+    private function isFacilityOrReferenceLetterheadLocation(array $fields, string $location): bool
+    {
+        foreach ($fields as $field) {
+            if (! is_array($field) || (string) ($field['location'] ?? '') !== $location) {
+                continue;
+            }
+            $cover = strtolower(trim((string) ($field['cover_field'] ?? '')));
+            if (in_array($cover, ['facility_section', 'reference_protocol_no'], true)) {
+                return true;
+            }
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $label = trim(preg_replace('/[^a-z0-9]+/', ' ', $label) ?? $label);
+            if (
+                str_contains($label, 'facility')
+                || str_contains($label, 'reference document')
+                || str_contains($label, 'ref document')
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -2743,7 +3406,26 @@ class DocxImportController extends Controller
             if ($key === '' || $loc === '') {
                 continue;
             }
-            if (! isset($map[$key]) || ($key === 'document_no' && $loc === 'header_0_row_4_col_2')) {
+            // Prefer Att6 Document No. at row_5 over legacy HVAC row_4 (often REF DOCUMENT).
+            // Do NOT steal Att4 Facility (also row_5_col_2) as Document No.
+            if (! isset($map[$key])) {
+                $map[$key] = $loc;
+            } elseif (
+                $key === 'document_no'
+                && $loc === 'header_0_row_5_col_2'
+                && ($map[$key] ?? '') !== 'header_0_row_2_col_2'
+            ) {
+                $map[$key] = $loc;
+            } elseif (
+                $key === 'reference_protocol_no'
+                && in_array($loc, ['header_0_row_4_col_2', 'header_0_row_2_col_2'], true)
+            ) {
+                $map[$key] = $loc;
+            } elseif (
+                $key === 'document_no'
+                && $loc === 'header_0_row_2_col_2'
+            ) {
+                // Att4 Document No. (Version No.) wins over a mis-tagged row_5 cell.
                 $map[$key] = $loc;
             }
         }
@@ -2752,44 +3434,62 @@ class DocxImportController extends Controller
     }
 
     /**
-     * Resolves Effective Date:
-     * - Before pre-approval is complete (pre_setup, pre_pending, pre_returned):
-     *   MUST NOT be automatic - stays blank.
-     * - Once pre-approval is completed:
-     *   Uses the date of the last pre-approval step.
+     * Resolves Effective Date for the fill form (Y-m-d):
+     * - Before pre-approval is complete: blank.
+     * - After pre/post approvals: date of the latest approved step.
      */
     private function resolveEffectiveDate(Report $report, array $fields): string
     {
         try {
-            $isPreApproved = in_array($report->status, ['pre_approved', 'post_setup', 'post_pending', 'post_returned', 'approved'], true);
-
-            // Find the last approved step in stage 'pre'
-            $lastPreStep = $report->approvalSteps()
-                ->where('stage', 'pre')
-                ->whereNotNull('approved_at')
-                ->orderByDesc('step_order')
-                ->first();
-
-            // If pre-approval is completed or all pre steps were approved:
-            if ($isPreApproved || ($lastPreStep && ! $report->approvalSteps()->where('stage', 'pre')->whereNull('approved_at')->exists())) {
-                if ($lastPreStep && $lastPreStep->approved_at) {
-                    return \Carbon\Carbon::parse($lastPreStep->approved_at)->timezone('Asia/Kolkata')->format('Y-m-d');
+            $stamp = $this->resolveLastApprovalDateTime($report);
+            if ($stamp !== '') {
+                // Form date inputs need Y-m-d; keep time only in DOCX via formatEffectiveDateForDocx path.
+                try {
+                    return \Carbon\Carbon::parse($stamp)->timezone('Asia/Kolkata')->format('Y-m-d');
+                } catch (\Throwable $e) {
+                    return $this->normalizeEffectiveDateForForm($stamp);
                 }
+            }
 
-                // Fallback to explicitly stored effective_date on report data
-        $data = $report->data ?? [];
-        if (is_string($data)) {
-            $data = json_decode($data, true) ?? [];
-        }
-        if (is_array($data) && ! empty($data['effective_date'])) {
-            return $this->normalizeEffectiveDateForForm((string) $data['effective_date']);
-                }
+            $data = $report->data ?? [];
+            if (is_string($data)) {
+                $data = json_decode($data, true) ?? [];
+            }
+            if (is_array($data) && ! empty($data['effective_date'])) {
+                return $this->normalizeEffectiveDateForForm((string) $data['effective_date']);
             }
         } catch (\Throwable $e) {
             // Ignore step query issues
         }
 
-        // Before pre-approval is complete: effective date must remain BLANK (not automatic)
+        return '';
+    }
+
+    /**
+     * Latest approval timestamp (post preferred, else pre) as d-m-Y h:i A for the DOCX cover.
+     */
+    private function resolveLastApprovalDateTime(Report $report): string
+    {
+        $report->loadMissing('approvalSteps');
+
+        $lastPost = $report->approvalSteps
+            ->where('stage', 'post')
+            ->filter(fn ($s) => $s->approved_at !== null)
+            ->sortByDesc(fn ($s) => $s->approved_at?->getTimestamp() ?? 0)
+            ->first();
+        if ($lastPost && $lastPost->approved_at) {
+            return $lastPost->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+        }
+
+        $lastPre = $report->approvalSteps
+            ->where('stage', 'pre')
+            ->filter(fn ($s) => $s->approved_at !== null)
+            ->sortByDesc(fn ($s) => $s->approved_at?->getTimestamp() ?? 0)
+            ->first();
+        if ($lastPre && $lastPre->approved_at) {
+            return $lastPre->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+        }
+
         return '';
     }
 
@@ -2914,14 +3614,30 @@ class DocxImportController extends Controller
     }
 
     // Converts Y-m-d from form input into d-m-Y for DOCX cover cell display.
+    // Preserves approval timestamps already formatted as d-m-Y h:i A.
     private function formatEffectiveDateForDocx(string $date): string
     {
         $date = trim($date);
+        if ($date === '') {
+            return '';
+        }
+        // Already stamped with time from last approval — keep as-is.
+        if (preg_match('/^\d{2}-\d{2}-\d{4}\s+\d{1,2}:\d{2}\s*(?:AM|PM)$/i', $date)) {
+            return $date;
+        }
         if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $m)) {
             return $m[3] . '-' . $m[2] . '-' . $m[1];
         }
-
-        return $date;
+        // Y-m-d H:i:s (or with timezone offset) → d-m-Y h:i A
+        try {
+            $parsed = \Carbon\Carbon::parse($date)->timezone('Asia/Kolkata');
+            if (preg_match('/\d{1,2}:\d{2}/', $date)) {
+                return $parsed->format('d-m-Y h:i A');
+            }
+            return $parsed->format('d-m-Y');
+        } catch (\Throwable $e) {
+            return $date;
+        }
     }
 
     /**
@@ -2941,7 +3657,11 @@ class DocxImportController extends Controller
         }
 
         $date = '';
-        if (is_array($data) && ! empty($data['effective_date'])) {
+        // Prefer last approver timestamp (with time) once an approval stage is complete.
+        if (in_array($report->status, ['approved', 'pre_approved'], true)) {
+            $date = $this->resolveLastApprovalDateTime($report);
+        }
+        if ($date === '' && is_array($data) && ! empty($data['effective_date'])) {
             $date = $this->formatEffectiveDateForDocx((string) $data['effective_date']);
         }
         if ($date === '') {
@@ -3160,9 +3880,9 @@ class DocxImportController extends Controller
                 }
             }
 
-            // Standard Approved By two-row layout: validation then QA approval.
+            // Standard Approved By two-row layout: User/Validation then QA approval.
             if (str_contains($title, 'approved by')) {
-                $this->assignApproverRoleIfEmpty($fields, $rows, 1, 'post_checked_by_validation_name');
+                $this->assignApproverRoleIfEmpty($fields, $rows, 1, 'post_approved_by_user_name');
                 $this->assignApproverRoleIfEmpty($fields, $rows, 2, 'post_approved_by_quality_name');
                 continue;
             }
@@ -3303,7 +4023,22 @@ class DocxImportController extends Controller
         }
 
         return (bool) preg_match('/certificate\s*(?:no\.?|number|#)/', $ll)
+            || (bool) preg_match('/(?:ref(?:erence)?\.?\s*no\.?|ref\.?)\s*(?:of\s+)?certificate/', $ll)
             || (bool) preg_match('/\bcert\.?\s*no\.?/', $ll);
+    }
+
+    private function isAnnexureIdColumnLabel(string $label): bool
+    {
+        $ll = strtolower(trim(preg_replace('/\s+/u', ' ', $label) ?? $label));
+
+        return (bool) preg_match('/^(annexure|annex)\s*(no\.?|number|#)?$/', $ll);
+    }
+
+    private function isPlaceholderTableValue(string $value): bool
+    {
+        $t = strtolower(trim(preg_replace('/\s+/u', ' ', $value) ?? $value));
+
+        return in_array($t, ['na', 'n/a', 'n.a.', 'n.a', '-', '–', '—', '.', '...', 'nil', 'none'], true);
     }
 
     /**
@@ -3436,72 +4171,54 @@ class DocxImportController extends Controller
             $byTable[$m[1]][(int) $m[2]][(int) $m[3]] = $idx;
         }
 
-        $checkedRoles = [
-            2 => 'post_checked_by_engineering_name',
-            3 => 'post_checked_by_production_name',
-            4 => 'post_checked_by_quality_name',
-            5 => 'post_checked_by_validation_name',
-        ];
-
-        $reportApprovalTables = [];
         foreach ($byTable as $tableNum => $rows) {
-            $nameRows = [];
+            $title = $this->neqApprovalTableTitle($fields, $rows);
+            if ($title === '') {
+                continue;
+            }
+
+            ksort($rows);
+            $nameCol = $this->neqApprovalNameCol($fields, $rows);
+            if ($nameCol === null) {
+                continue;
+            }
+
+            $dataRows = [];
             foreach ($rows as $rowNum => $cols) {
-                if ($rowNum < 2 || ! isset($cols[0])) {
+                if ($rowNum < 1 || ! isset($cols[$nameCol])) {
                     continue;
                 }
-                $idx = $cols[0];
+                $idx = $cols[$nameCol];
+                $type = strtolower(trim((string) ($fields[$idx]['type'] ?? '')));
                 $label = strtolower(trim((string) ($fields[$idx]['label'] ?? '')));
-                $type = (string) ($fields[$idx]['type'] ?? '');
                 $role = (string) ($fields[$idx]['approver_role'] ?? '');
-                $isName = $label === 'name'
-                    || (str_contains($label, 'name') && str_contains($label, 'designation'))
-                    || $type === 'approver'
-                    || str_starts_with($role, 'post_');
-                $sigIdx = $cols[1] ?? null;
-                $dateIdx = $cols[2] ?? null;
-                $sigLabel = is_int($sigIdx) ? strtolower(trim((string) ($fields[$sigIdx]['label'] ?? ''))) : '';
-                $dateLabel = is_int($dateIdx) ? strtolower(trim((string) ($fields[$dateIdx]['label'] ?? ''))) : '';
-                $hasSigDate = str_contains($sigLabel, 'signature') && str_contains($dateLabel, 'date');
-                if ($isName && $hasSigDate) {
-                    $nameRows[] = $rowNum;
+                $isName = $type === 'approver'
+                    || str_starts_with($role, 'post_')
+                    || $label === 'name'
+                    || (str_contains($label, 'name') && str_contains($label, 'designation'));
+                if ($isName) {
+                    $dataRows[] = $rowNum;
                 }
             }
-            if ($nameRows !== []) {
-                $reportApprovalTables[$tableNum] = $nameRows;
+            if ($dataRows === []) {
+                continue;
             }
-        }
 
-        if ($reportApprovalTables === []) {
-            return $fields;
-        }
-
-        $ordered = array_keys($reportApprovalTables);
-        sort($ordered, SORT_NUMERIC);
-        $singleRowTables = [];
-        foreach ($ordered as $tableNum) {
-            if (count($reportApprovalTables[$tableNum]) === 1) {
-                $singleRowTables[] = $tableNum;
-            }
-        }
-
-        foreach ($ordered as $tableNum) {
-            $nameRows = $reportApprovalTables[$tableNum];
-            $isChecked = count($nameRows) >= 2;
-            $isPrepared = ! $isChecked && ($singleRowTables[0] ?? null) === $tableNum;
-
-            foreach ($nameRows as $rowNum) {
-                $idx = $byTable[$tableNum][$rowNum][0] ?? null;
+            foreach ($dataRows as $offset => $rowNum) {
+                $idx = $rows[$rowNum][$nameCol] ?? null;
                 if ($idx === null || ! is_array($fields[$idx] ?? null)) {
                     continue;
                 }
-
-                if ($isChecked) {
-                    $role = $checkedRoles[$rowNum] ?? 'post_checked_by_engineering_name';
-                } elseif ($isPrepared) {
-                    $role = 'post_prepared_by_name';
-                } else {
-                    $role = 'post_approved_by_quality_name';
+                $deptLabel = '';
+                if (isset($rows[$rowNum][0]) && $nameCol !== 0) {
+                    $deptLabel = strtolower(trim((string) (
+                        ($fields[$rows[$rowNum][0]]['value'] ?? '')
+                        ?: ($fields[$rows[$rowNum][0]]['label'] ?? '')
+                    )));
+                }
+                $role = $this->neqApprovalRoleForRow($title, $deptLabel, $offset, count($dataRows));
+                if ($role === '') {
+                    continue;
                 }
 
                 $fields[$idx]['type'] = 'approver';
@@ -3509,12 +4226,162 @@ class DocxImportController extends Controller
                 $fields[$idx]['locked'] = false;
                 $fields[$idx]['approver_role'] = $role;
                 $fields[$idx]['stamp_eligible'] = true;
-                $fields[$idx]['signature_date_location'] = "table_{$tableNum}_row_{$rowNum}_col_2";
                 $fields[$idx]['draft_editable'] = true;
+                unset($fields[$idx]['prefilled']);
+                // Prefer explicit date col; else signature/date merged col.
+                $dateCol = isset($rows[$rowNum][3]) ? 3 : (isset($rows[$rowNum][2]) ? 2 : null);
+                if ($dateCol !== null) {
+                    $fields[$idx]['signature_date_location'] = "table_{$tableNum}_row_{$rowNum}_col_{$dateCol}";
+                }
+                // Keep Signature / Date stamp cells on the same role as Name.
+                foreach ($cols = ($rows[$rowNum] ?? []) as $colNum => $stampIdx) {
+                    if ((int) $colNum === (int) $nameCol || ! is_array($fields[$stampIdx] ?? null)) {
+                        continue;
+                    }
+                    $stampType = strtolower(trim((string) ($fields[$stampIdx]['type'] ?? '')));
+                    if (str_starts_with($stampType, 'approval_stamp_') || str_contains(
+                        strtolower((string) ($fields[$stampIdx]['label'] ?? '')),
+                        'signature'
+                    ) || str_contains(strtolower((string) ($fields[$stampIdx]['label'] ?? '')), 'date')) {
+                        $fields[$stampIdx]['approver_role'] = $role;
+                    }
+                }
             }
         }
 
+        // Legacy parser used pre-approval key approved_by_user_name on POST Approved By rows.
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            if ((string) ($field['approver_role'] ?? '') !== 'approved_by_user_name') {
+                continue;
+            }
+            $fields[$idx]['approver_role'] = 'post_approved_by_user_name';
+            $fields[$idx]['type'] = 'approver';
+            $fields[$idx]['widget'] = 'approver';
+            $fields[$idx]['locked'] = false;
+            $fields[$idx]['draft_editable'] = true;
+            $fields[$idx]['stamp_eligible'] = true;
+            unset($fields[$idx]['prefilled'], $fields[$idx]['is_pre_approver']);
+        }
+
         return $fields;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $fields
+     * @param  array<int, array<int, int>>  $rows
+     */
+    private function neqApprovalTableTitle(array $fields, array $rows): string
+    {
+        foreach ($rows[0] ?? [] as $idx) {
+            if (! is_array($fields[$idx] ?? null)) {
+                continue;
+            }
+            $blob = strtolower(trim(
+                (string) (($fields[$idx]['value'] ?? '') ?: ($fields[$idx]['label'] ?? ''))
+            ));
+            foreach (['prepared by', 'checked by', 'approved by'] as $title) {
+                if (str_contains($blob, $title)) {
+                    return $title;
+                }
+            }
+        }
+
+        // Department tables often omit row-0 headers from fillable fields — infer by size.
+        $nameRows = 0;
+        foreach ($rows as $rowNum => $_cols) {
+            if ($rowNum >= 1) {
+                $nameRows++;
+            }
+        }
+        if ($nameRows >= 3) {
+            return 'checked by';
+        }
+        if ($nameRows === 2) {
+            return 'approved by';
+        }
+        if ($nameRows === 1) {
+            return 'prepared by';
+        }
+
+        return '';
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $fields
+     * @param  array<int, array<int, int>>  $rows
+     */
+    private function neqApprovalNameCol(array $fields, array $rows): ?int
+    {
+        foreach ([1, 0] as $col) {
+            foreach ($rows as $rowNum => $cols) {
+                if ($rowNum < 1 || ! isset($cols[$col])) {
+                    continue;
+                }
+                $idx = $cols[$col];
+                if (! is_array($fields[$idx] ?? null)) {
+                    continue;
+                }
+                $type = strtolower(trim((string) ($fields[$idx]['type'] ?? '')));
+                $label = strtolower(trim((string) ($fields[$idx]['label'] ?? '')));
+                $role = (string) ($fields[$idx]['approver_role'] ?? '');
+                if (
+                    $type === 'approver'
+                    || str_starts_with($role, 'post_')
+                    || $role === 'approved_by_user_name'
+                    || $label === 'name'
+                    || (str_contains($label, 'name') && str_contains($label, 'designation'))
+                ) {
+                    return $col;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function neqApprovalRoleForRow(string $title, string $deptLabel, int $offset, int $rowCount): string
+    {
+        $dept = strtolower(trim($deptLabel));
+        if ($title === 'prepared by') {
+            return 'post_prepared_by_name';
+        }
+        if ($title === 'approved by') {
+            if (str_contains($dept, 'quality') || str_contains($dept, 'assurance')) {
+                return 'post_approved_by_quality_name';
+            }
+            if (str_contains($dept, 'validation') || str_contains($dept, 'user')) {
+                return 'post_approved_by_user_name';
+            }
+
+            return $offset === 0 ? 'post_approved_by_user_name' : 'post_approved_by_quality_name';
+        }
+        if ($title === 'checked by') {
+            if (str_contains($dept, 'engineering')) {
+                return 'post_checked_by_engineering_name';
+            }
+            if (str_contains($dept, 'production')) {
+                return 'post_checked_by_production_name';
+            }
+            if (str_contains($dept, 'quality') || str_contains($dept, 'assurance') || $dept === 'qa') {
+                return 'post_checked_by_quality_name';
+            }
+            if (str_contains($dept, 'validation') || str_contains($dept, 'user')) {
+                return 'post_checked_by_validation_name';
+            }
+            $byOffset = [
+                0 => 'post_checked_by_validation_name',
+                1 => 'post_checked_by_production_name',
+                2 => 'post_checked_by_engineering_name',
+                3 => 'post_checked_by_quality_name',
+            ];
+
+            return $byOffset[$offset] ?? 'post_checked_by_engineering_name';
+        }
+
+        return '';
     }
 
     /**
@@ -3771,6 +4638,7 @@ PY;
             'post_checked_by_production_name',
             'post_checked_by_quality_name',
             'post_checked_by_validation_name',
+            'post_approved_by_user_name',
             'post_approved_by_quality_name',
         ];
 
@@ -5047,6 +5915,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 )
             )
         );
+        // Att6: restore VERSION "0.2" (etc.) from Word when stored value was "." / cleared.
+        if (($report->import_source ?? '') === 'new_equipment_qualification') {
+            $fields = $this->restoreAtt6LetterheadFromWordIfNeeded($report, $fields);
+        }
         // Upgrade any paragraph with blanks that became paragraph_content back to paragraph_blank
         foreach ($fields as $idx => $f) {
             if (! is_array($f)) {
@@ -5091,6 +5963,33 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $report->save();
             if (! empty($report->docx_import_path)) {
                 $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
+            }
+        }
+
+        // Att10: older imports skipped "Safety Checks By (Sign./Date)" as a banner — reparse once.
+        if (
+            ($report->import_source ?? '') === 'new_equipment_qualification'
+            && ! empty($report->docx_import_path)
+            && in_array($report->status, ['post_setup', 'post_returned', 'draft', 'pre_setup'], true)
+        ) {
+            $hasSafetyBySignField = collect($fields)->contains(function ($f) {
+                if (! is_array($f)) {
+                    return false;
+                }
+                $label = (string) ($f['label'] ?? '');
+                $value = (string) ($f['value'] ?? '');
+
+                return preg_match('/^safety\s*(?:checks?\s*)?s?\s*by\b/i', $label) === 1
+                    || preg_match('/^safety\s*(?:checks?\s*)?s?\s*by\b/i', $value) === 1;
+            });
+            if (! $hasSafetyBySignField) {
+                $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
+                $reparsed = $this->reparseDocxForReport($report);
+                if (! empty($reparsed)) {
+                    $fields = $reparsed;
+                    $report->docx_import_fields = $fields;
+                    $report->save();
+                }
             }
         }
 
@@ -5194,9 +6093,23 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $report->save();
         }
 
-        $equipmentName   = $report->equipment_name ?? '';
-        $equipmentId     = $report->equipment_id ?? '';
-        $facilitySection = $report->facility_section ?? '';
+        // Prefer Word letterhead cover values over create-form junk so JS sync
+        // does not overwrite Att6 PRODUCTION / WEIGHING BALANCE / 0.2.
+        $equipmentName = trim((string) ($report->equipment_name ?? ''));
+        $coverEquipmentName = $this->extractCoverTextValue($fields, 'equipment_name');
+        if ($coverEquipmentName !== '') {
+            $equipmentName = $coverEquipmentName;
+        }
+        $equipmentId = trim((string) ($report->equipment_id ?? ''));
+        $coverEquipmentId = $this->extractCoverTextValue($fields, 'equipment_id');
+        if ($coverEquipmentId !== '') {
+            $equipmentId = $coverEquipmentId;
+        }
+        $facilitySection = trim((string) ($report->facility_section ?? ''));
+        $coverFacility = $this->extractCoverTextValue($fields, 'facility_section');
+        if ($coverFacility !== '') {
+            $facilitySection = $coverFacility;
+        }
         $documentNo      = $report->document_no ?? '';
         $protocolDocumentNo = $this->resolveProtocolDocumentNumber($report, $fields);
         $referenceProtocolNo = $this->resolveReferenceProtocolNo($report, $fields);
@@ -5336,6 +6249,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
         }
         $draftSavedAt = (string) ($reportData['docx_fill_draft_saved_at'] ?? '');
+        $tableOps = $this->normalizeTableOpsPayload($reportData['table_ops'] ?? []);
+        if (($reportData['table_ops'] ?? null) !== $tableOps) {
+            $reportData['table_ops'] = $tableOps;
+            $report->data = $reportData;
+            $report->save();
+        }
         $requalFillLocked = $this->requalificationFillIsLocked($report);
         $requalPreEditable = $requalFillLocked
             && in_array($report->status, ['pre_setup', 'pre_returned'], true);
@@ -5384,6 +6303,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'approvedDocxProtocols',
             'draftApprovers',
             'draftSavedAt',
+            'tableOps',
             'requalFillLocked',
             'requalPreEditable',
             'draftPreApprovers',
@@ -5441,6 +6361,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'post_checked_by_production_name' => ['nullable', 'integer', 'exists:users,id'],
             'post_checked_by_quality_name' => ['nullable', 'integer', 'exists:users,id'],
             'post_checked_by_validation_name' => ['nullable', 'integer', 'exists:users,id'],
+            'post_approved_by_user_name' => ['nullable', 'integer', 'exists:users,id'],
             'post_approved_by_quality_name' => ['nullable', 'integer', 'exists:users,id'],
         ]);
 
@@ -5562,6 +6483,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'post_checked_by_production_name',
             'post_checked_by_quality_name',
             'post_checked_by_validation_name',
+            'post_approved_by_user_name',
             'post_approved_by_quality_name',
         ]);
 
@@ -5750,6 +6672,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'post_checked_by_production_name',
             'post_checked_by_quality_name',
             'post_checked_by_validation_name',
+            'post_approved_by_user_name',
             'post_approved_by_quality_name',
         ] as $roleKey) {
             if ($request->filled($roleKey) && is_numeric($request->input($roleKey))) {
@@ -5763,17 +6686,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
         }
 
-        $tableOpsRaw = $request->input('table_ops');
-        if (is_string($tableOpsRaw)) {
-            $tableOps = json_decode($tableOpsRaw, true) ?: [];
-        } elseif (is_array($tableOpsRaw)) {
-            $tableOps = $tableOpsRaw;
-        } else {
-            $tableOps = [];
-        }
-        if (! empty($tableOps)) {
-            $data['table_ops'] = $tableOps;
-        }
+        $tableOps = $this->normalizeTableOpsPayload($request->input('table_ops'));
+        $data['table_ops'] = $tableOps;
 
         $savedAt = now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
         $data['docx_fill_draft_saved_at'] = $savedAt;
@@ -6118,13 +7032,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if (! is_array($formFields)) {
             $formFields = [];
         }
-        $tableOpsRaw = $request->input('table_ops');
-        $tableOps = [];
-        if (is_string($tableOpsRaw)) {
-            $tableOps = json_decode($tableOpsRaw, true) ?: [];
-        } elseif (is_array($tableOpsRaw)) {
-            $tableOps = $tableOpsRaw;
-        }
+        $tableOps = $this->normalizeTableOpsPayload($request->input('table_ops'));
 
         // Apply updated field values
         $storedFields = $report->docx_import_fields ?? [];
@@ -6168,6 +7076,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             (string) ($data['document_number'] ?? ''),
             (string) ($data['reference_protocol_no'] ?? '')
         );
+        $data['table_ops'] = $tableOps;
         $report->data = $data;
         $formFields = $this->applyProtocolCoverValues($formFields, $storedFields, $report);
         $storedFields = $this->applyRequalificationPreApproverNames($report, $storedFields);
@@ -6630,6 +7539,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'post_checked_by_production_name',
             'post_checked_by_quality_name',
             'post_checked_by_validation_name',
+            'post_approved_by_user_name',
             'post_approved_by_quality_name',
         ]);
 
@@ -6851,6 +7761,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 : 'report.docx';
 
             $attachmentLinks = $this->buildAttachmentLinksMap($report, $uploadedAttachments);
+            $tableOps = $this->normalizeTableOpsPayload($request->input('table_ops'));
 
             // [API] POST {PYTHON_NLP_URL}/fill — write cells + fix TOC pages in Python.
             // TOC uses [WORD COM] first, then [LIBREOFFICE] only if Word fails.
@@ -6863,6 +7774,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     'original_filename' => $originalFilename,
                     'fields'            => $fieldsToPython,
                     'attachment_links'  => $this->formatAttachmentLinksForPython($attachmentLinks),
+                    'table_ops'         => $tableOps,
                     'equipment_id'      => in_array($report->import_source, ['requalification', 'revalidation'], true)
                         ? (string) ($report->equipment_id ?? '')
                         : '',
@@ -6899,6 +7811,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     file_put_contents($tmpFields, json_encode($fieldsToPython, JSON_UNESCAPED_UNICODE));
                     $tmpAtt = tempnam(sys_get_temp_dir(), 'fill_att_');
                     file_put_contents($tmpAtt, json_encode($this->formatAttachmentLinksForPython($attachmentLinks), JSON_UNESCAPED_UNICODE));
+                    $tmpTableOps = tempnam(sys_get_temp_dir(), 'fill_tops_');
+                    file_put_contents($tmpTableOps, json_encode($tableOps, JSON_UNESCAPED_UNICODE));
 
                     $eqId = in_array($report->import_source, ['requalification', 'revalidation'], true)
                         ? (string) ($report->equipment_id ?? '')
@@ -6914,13 +7828,14 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                         $cliOutputPath,
                         $tmpAtt,
                         $eqId,
-                        '', // table_ops path unused here
+                        $tmpTableOps,
                         $importSource,
                     ]);
                     $process->setTimeout(90);
                     $process->run();
                     @unlink($tmpFields);
                     @unlink($tmpAtt);
+                    @unlink($tmpTableOps);
 
                     $cliOutput = trim($process->getOutput());
                     $jsonStart = strpos($cliOutput, '{');
@@ -7023,6 +7938,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             if (! empty($oldData['import_source'])) {
                 $data['import_source'] = $oldData['import_source'];
             }
+            $data['table_ops'] = $tableOps;
 
             if ($request->filled('document_id')) {
                 $data['document_id'] = $request->input('document_id');
@@ -7244,7 +8160,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
     /**
      * Apply Python layout fixes to an existing filled DOCX.
-     * Requal/reval: 14/11 layout_v1. NEQ: layout_v2 (header pct→dxa).
+     * Requal/reval: 14/11 layout_v1. NEQ: layout_v4 (Att08 multi-row header + cantSplit).
      */
     private function normalizeFilledDocxLayoutOnDisk(string $docxPath, ?string $importSource = null): void
     {
@@ -7323,13 +8239,19 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         $pdfPath = dirname($docxPath) . DIRECTORY_SEPARATOR . pathinfo($docxPath, PATHINFO_FILENAME) . '.pdf';
         $isNeq = $this->isNeqImportSource($report->import_source ?? null);
-        // 14/11 baseline for requal/reval = layout_v1. NEQ keeps layout_v2.
-        $layoutMarker = $docxPath . ($isNeq ? '.layout_v2' : '.layout_v1');
+        // Requal/reval layout_v3 = letterhead pct→dxa + offsetFrom=text border clamp.
+        // NEQ layout_v4 = Att08 row integrity.
+        $layoutMarker = $docxPath . ($isNeq ? '.layout_v4' : '.layout_v3');
         $needsLayout = ! is_file($layoutMarker);
-        if ($isNeq && $needsLayout) {
-            $legacyMarker = $docxPath . '.layout_v1';
-            if (is_file($legacyMarker)) {
-                @unlink($legacyMarker);
+        if ($needsLayout) {
+            $legacySuffixes = $isNeq
+                ? ['.layout_v1', '.layout_v2', '.layout_v3']
+                : ['.layout_v1', '.layout_v2'];
+            foreach ($legacySuffixes as $legacySuffix) {
+                $legacyMarker = $docxPath . $legacySuffix;
+                if (is_file($legacyMarker)) {
+                    @unlink($legacyMarker);
+                }
             }
         }
 
@@ -7536,6 +8458,44 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         }
     }
 
+    /**
+     * Decode table_ops from the fill form / draft. Draft autosave used to
+     * JSON-encode an already-encoded string, producing nested quotes around [].
+     *
+     * @param  mixed  $raw
+     * @return list<array<string, mixed>>
+     */
+    private function normalizeTableOpsPayload(mixed $raw): array
+    {
+        $decoded = $raw;
+        for ($i = 0; $i < 12; $i++) {
+            if (is_array($decoded)) {
+                $ops = [];
+                foreach ($decoded as $op) {
+                    if (is_array($op) && isset($op['op'])) {
+                        $ops[] = $op;
+                    }
+                }
+
+                return $ops;
+            }
+            if (! is_string($decoded)) {
+                return [];
+            }
+            $trimmed = trim($decoded);
+            if ($trimmed === '' || $trimmed === '[]' || $trimmed === 'null') {
+                return [];
+            }
+            $next = json_decode($trimmed, true);
+            if ($next === null && json_last_error() !== JSON_ERROR_NONE) {
+                return [];
+            }
+            $decoded = $next;
+        }
+
+        return [];
+    }
+
     // ── normalizeImportFields() ──────────────────────────
     // Normalizes Python /parse field objects into a consistent Laravel array shape.
     // Parameters: array $fields — raw fields list from Python /parse JSON response.
@@ -7573,6 +8533,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 'locked'                  => $locked,
                 'type'                    => (string) ($field['type'] ?? ''),
                 'widget'                  => isset($field['widget']) ? (string) $field['widget'] : null,
+                'cover_field'             => isset($field['cover_field']) && trim((string) $field['cover_field']) !== ''
+                    ? (string) $field['cover_field']
+                    : null,
                 'approver_role'           => isset($field['approver_role']) ? (string) $field['approver_role'] : null,
                 'signature_date_location' => isset($field['signature_date_location'])
                     ? (string) $field['signature_date_location']
@@ -7581,6 +8544,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 'stamp_eligible'          => array_key_exists('stamp_eligible', $field)
                     ? (bool) $field['stamp_eligible']
                     : null,
+                'draft_editable'          => array_key_exists('draft_editable', $field)
+                    ? (bool) $field['draft_editable']
+                    : null,
+                'auto_serial'             => $field['auto_serial'] ?? null,
             ], fn ($v) => $v !== null);
         }
 
@@ -7598,12 +8565,66 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     private function applySourceSpecificImportFieldRules(array $fields, string $importSource): array
     {
         if ($importSource === 'new_equipment_qualification') {
+            $fields = $this->upgradeCertificateNumberTextFields($fields);
+            $fields = $this->upgradeNeqPlaceholderTableCells($fields);
             $fields = $this->upgradeNeqTrainingPersonnelFields($fields);
+            $fields = $this->repairNeqBlankPartSectionHeadings($fields);
+            $fields = $this->stripNeqMisparsedSectionHeadingFields($fields);
 
             return $this->applyNeqFillFieldRules($fields);
         }
 
         return $fields;
+    }
+
+    /**
+     * Drop / lock mis-parsed section titles that became paragraph_blank inputs
+     * (INSTALLATION CHECKS:, Pre-Installation Checks:, Motor Verification:).
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function stripNeqMisparsedSectionHeadingFields(array $fields): array
+    {
+        $out = [];
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $label = (string) ($field['label'] ?? '');
+            $type = strtolower(trim((string) ($field['type'] ?? '')));
+            $loc = (string) ($field['location'] ?? '');
+
+            // Keep real fill blanks (machine I.D. / responsibility (blank N), etc.).
+            $isBlankPart = $type === 'paragraph_blank_part'
+                || preg_match('/_blank_\d+$/', $loc) === 1
+                || preg_match('/\(\s*blank\s*\d+\s*\)\s*$/i', $label) === 1;
+
+            // Drop mis-parsed section titles so the Word heading (with 7.0 / 7.2 / 8.2.1) shows.
+            if (
+                ! $isBlankPart
+                && str_starts_with($loc, 'para_')
+                && $this->isLockedSectionHeadingText($label)
+                && in_array($type, ['paragraph_blank', 'paragraph_blank_part', 'text', 'protocol_cover', ''], true)
+            ) {
+                continue;
+            }
+
+            // Bullet lines wrongly tagged as protocol_cover via "equipment id" substring match
+            // (e.g. "General appearance & equipment identification") — no description box.
+            if (
+                str_starts_with($loc, 'para_')
+                && ($type === 'protocol_cover' || ! empty($field['cover_field']))
+                && ! str_starts_with($loc, 'header_')
+                && preg_match('/equipment\s+identification/i', $label) === 1
+            ) {
+                continue;
+            }
+
+            $out[] = $field;
+        }
+
+        return $out;
     }
 
     /**
@@ -7825,8 +8846,18 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
 
-            // Headings / fixed text stay locked
+            // Headings / fixed text stay locked (never lock blank-part fill targets).
             $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $isBlankPart = $type === 'paragraph_blank_part'
+                || preg_match('/_blank_\d+$/', $location) === 1
+                || preg_match('/\(\s*blank\s*\d+\s*\)\s*$/i', (string) ($field['label'] ?? '')) === 1;
+            if ($isBlankPart) {
+                $fields[$idx]['type'] = 'paragraph_blank_part';
+                $fields[$idx]['widget'] = 'text';
+                $fields[$idx]['locked'] = false;
+                $unlocked++;
+                continue;
+            }
             if ($this->isLockedSectionHeadingText($label) || str_contains($label, 'methodology') || str_contains($label, 'report approval')) {
                 $fields[$idx]['locked'] = true;
                 continue;
@@ -7977,14 +9008,21 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
             // 5. Paragraph content (Objective, Scope, etc.) locked, BUT paragraph blanks MUST REMAIN UNLOCKED for execution fill
             // Except METHODOLOGY and REPORT APPROVAL, which are strictly locked
+            $isBlankPart = $type === 'paragraph_blank_part'
+                || preg_match('/_blank_\d+$/', $location) === 1
+                || preg_match('/\(\s*blank\s*\d+\s*\)\s*$/i', (string) ($field['label'] ?? '')) === 1;
+            if ($isBlankPart || $type === 'paragraph_blank') {
+                if ($isBlankPart) {
+                    $fields[$idx]['type'] = 'paragraph_blank_part';
+                    $fields[$idx]['widget'] = 'text';
+                }
+                $fields[$idx]['locked'] = false;
+                $unlockedCount++;
+                continue;
+            }
             if ($this->isLockedSectionHeadingText($label) || str_contains($label, 'methodology') || str_contains($label, 'report approval')) {
                 $fields[$idx]['locked'] = true;
                 $lockedCount++;
-                continue;
-            }
-            if ($type === 'paragraph_blank' || $type === 'paragraph_blank_part') {
-                $fields[$idx]['locked'] = false;
-                $unlockedCount++;
                 continue;
             }
             if ($type === 'paragraph_content' || str_starts_with($location, 'para_') || str_starts_with($type, 'para')) {
@@ -8098,6 +9136,25 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
 
+            // Att10: "Safety Checks By (Sign./Date)" / "Safety By (Sign./Date)" stay fillable for e-sign.
+            if (
+                preg_match('/^safety\s*(?:checks?\s*)?s?\s*by\b/i', $labelRaw) === 1
+                || preg_match('/^safety\s*(?:checks?\s*)?s?\s*by\b/i', $valueRaw) === 1
+            ) {
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['draft_editable'] = true;
+                $fields[$idx]['stamp_eligible'] = true;
+                $fields[$idx]['type'] = 'table_multicol';
+                $fields[$idx]['widget'] = 'text';
+                if ($labelRaw === '' || preg_match('/^safety\s*(?:checks?\s*)?s?\s*by\b/i', $labelRaw) !== 1) {
+                    $fields[$idx]['label'] = 'Safety Checks By (Sign./Date) :';
+                } elseif (! str_ends_with(rtrim($labelRaw), ':')) {
+                    $fields[$idx]['label'] = rtrim($labelRaw) . ' :';
+                }
+                $unlocked++;
+                continue;
+            }
+
             // Empty Sr. No. / Sl. No. data cells (Att11) stay editable so users can type 1, 2, 3…
             // Pre-numbered Word serials (Att14 "1.") and Att07 auto_serials remain locked display text.
             $serialVal = trim((string) ($field['value'] ?? ''));
@@ -8163,6 +9220,38 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
             $label = strtolower(trim((string) ($field['label'] ?? '')));
             $location = strtolower(trim((string) ($field['location'] ?? '')));
+            $isBlankPart = $type === 'paragraph_blank_part'
+                || preg_match('/_blank_\d+$/', $location) === 1
+                || preg_match('/\(\s*blank\s*\d+\s*\)\s*$/i', (string) ($field['label'] ?? '')) === 1;
+            $isRevisionNo = str_contains($label, 'revision no')
+                || str_contains($label, 'rev. no')
+                || str_contains($label, 'rev no');
+
+            // Paragraph blank parts (machine name / I.D. under Responsibility, etc.) stay fillable.
+            if ($isBlankPart) {
+                $fields[$idx]['type'] = 'paragraph_blank_part';
+                $fields[$idx]['widget'] = $widget !== '' ? $widget : 'text';
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['draft_editable'] = true;
+                unset($fields[$idx]['prefilled']);
+                $unlocked++;
+                continue;
+            }
+
+            // Revision No. from DOCX must remain visible + editable at fill time.
+            if ($isRevisionNo) {
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['draft_editable'] = true;
+                unset($fields[$idx]['prefilled']);
+                if (in_array($type, ['', 'locked', 'section_heading', 'paragraph_content'], true)) {
+                    $fields[$idx]['type'] = 'table_multicol';
+                }
+                if ($widget === '') {
+                    $fields[$idx]['widget'] = 'text';
+                }
+                $unlocked++;
+                continue;
+            }
 
             // "APPROVAL PAGE:" / "Report Approval" headings are never fill targets.
             if (
@@ -8171,7 +9260,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 || str_contains($label, 'report approval')
             ) {
                 $fields[$idx]['locked'] = true;
-                if (in_array($type, ['paragraph_blank', 'paragraph_blank_part', 'text'], true)) {
+                if (in_array($type, ['paragraph_blank', 'text'], true)) {
                     $fields[$idx]['type'] = 'paragraph_content';
                 }
                 continue;
@@ -8181,8 +9270,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
             $isLetterhead = $type === 'header_cell'
+                || $type === 'protocol_cover'
                 || str_starts_with($location, 'header_')
                 || ($field['protocol_cover'] ?? false) === true
+                || ($field['cover_field'] ?? '') !== ''
                 || in_array($label, [
                     'document_number',
                     'document_title',
@@ -8191,18 +9282,32 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     'facility_section',
                     'reference_document_no',
                     'reference_protocol_no',
+                    'version',
+                    'document no.',
+                    'document no',
                 ], true)
                 || preg_match(
-                    '/^(reference\s*document\s*no|document\s*title|equipment\s*\/?\s*system\s*(name|id)|facility\s*\/?\s*section)/i',
+                    '/^(reference\s*document\s*no|document\s*(title|no\.?)|equipment\s*\/?\s*system\s*(name|id)|facility\s*\/?\s*section|version)/i',
                     $label
                 ) === 1;
-            $isComments = $widget === 'textarea' || str_contains($label, 'comment');
+            // Only real comment/remarks/observation labels unlock — not every
+            // paragraph_content that happens to use widget=textarea.
+            $isComments = (bool) preg_match(
+                '/\b(comments?|remarks?|observation|description)\b/i',
+                $label
+            );
             $isSeverityS = $label === 's' || $label === 'severity';
-            $isRevisionNo = str_contains($label, 'revision no')
-                || str_contains($label, 'rev. no')
-                || str_contains($label, 'rev no');
 
             $existingValue = trim((string) ($field['value'] ?? ''));
+
+            // Letterhead / protocol cover cells stay fillable even when Word-prefilled
+            // (Att6 FACILITY, EQUIPMENT, REF, DOCUMENT No., VERSION).
+            if ($isLetterhead) {
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['draft_editable'] = true;
+                $unlocked++;
+                continue;
+            }
 
             // True Word/VIVA content from import stays locked.
             if (($field['prefilled'] ?? false) === true) {
@@ -8268,6 +9373,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     'table_multicol',
                     'table_2col',
                     'paragraph_blank',
+                    'paragraph_blank_part',
                     'header_cell',
                     'text',
                     'textarea',
@@ -8908,8 +10014,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $cacheVer   = $this->docxPreviewCacheVersion($fileId, $reportId);
         $sourceKey  = $importSource !== '' ? $importSource : 'legacy';
         $cacheKey   = $reportId
-            ? "docx_preview:v84:{$mode}:{$sourceKey}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
-            : "docx_preview:v84:{$mode}:{$sourceKey}:{$fileId}:{$cacheVer}:{$fieldsHash}";
+            ? "docx_preview:v87:{$mode}:{$sourceKey}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
+            : "docx_preview:v87:{$mode}:{$sourceKey}:{$fileId}:{$cacheVer}:{$fieldsHash}";
         $cached     = Cache::get($cacheKey);
 
         // Return cached HTML when fields and mode have not changed since last preview.
@@ -9250,11 +10356,29 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'equipment location'             => $report->facility_section ?? '',
         ];
 
+        $coverLoc = $this->buildCoverFieldLocationMap($fields);
         $locationPrefill = [
-            'header_0_row_4_col_2' => $this->resolveProtocolDocumentNumber($report, $fields),
-            'header_ref_protocol'  => $this->resolveReferenceProtocolNo($report, $fields),
-            'header_0_row_4_col_4' => $report->version ?? '',
+            'header_ref_protocol' => $this->resolveReferenceProtocolNo($report, $fields),
         ];
+        // Bind by real cover locations — never hardcode HVAC row_4 as Document No. / Version.
+        if (! empty($coverLoc['document_no'])) {
+            $locationPrefill[$coverLoc['document_no']] = $this->resolveProtocolDocumentNumber($report, $fields);
+        }
+        if (! empty($coverLoc['reference_protocol_no'])) {
+            $locationPrefill[$coverLoc['reference_protocol_no']] = $this->resolveReferenceProtocolNo($report, $fields);
+        }
+        if (! empty($coverLoc['version']) && trim((string) ($report->version ?? '')) !== '') {
+            $ver = trim((string) $report->version);
+            // Ignore broken split-run reads (".") and page chrome — keep Word "0.2".
+            if (
+                $ver !== '.'
+                && $ver !== '0.'
+                && $ver !== '.2'
+                && ! preg_match('/\bpage\s+\d+\s+of\s+\d+\b/i', $ver)
+            ) {
+                $locationPrefill[$coverLoc['version']] = $ver;
+            }
+        }
 
         return array_map(function (array $field) use ($labelPrefill, $locationPrefill, $report, $fields, $effectiveDateForPreview) {
             $location = (string) ($field['location'] ?? '');
@@ -9281,10 +10405,25 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
             $location = $field['location'] ?? '';
             $label    = strtolower(trim((string) ($field['label'] ?? '')));
+            $type     = strtolower(trim((string) ($field['type'] ?? '')));
+            $existing = trim((string) ($field['value'] ?? ''));
+            $coverKey = (string) ($field['cover_field'] ?? '');
+
+            // Letterhead / cover cells that already have Word text must keep it
+            // (do not replace PRODUCTION / WEIGHING BALANCE / 0.2 with create-form junk).
+            if (
+                $existing !== ''
+                && (
+                    $coverKey !== ''
+                    || in_array($type, ['header_cell', 'protocol_cover'], true)
+                    || str_starts_with((string) $location, 'header_')
+                )
+            ) {
+                return $field;
+            }
 
             $prefill = $locationPrefill[$location] ?? $labelPrefill[$label] ?? null;
 
-            $coverKey = (string) ($field['cover_field'] ?? '');
             if ($coverKey !== '') {
                 $coverSources = [
                     'equipment_name'        => $report->equipment_name ?? '',
@@ -9293,6 +10432,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     'document_no'           => $this->resolveProtocolDocumentNumber($report, $fields),
                     'document_title'        => $this->resolveDocumentTitle($report, $fields),
                     'reference_protocol_no' => $this->resolveReferenceProtocolNo($report, $fields),
+                    'version'               => $report->version ?? '',
                     'effective_date'        => $this->reportHasCoverField($fields, 'effective_date')
                         ? $this->resolveEffectiveDate($report, $fields)
                         : '',
@@ -9304,12 +10444,29 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 ) {
                     $fromCover = null;
                 }
+                // Never treat page chrome or broken "." reads as a version prefill.
+                if (
+                    $coverKey === 'version'
+                    && is_string($fromCover)
+                    && (
+                        in_array(trim($fromCover), ['.', '0.', '.2'], true)
+                        || preg_match('/\bpage\s+\d+\s+of\s+\d+\b/i', $fromCover)
+                    )
+                ) {
+                    $fromCover = null;
+                }
                 if ($fromCover !== null && $fromCover !== '') {
                     $prefill = $fromCover;
                 }
             }
 
             if ($prefill !== null && $prefill !== '') {
+                if (
+                    $coverKey === 'version'
+                    && preg_match('/\bpage\s+\d+\s+of\s+\d+\b/i', (string) $prefill)
+                ) {
+                    return $field;
+                }
                 $field['value'] = $prefill;
             }
 
@@ -9514,6 +10671,18 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             if (! is_array($field)) {
                 continue;
             }
+            $type = strtolower(trim((string) ($field['type'] ?? '')));
+            // Never convert fill blanks / checklist items into empty section headings.
+            if (in_array($type, [
+                'paragraph_blank',
+                'paragraph_blank_part',
+                'paragraph_checkbox',
+                'paragraph_radio',
+                'table_checkbox',
+                'table_radio',
+            ], true)) {
+                continue;
+            }
             $label = trim((string) ($field['label'] ?? ''));
             if (! $this->isLockedSectionHeadingText($label)) {
                 continue;
@@ -9524,8 +10693,49 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         }
 
         return $this->unlockSummaryAndConclusionField(
-            $this->unlockVerificationPAndIdField($fields)
+            $this->unlockVerificationPAndIdField(
+                $this->repairNeqBlankPartSectionHeadings($fields)
+            )
         );
+    }
+
+    /**
+     * Repair blank-part fields wrongly converted to empty section_heading
+     * (e.g. "Responsibilities of different department (blank 1)").
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function repairNeqBlankPartSectionHeadings(array $fields): array
+    {
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            $label = trim((string) ($field['label'] ?? ''));
+            $type = strtolower(trim((string) ($field['type'] ?? '')));
+            $isBlankPartLoc = (bool) preg_match('/_blank_\d+$/', $loc);
+            $isBlankPartLabel = (bool) preg_match('/\(\s*blank\s*\d+\s*\)\s*$/i', $label);
+            if (! $isBlankPartLoc && ! $isBlankPartLabel) {
+                continue;
+            }
+            if (! in_array($type, ['section_heading', 'paragraph_content', 'locked', ''], true)
+                && $type !== 'paragraph_blank_part'
+            ) {
+                // Keep real checkbox/radio/attachment types untouched.
+                if (! in_array($type, ['paragraph_blank', 'text'], true)) {
+                    continue;
+                }
+            }
+            $fields[$idx]['type'] = 'paragraph_blank_part';
+            $fields[$idx]['widget'] = 'text';
+            $fields[$idx]['locked'] = false;
+            $fields[$idx]['draft_editable'] = true;
+            unset($fields[$idx]['prefilled']);
+        }
+
+        return $fields;
     }
 
     /**
@@ -9594,14 +10804,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if ($key === '') {
             return false;
         }
+        // Fill blanks / blank-part labels are never section headings.
         if (preg_match('/_{3,}|\.{3,}|…/', $text) === 1) {
             return false;
         }
-
-        foreach (['responsibilities of different department'] as $longPrefix) {
-            if ($key === $longPrefix || str_starts_with($key, $longPrefix . ' ') || str_starts_with($key, $longPrefix . '/') || str_starts_with($key, $longPrefix . '(')) {
-                return true;
-            }
+        if (preg_match('/\(\s*blank\s*\d+\s*\)\s*$/i', $text) === 1) {
+            return false;
         }
 
         if (strlen($key) > 110) {
@@ -9626,6 +10834,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'observation/results and evaluation',
             'list of sops identified',
             'verification of draft sops',
+            'installation checks',
+            'pre-installation checks',
+            'pre installation checks',
+            'motor verification',
+            'identification of major components',
+            'identification of the contact surfaces',
         ];
         if (in_array($key, $exact, true)) {
             return true;
@@ -9656,6 +10870,14 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'approval page',
             'observation / results',
             'observation/results',
+            'installation checks',
+            'pre-installation checks',
+            'motor verification',
+            'identification of major components',
+            'identification of the contact surfaces',
+            'identification and classification',
+            'identification of execution team members',
+            'operational, functional, safety and performance checks',
         ];
         foreach ($prefixes as $prefix) {
             if ($key === $prefix || str_starts_with($key, $prefix . ' ') || str_starts_with($key, $prefix . '(')) {

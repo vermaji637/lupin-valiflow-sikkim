@@ -33,8 +33,10 @@ from doc_parser import (
     is_toc_entry_text,
     is_equipment_section_banner_row,
     is_verified_by_sign_row,
+    is_safety_by_sign_row,
     is_repeated_column_header_row,
     _match_cover_label_cell,
+    _cell_plain_text,
 )
 from docx.oxml.ns import qn
 from report_generator import fill_docx, _normalize_text_value, normalize_existing_filled_docx
@@ -612,10 +614,34 @@ async def preview_document(
                     ) or val not in (None, ""):
                         ff[meta_key] = val
                 # Word-prefilled template text stays locked unless the user typed over it.
-                if (
+                # Exception: NEQ letterhead / protocol cover cells stay fillable so
+                # FACILITY, EQUIPMENT, REF, DOCUMENT No., VERSION can be edited.
+                is_letterhead_cover = (
+                    str(ff.get("type") or "") in ("protocol_cover", "header_cell")
+                    or str(sv.get("type") or "") in ("protocol_cover", "header_cell")
+                    or bool(ff.get("cover_field") or sv.get("cover_field"))
+                    or str(loc or "").startswith("header_")
+                )
+                if is_letterhead_cover:
+                    # Prefer PHP unlock (locked=false / draft_editable) for letterhead.
+                    if "locked" in sv:
+                        sv_locked = sv["locked"]
+                        if isinstance(sv_locked, str):
+                            ff["locked"] = sv_locked.strip().lower() in ("1", "true", "yes")
+                        else:
+                            ff["locked"] = bool(sv_locked)
+                    else:
+                        ff["locked"] = False
+                    if sv.get("draft_editable") is True or ff.get("draft_editable") is True:
+                        ff["locked"] = False
+                        ff["draft_editable"] = True
+                elif (
                     (parse_prefilled or ff.get("prefilled") or sv.get("prefilled"))
                     and not sv.get("user_filled")
                     and not ff.get("user_filled")
+                    # Send-back / draft unlock: PHP locked=false + draft_editable must win.
+                    and sv.get("locked") is not False
+                    and sv.get("draft_editable") is not True
                 ):
                     ff["locked"] = True
                     ff["prefilled"] = True
@@ -633,11 +659,27 @@ async def preview_document(
                     if not re.search(r"_col_[23]$", loc_s):
                         ff["type"] = "approver"
                         ff["widget"] = parse_widget or "approver"
-                        if parse_role:
+                        stored_role = str(sv.get("approver_role") or "")
+                        # Prefer Laravel POST roles. Legacy parse used pre-approval
+                        # approved_by_user_name for Approved By → User/Validation.
+                        if stored_role.startswith("post_"):
+                            ff["approver_role"] = stored_role
+                        elif parse_role == "approved_by_user_name" and mode == "edit":
+                            ff["approver_role"] = "post_approved_by_user_name"
+                        elif parse_role:
                             ff["approver_role"] = parse_role
-                        if parse_sig_date_loc:
+                        elif stored_role:
+                            ff["approver_role"] = stored_role
+                        if parse_sig_date_loc and not sv.get("signature_date_location"):
                             ff["signature_date_location"] = parse_sig_date_loc
-                        if not ff.get("user_filled") and not sv.get("is_pre_approver"):
+                        # POST Name dropdowns must stay selectable in edit/fill mode.
+                        role_now = str(ff.get("approver_role") or "")
+                        if role_now.startswith("post_") or (
+                            mode == "edit" and role_now == "post_approved_by_user_name"
+                        ):
+                            ff["locked"] = False
+                            ff["is_pre_approver"] = False
+                        elif not ff.get("user_filled") and not sv.get("is_pre_approver"):
                             ff["locked"] = False
                 # Signature / Date always stay locked stamps from the fresh parse.
                 if isinstance(parse_type, str) and parse_type.startswith("approval_stamp"):
@@ -1651,25 +1693,52 @@ def _render_approval_stamp_cell(field: dict, mode: str = "edit", colspan_attr: s
 # Render approver dropdown placeholder; Laravel JS hydrates options from users table.
 def _render_approver_cell(field: dict, mode: str = "edit", colspan_attr: str = "") -> str:
     location = _escape_html(field.get("location", ""))
-    role = _escape_html(field.get("approver_role", ""))
+    role = str(field.get("approver_role", "") or "")
+    # NEQ POST Approved By → User/Validation must never use the pre-approval key.
+    if role == "approved_by_user_name" and mode == "edit" and not field.get("is_pre_approver"):
+        role = "post_approved_by_user_name"
+        field = dict(field)
+        field["approver_role"] = role
+        field["locked"] = False
     date_loc = _escape_html(field.get("signature_date_location", ""))
     value = field.get("value", "")
     user_id = field.get("user_id", "")
     # Pre-approver lock is role/flag based only — never table_1/2/3 index.
     # NEQ Att11 APPROVAL PAGE is often table_3 and must stay a user dropdown.
+    # post_* roles are always POST workflow selects (never pre-approval readonly).
     is_pre = (
-        field.get("is_pre_approver")
-        or role in (
-            "prepared_by_engineering_name",
-            "checked_by_engineering_name",
-            "checked_by_production_name",
-            "checked_by_validation_name",
-            "checked_by_quality_name",
-            "approved_by_user_name",
-            "approved_by_quality_name",
+        (not role.startswith("post_"))
+        and (
+            field.get("is_pre_approver")
+            or role in (
+                "prepared_by_engineering_name",
+                "checked_by_engineering_name",
+                "checked_by_production_name",
+                "checked_by_validation_name",
+                "checked_by_quality_name",
+                "approved_by_user_name",
+                "approved_by_quality_name",
+            )
         )
     )
-    if _is_readonly_mode(mode) or _is_field_locked(field) or (is_pre and mode != "pre_approval"):
+    role_raw = str(field.get("approver_role") or "")
+    # POST Name cells must remain user selects during edit/fill even if a stale
+    # locked/prefilled flag survived merge.
+    force_post_select = (
+        mode == "edit"
+        and not _is_readonly_mode(mode)
+        and role_raw.startswith("post_")
+    )
+    if force_post_select:
+        is_pre = False
+        field = dict(field)
+        field["locked"] = False
+    role = _escape_html(role_raw)
+    if (
+        _is_readonly_mode(mode)
+        or (is_pre and mode != "pre_approval")
+        or (not force_post_select and _is_field_locked(field))
+    ):
         display = _render_readonly_span(value, field, location)
         hidden_input = (
             f'<input type="hidden" name="fields[{location}]" value="{_escape_html(value)}">'
@@ -2263,10 +2332,13 @@ def _cell_numbered_text(cell, num_resolver) -> str:
     lines = []
     for p_el in tc.findall(qn("w:p")):
         p_txt = _para_text_from_element(p_el)
+        pref, is_bul = num_resolver.prefix_for_p(p_el)
         if p_txt:
-            pref, is_bul = num_resolver.prefix_for_p(p_el)
             eff_pref = _strip_duplicate_prefix(p_txt, pref, is_bul)
             lines.append(f"{eff_pref} {p_txt}".strip() if eff_pref else p_txt)
+        elif pref:
+            # Att02 Sr. No.: empty run text, number comes only from w:numPr (1., 2., …).
+            lines.append(str(pref).strip())
         else:
             lines.append("")
     return "\n".join(ln for ln in lines if ln).strip() or cell.text.strip()
@@ -2366,6 +2438,60 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 )
             html.append("</tr>")
             continue
+        # Att10: "Safety Checks By (Sign./Date)" is an e-sign line, not a section banner.
+        if is_safety_by_sign_row(row):
+            colspan = len(cells) or 1
+            colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
+            loc = f"table_{t_idx}_row_{r_idx}_col_0"
+            field = field_map.get(loc)
+            if field is None:
+                for ci in range(colspan):
+                    alt = field_map.get(f"table_{t_idx}_row_{r_idx}_col_{ci}")
+                    if alt:
+                        field = alt
+                        loc = alt.get("location") or loc
+                        break
+            raw_label = re.sub(
+                r"\s+",
+                " ",
+                dedupe_colon_label((cells[0].text if cells else "") or ""),
+            ).strip()
+            label = raw_label or "Safety Checks By (Sign./Date)"
+            if not label.endswith(":"):
+                label = f"{label.rstrip()} :"
+            value = str((field or {}).get("value") or "").strip()
+            # Keep label visible after stamp; blank value still shows the prompt.
+            if value and not re.match(r"^safety\s*(?:checks?\s*)?s?\s*by\b", value, re.I):
+                value = f"{label.rstrip(' :')} : {value}"
+            style = _inline_cell_style("", readonly=readonly, value_cell=not readonly)
+            if readonly or _is_field_locked(field or {}):
+                display = value or label
+                html.append(
+                    f'<td class="docx-cell" style="{style}"{colspan_attr} data-field="{_escape_html(loc)}">'
+                    f"{_escape_html(display)}</td>"
+                )
+            else:
+                inp = _render_field_input(
+                    loc,
+                    field
+                    if isinstance(field, dict)
+                    else {
+                        "location": loc,
+                        "label": label,
+                        "type": "table_multicol",
+                        "widget": "text",
+                        "stamp_eligible": True,
+                    },
+                    css_class="docx-input",
+                    placeholder=label,
+                    value=value,
+                )
+                html.append(
+                    f'<td class="docx-cell editable" style="{style}"{colspan_attr} '
+                    f'data-field="{_escape_html(loc)}">{inp}</td>'
+                )
+            html.append("</tr>")
+            continue
         # "Mechanical Adjustment:" / "Machine Performance:" / "Major components :" are merged title rows.
         # Col 0 is the Sr. No. column, so without this they render as the row number.
         if is_equipment_section_banner_row(row):
@@ -2432,6 +2558,15 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 if (r_idx > 0 and num_resolver is not None)
                 else text
             )
+            # Prefer Word auto-number text for Sl. No. detection (Att02 empty cells with numPr).
+            if (
+                r_idx > 0
+                and sl_no_col is not None
+                and col_idx == sl_no_col
+                and display_text
+                and _looks_like_sl_no_value(display_text)
+            ):
+                text = display_text
             is_header = r_idx == 0 and not (is_two_col and not is_two_col_grid_table(table) and not is_two_col_header_row(cells, table.rows))
             cell_style = "font-weight:bold;" if is_header else ""
 
@@ -2589,7 +2724,8 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 html.append(_render_approval_stamp_cell(field, mode, colspan_attr=colspan_attr))
                 continue
 
-            if field and field.get("type") == "approver" and not _is_field_locked(field):
+            if field and field.get("type") == "approver":
+                # _render_approver_cell decides select vs readonly (POST roles stay selectable).
                 html.append(_render_approver_cell(field, mode, colspan_attr=colspan_attr))
                 continue
 
@@ -2992,13 +3128,14 @@ def extract_header_and_footer_templates(
 
                     cs_attr = f' colspan="{colspan}"' if colspan > 1 else ""
                     rs_attr = f' rowspan="{rowspan}"' if rowspan > 1 else ""
-                    txt = dedupe_colon_label(cell.text.strip())
+                    txt = dedupe_colon_label(_cell_plain_text(cell))
                     own_match = _match_cover_label_cell(txt)
                     is_page_label = bool(re.search(r"^PAGE\s*NO\.?$", txt, re.IGNORECASE))
-                    is_page_value = bool(
-                        "24 of 24" in txt
-                        or re.search(r"\d+\s*of\s*\d+", txt, re.IGNORECASE)
-                        or (r_idx == 5 and c_idx == 4)
+                    # Only real page text — never hardcode a cell as PAGE (that stole VERSION).
+                    looks_like_page = bool(
+                        re.search(r"(?:^|\b)page\s+\d+\s+of\s+\d+\b", txt, re.IGNORECASE)
+                        or re.search(r"^\d+\s*of\s*\d+$", txt, re.IGNORECASE)
+                        or txt.strip() == "24 of 24"
                     )
                     lh_attr = ""
                     style = "border: 1px solid #334155; padding: 3px 6px; vertical-align: middle; font-size: 11px; color: #0f172a; background: #ffffff;"
@@ -3013,15 +3150,18 @@ def extract_header_and_footer_templates(
                     elif is_page_label:
                         style += " font-weight: 600; background: #f8fafc;"
                         content = "PAGE NO."
-                        prev_label_key = ""
-                    elif is_page_value:
-                        style += " font-weight: 700; text-align: center; background: #ffffff;"
-                        content = 'Page <span class="current-page-num">{PAGE}</span> of <span class="total-pages-count">{TOTAL}</span>'
-                        prev_label_key = ""
+                        prev_label_key = "__page_no__"
                     elif own_match is not None:
                         style += " font-weight: 600; background: #f8fafc;"
                         content = _escape_html(txt)
                         prev_label_key = own_match[0]
+                    elif prev_label_key == "__page_no__" or (
+                        looks_like_page and prev_label_key == ""
+                    ):
+                        # PAGE NO. value cell (or bare "N of M" when not under VERSION/etc.).
+                        style += " font-weight: 700; text-align: center; background: #ffffff;"
+                        content = 'Page <span class="current-page-num">{PAGE}</span> of <span class="total-pages-count">{TOTAL}</span>'
+                        prev_label_key = ""
                     elif prev_label_key:
                         loc_key = f"header_0_row_{r_idx}_col_{c_idx}"
                         loc_field = (field_map or {}).get(loc_key) if field_map else None
@@ -3031,35 +3171,51 @@ def extract_header_and_footer_templates(
                             for cand in field_map.values():
                                 if not isinstance(cand, dict):
                                     continue
-                                if str(cand.get("cover_key") or "").strip() == prev_label_key:
+                                cand_key = (
+                                    str(cand.get("cover_field") or "").strip()
+                                    or str(cand.get("cover_key") or "").strip()
+                                    or str(cand.get("protocol_key") or "").strip()
+                                )
+                                if cand_key == prev_label_key:
                                     cover_field = cand
                                     break
-                                if str(cand.get("protocol_key") or "").strip() == prev_label_key:
-                                    cover_field = cand
-                                    break
-                        live_val = ""
-                        if isinstance(loc_field, dict) and str(loc_field.get("value") or "").strip():
-                            live_val = str(loc_field.get("value") or "").strip()
-                        elif isinstance(cover_field, dict) and str(cover_field.get("value") or "").strip():
-                            live_val = str(cover_field.get("value") or "").strip()
-                        elif prev_label_key in live_cover_values:
-                            live_val = live_cover_values[prev_label_key]
-                        else:
+                        # Word letterhead text is source of truth when present.
+                        # Stored field wins only for explicit user edits or blank Word cells.
+                        stored_val = ""
+                        if isinstance(loc_field, dict):
+                            stored_val = str(loc_field.get("value") or "").strip()
+                        if not stored_val and isinstance(cover_field, dict):
+                            stored_val = str(cover_field.get("value") or "").strip()
+                        if not stored_val and prev_label_key in live_cover_values:
+                            stored_val = live_cover_values[prev_label_key]
+                        user_edited = bool(
+                            isinstance(loc_field, dict) and loc_field.get("user_filled")
+                        )
+                        if txt and not user_edited:
                             live_val = txt
+                        elif stored_val:
+                            live_val = stored_val
+                        else:
+                            live_val = txt or ""
+                        # Never show page chrome inside VERSION / other cover value cells.
+                        if prev_label_key == "version" and re.search(
+                            r"(?:page\s+)?\d+\s+of\s+\d+", live_val or "", re.I
+                        ):
+                            live_val = "" if looks_like_page else (txt or "")
                         lh_attr = f' data-letterhead-field="{_escape_html(prev_label_key)}"'
                         field_for_input = loc_field if isinstance(loc_field, dict) else cover_field
-                        field_locked = (
-                            _is_field_locked(field_for_input)
-                            if isinstance(field_for_input, dict)
-                            else False
-                        )
+                        # Prefer stored/cover value when Word cell text is empty
+                        # (e.g. FACILITY restored from parse but header run was blank).
+                        if not (live_val or "").strip() and stored_val:
+                            live_val = stored_val
                         # Prefer a real parsed location so fill() can write back to the DOCX header.
                         input_loc = loc_key
                         if isinstance(loc_field, dict) and str(loc_field.get("location") or "").strip():
                             input_loc = str(loc_field.get("location"))
                         elif isinstance(cover_field, dict) and str(cover_field.get("location") or "").strip():
                             input_loc = str(cover_field.get("location"))
-                        if letterhead_inputs and not field_locked:
+                        # NEQ edit mode: ALL letterhead cover value cells stay yellow/fillable.
+                        if letterhead_inputs:
                             style += " background: #fffde7;"
                             content = _render_field_input(
                                 input_loc,
@@ -3070,6 +3226,7 @@ def extract_header_and_footer_templates(
                                     "label": prev_label_key,
                                     "type": "header_cell",
                                     "widget": "text",
+                                    "locked": False,
                                 },
                                 css_class="docx-input",
                                 placeholder=prev_label_key.replace("_", " ").title(),

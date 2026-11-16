@@ -518,6 +518,7 @@ private function lockAllFields(string $html): string
         $saveUserText('post_checked_by_production_name');
         $saveUserText('post_checked_by_quality_name');
         $saveUserText('post_checked_by_validation_name');
+        $saveUserText('post_approved_by_user_name');
         $saveUserText('post_approved_by_quality_name');
 
         // attachments
@@ -687,8 +688,8 @@ private function lockAllFields(string $html): string
     }
         } else {
             if ($report->stage === 'pre') {
-                // The date of the last pre-approval step becomes the Effective Date.
-                $lastPreDate = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y');
+                // Last pre-approval timestamp becomes the Effective Date (date + time).
+                $lastPreDate = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
                 $data['effective_date'] = $lastPreDate;
                 $report->update([
                     'status'             => 'pre_approved',
@@ -710,14 +711,21 @@ private function lockAllFields(string $html): string
                     }
                 }
             } else {
-                if (empty($data['effective_date'])) {
-                    $data['effective_date'] = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y');
-                }
+                // Final POST approval: always stamp last approver date+time as Effective Date.
+                $lastApprovalAt = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+                $data['effective_date'] = $lastApprovalAt;
                 $report->update([
                     'status'             => 'approved',
                     'current_step_order' => 0,
                     'data'               => $data,
                 ]);
+
+                $fresh = $report->fresh();
+                if ($fresh && ! empty($fresh->docx_import_path)) {
+                    app(DocxImportController::class)->syncEffectiveDateOnPreApprovalComplete($fresh, $lastApprovalAt);
+                    // Re-stamp filled DOCX so letterhead Effective Date shows the final approval time.
+                    app(DocxImportController::class)->refreshDocxAfterApproval($fresh, $prefix ?: 'post_approved_by_quality', 'Approved');
+                }
 
                 app(ReportApprovalNotifier::class)->notifyFullyApproved($report->fresh());
             }
@@ -811,6 +819,14 @@ private function lockAllFields(string $html): string
         ]);
 
         $report->refresh();
+        if ($report->docx_import_path) {
+            try {
+                app(\App\Http\Controllers\DocxImportController::class)
+                    ->reopenDocxFieldsAfterSendBack($report->fresh());
+            } catch (\Throwable $e) {
+                \Log::warning('Send-back DOCX unlock failed: ' . $e->getMessage());
+            }
+        }
         ProtocolAuditLogger::recordRejected($report, $remark);
         $notifier->notifyRejected($report, $remark, $rejecter, $priorApprovers, 'sent_back');
 
@@ -867,6 +883,18 @@ private function lockAllFields(string $html): string
         'docx_import_status' => $report->docx_import_path ? 'pending' : $report->docx_import_status,
     ]);
     $report->refresh();
+
+    // Persist unlocked fill fields immediately so the fill page opens yellow/editable
+    // (submit often left observation cells locked+prefilled).
+    if ($report->docx_import_path) {
+        try {
+            app(\App\Http\Controllers\DocxImportController::class)
+                ->reopenDocxFieldsAfterSendBack($report->fresh());
+        } catch (\Throwable $e) {
+            \Log::warning('Send-back DOCX unlock failed: ' . $e->getMessage());
+        }
+    }
+
     ProtocolAuditLogger::recordRejected($report, $remark);
     $notifier->notifyRejected($report, $remark, $rejecter, $priorApprovers, 'sent_back');
 
@@ -1067,12 +1095,13 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
     private function buildPostApprovalSteps(array $data): array
     {
         return [
-            ['key' => 'post_prepared_by_name',            'label' => 'POST_PREPARED',    'order' => 1],
-            ['key' => 'post_checked_by_engineering_name', 'label' => 'POST_ENGINEERING', 'order' => 2],
-            ['key' => 'post_checked_by_production_name',  'label' => 'POST_PRODUCTION',  'order' => 3],
-            ['key' => 'post_checked_by_quality_name',     'label' => 'POST_CHECKED_QA',  'order' => 4],
-            ['key' => 'post_checked_by_validation_name',  'label' => 'POST_VALIDATION',  'order' => 5],
-            ['key' => 'post_approved_by_quality_name',    'label' => 'POST_APPROVED_QA', 'order' => 6],
+            ['key' => 'post_prepared_by_name',            'label' => 'POST_PREPARED',      'order' => 1],
+            ['key' => 'post_checked_by_engineering_name', 'label' => 'POST_ENGINEERING',   'order' => 2],
+            ['key' => 'post_checked_by_production_name',  'label' => 'POST_PRODUCTION',    'order' => 3],
+            ['key' => 'post_checked_by_quality_name',     'label' => 'POST_CHECKED_QA',    'order' => 4],
+            ['key' => 'post_checked_by_validation_name',  'label' => 'POST_VALIDATION',    'order' => 5],
+            ['key' => 'post_approved_by_user_name',       'label' => 'POST_APPROVED_USER', 'order' => 6],
+            ['key' => 'post_approved_by_quality_name',    'label' => 'POST_APPROVED_QA',   'order' => 7],
         ];
     }
 
@@ -2301,6 +2330,7 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
             'post_checked_by_production'   => 'POST_PRODUCTION',
             'post_checked_by_quality'      => 'POST_CHECKED_QA',
             'post_checked_by_validation'   => 'POST_VALIDATION',
+            'post_approved_by_user'        => 'POST_APPROVED_USER',
             'post_approved_by_quality'     => 'POST_APPROVED_QA',
         ];
 
@@ -2380,13 +2410,14 @@ if ($preparedDateInputs->length > 0) {
         }
 
         return match ($label) {
-            'POST_PREPARED'    => 'post_prepared_by',
-            'POST_ENGINEERING' => 'post_checked_by_engineering',
-            'POST_PRODUCTION'  => 'post_checked_by_production',
-            'POST_CHECKED_QA'  => 'post_checked_by_quality',
-            'POST_VALIDATION'  => 'post_checked_by_validation',
-            'POST_APPROVED_QA' => 'post_approved_by_quality',
-            default            => null,
+            'POST_PREPARED'      => 'post_prepared_by',
+            'POST_ENGINEERING'   => 'post_checked_by_engineering',
+            'POST_PRODUCTION'    => 'post_checked_by_production',
+            'POST_CHECKED_QA'    => 'post_checked_by_quality',
+            'POST_VALIDATION'    => 'post_checked_by_validation',
+            'POST_APPROVED_USER' => 'post_approved_by_user',
+            'POST_APPROVED_QA'   => 'post_approved_by_quality',
+            default              => null,
         };
     }
 

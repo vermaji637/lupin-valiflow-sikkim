@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+<?php echo $__env->make('common.head', \Illuminate\Support\Arr::except(get_defined_vars(), ['__data', '__path']))->render(); ?>
+
+<body id="page-top" class="premium-app">
+
+    <!-- Page Wrapper -->
+    <div id="wrapper">
+
+        <?php if(auth()->guard()->check()): ?>
+            <!-- Sidebar -->
+            <?php echo $__env->make('common.sidebar', \Illuminate\Support\Arr::except(get_defined_vars(), ['__data', '__path']))->render(); ?>
+            <!-- End of Sidebar -->
+        <?php endif; ?>
+
+        <!-- Content Wrapper -->
+        <div id="content-wrapper" class="d-flex flex-column w-100">
+
+            <!-- Main Content -->
+            <div id="content">
+
+                <?php if(auth()->guard()->check()): ?>
+                    <!-- Topbar -->
+                    <?php echo $__env->make('common.header', \Illuminate\Support\Arr::except(get_defined_vars(), ['__data', '__path']))->render(); ?>
+                    <!-- End of Topbar -->
+                <?php endif; ?>
+
+                <!-- Begin Page Content -->
+                <main class="app-page">
+                    <?php echo $__env->yieldContent('content'); ?>
+                </main>
+                <!-- /.container-fluid -->
+
+            </div>
+            <!-- End of Main Content -->
+
+            <?php if(auth()->guard()->check()): ?>
+                <!-- Footer -->
+                <?php echo $__env->make('common.footer', \Illuminate\Support\Arr::except(get_defined_vars(), ['__data', '__path']))->render(); ?>
+                <!-- End of Footer -->
+            <?php endif; ?>
+
+        </div>
+        <!-- End of Content Wrapper -->
+
+    </div>
+    <!-- End of Page Wrapper -->
+
+    <?php if(auth()->guard()->check()): ?>
+        <!-- Scroll to Top Button-->
+        <a class="scroll-to-top rounded" href="#page-top">
+            <i class="fas fa-angle-up"></i>
+        </a>
+    <?php endif; ?>
+
+    <?php if(auth()->guard()->check()): ?>
+        <!-- Logout Modal-->
+        <?php echo $__env->make('common.logout-modal', \Illuminate\Support\Arr::except(get_defined_vars(), ['__data', '__path']))->render(); ?>
+    <?php endif; ?>
+
+    <!-- Bootstrap core JavaScript-->
+    <script src="<?php echo e(asset('js/app.js')); ?>"></script>
+    <!-- Custom scripts for all pages-->
+    <script src="<?php echo e(asset('admin/js/sb-admin-2.min.js')); ?>"></script>
+    <!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script> -->
+<script src="<?php echo e(asset('js/js/bootstrap.bundle.min.js')); ?>"></script>
+   
+    <script>
+
+    document.addEventListener('DOMContentLoaded', function () {
+        let formToSubmit = null;
+        let esignCallback = null;
+        let isVerifying = false;
+        const modalEl = document.getElementById('esignModal');
+        const passwordInput = document.getElementById('esign_password');
+        const errorBox = document.getElementById('esignError');
+        const confirmBtn = document.getElementById('confirmEsign');
+
+        if (!modalEl || !passwordInput || !errorBox || !confirmBtn || typeof bootstrap === 'undefined') {
+            return;
+        }
+
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        const defaultConfirmText = confirmBtn.textContent.trim() || 'Confirm';
+
+        function resetConfirmButton() {
+            isVerifying = false;
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = defaultConfirmText;
+        }
+
+        function resetEsignState() {
+            passwordInput.value = '';
+            errorBox.innerText = '';
+            resetConfirmButton();
+        }
+
+        function openEsignModal(form) {
+            formToSubmit = form || null;
+            esignCallback = null;
+            resetEsignState();
+            modal.show();
+        }
+
+        window.runWithEsign = function (callback) {
+            if (typeof callback !== 'function') {
+                return;
+            }
+
+            formToSubmit = null;
+            esignCallback = callback;
+            resetEsignState();
+            modal.show();
+        };
+
+        document.querySelectorAll('form.esign-required').forEach(form => {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                openEsignModal(this);
+            });
+        });
+
+        modalEl.addEventListener('shown.bs.modal', function () {
+            passwordInput.focus();
+        });
+
+        passwordInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                confirmBtn.click();
+            }
+        });
+
+        confirmBtn.addEventListener('click', function() {
+            if (isVerifying) {
+                return;
+            }
+
+            const password = passwordInput.value;
+            if (!password) {
+                errorBox.innerText = 'Please enter your password.';
+                passwordInput.focus();
+                return;
+            }
+
+            if (formToSubmit) {
+                const hiddenField = formToSubmit.querySelector('input[name="password"]');
+                if (hiddenField) {
+                    hiddenField.value = password;
+                }
+            }
+
+            isVerifying = true;
+            errorBox.innerText = '';
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Verifying...';
+
+            const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            const csrfToken = (csrfMeta && csrfMeta.getAttribute('content')) || "<?php echo e(csrf_token()); ?>";
+
+            fetch("<?php echo e(route('esign.validate', [], false)); ?>", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-CSRF-TOKEN": csrfToken
+                },
+                credentials: "same-origin",
+                body: JSON.stringify({ password })
+            })
+            .then(async res => {
+                const data = await res.json().catch(() => ({}));
+                return { ok: res.ok, data };
+            })
+            .then(({ ok, data }) => {
+                if (ok && data && data.success) {
+                    if (formToSubmit) {
+                        const form = formToSubmit;
+                        formToSubmit = null;
+                        confirmBtn.textContent = 'Submitting...';
+                        modal.hide();
+                        form.dispatchEvent(new CustomEvent('esign:confirmed'));
+                        HTMLFormElement.prototype.submit.call(form);
+                        return;
+                    }
+
+                    modal.hide();
+                    resetConfirmButton();
+
+                    if (esignCallback) {
+                        const callback = esignCallback;
+                        esignCallback = null;
+                        callback(password);
+                    }
+                } else {
+                    resetConfirmButton();
+                    errorBox.innerText = (data && data.message) || "Incorrect password";
+                    passwordInput.focus();
+                }
+            })
+            .catch(() => {
+                resetConfirmButton();
+                errorBox.innerText = "Something went wrong, try again.";
+            });
+        });
+
+        modalEl.addEventListener('hidden.bs.modal', function () {
+            resetConfirmButton();
+            if (!formToSubmit && !esignCallback) {
+                return;
+            }
+
+            formToSubmit = null;
+            esignCallback = null;
+        });
+    });
+
+    </script>
+
+    <script>
+    function fillToday(){
+          const today = new Date().toISOString().slice(0,10);
+          document.querySelectorAll('input[type="date"]').forEach(el=>{ if(!el.value) el.value = today; });
+        }
+        function clearInputs(){
+          document.querySelectorAll('input[type="text"], input[type="date"], .input').forEach(el=>{
+            if(el.tagName.toLowerCase()==='textarea'){ el.value=''; el.textContent=''; }
+            else if(el.type==='date'){ el.value=''; }
+            else if(el.classList.contains('input')){ el.value=''; }
+            else { el.value=''; }
+          });
+        }
+
+        function addMultipleRows(tableId, col1Text, col2Text, countInputId) {
+      let count = document.getElementById(countInputId).value;
+      count = parseInt(count);
+
+      if (isNaN(count) || count < 1) return;
+
+      let table = document.getElementById(tableId);
+
+      for (let i = 0; i < count; i++) {
+        let row = table.insertRow(-1);
+        let cell1 = row.insertCell(0);
+        let cell2 = row.insertCell(1);
+        let cell3 = row.insertCell(2);
+
+        cell1.contentEditable = "true";
+        cell2.contentEditable = "true";
+
+        cell1.innerText =  " ";
+        cell2.innerText =  " ";
+        cell3.innerHTML = '<button type="button" class=" btn-danger " onclick="deleteRow(this)"> <i class="fa-solid fa-trash"></i></button>';
+      }
+    }
+
+    function deleteRow(btn) {
+      let row = btn.parentNode.parentNode;
+      row.remove();
+    }
+
+    function copyCriteria(checkbox)
+    {
+        let row = checkbox.closest("tr");
+
+        // Get exact criteria text
+        let text = row.querySelector(".criteria").getAttribute("data-text");
+
+        // Remove "Should be available." from text
+        text = text.replace(/^Should be available\.\s*/i, '');
+
+        let obs = row.querySelector(".observation");
+
+        if (checkbox.checked)
+        {
+            obs.value = text;     // cleaned text
+            obs.readOnly = true;
+        }
+        else
+        {
+            obs.value = "";
+            obs.readOnly = false;
+        }
+    }
+     <?php if(auth()->check()): ?>
+window.loggedInUser = {
+    id: "<?php echo e(auth()->id()); ?>",
+    name: "<?php echo e(auth()->user()->full_name); ?>",
+    email: "<?php echo e(auth()->user()->email); ?>",
+    role: "<?php echo e(auth()->user()->getRoleNames()->first()); ?>"
+};
+<?php else: ?>
+window.loggedInUser = null;
+<?php endif; ?>
+    function engineeringCheck(checkbox) {
+    console.log(window.loggedInUser);
+              let row = checkbox.closest("tr");
+              let doneByInput  = row.querySelector(".done-by");
+
+              if (checkbox.checked) {
+                  // ====== API SE USER NAME LENA HAI ======
+                  // Yaha par aapko backend API call lagani hogi
+                  // Example: /api/get-logged-user
+                  // Response me user ka name aayega
+
+                  // For now demo ke liye static name use kar rahe hain
+                let today = new Date();
+            let formattedDate = today.toLocaleDateString('en-GB'); // DD/MM/YYYY
+
+            doneByInput.value = loggedInUser.name + " - " + formattedDate;
+            doneByInput.readOnly = true;
+              } else {
+                      doneByInput.value = "";
+            doneByInput.readOnly = false;;
+              }
+      }
+
+
+    // Force clear navbar search input to defeat Chrome autofill
+    document.addEventListener("DOMContentLoaded", function() {
+        const searchInput = document.getElementById("navbar-search");
+        if(searchInput){
+            // Immediate clear
+            searchInput.value = "";
+            // Force clear after short delay for stubborn autofill
+            setTimeout(function() {
+                searchInput.value = "";
+            }, 50);
+            // Final clear after longer delay
+            setTimeout(function() {
+                searchInput.value = "";
+            }, 200);
+            // Prevent autofill on focus
+            searchInput.addEventListener('focus', function() {
+                this.value = "";
+            });
+            // Prevent autofill on change
+            searchInput.addEventListener('change', function() {
+                if(this.value.includes('@')) {
+                    this.value = "";
+                }
+            });
+        }
+    });
+
+    </script>
+
+    <?php echo $__env->yieldContent('scripts'); ?>
+
+<?php echo $__env->yieldPushContent('scripts'); ?>
+</body>
+
+</html>
+<?php /**PATH D:\lupin\latest Lupin2\valiflow-main\resources\views/layouts/app.blade.php ENDPATH**/ ?>

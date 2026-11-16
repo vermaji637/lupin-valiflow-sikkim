@@ -2581,7 +2581,13 @@ def _table_indent_dxa(tbl) -> int:
 
 
 def _page_border_inset_dxa(doc: Document, side: str = "right") -> int:
-    """Distance from page edge to page border line (twips). Default 24pt."""
+    """Distance from page edge to page border line (twips). Default 24pt.
+
+    When pgBorders offsetFrom=page, w:space is measured from the page edge.
+    When offsetFrom=text (HVAC / revalidation), w:space is outside the text
+    margin — use the text margin as the inner limit so tables stay inside the
+    visible frame (LibreOffice otherwise keeps fixed dxa past the border).
+    """
     sect = doc.element.body.find(qn("w:sectPr"))
     if sect is None:
         return 480
@@ -2595,7 +2601,20 @@ def _page_border_inset_dxa(doc: Document, side: str = "right") -> int:
         space_pt = int(node.get(qn("w:space")) or 24)
     except (TypeError, ValueError):
         space_pt = 24
-    return max(0, space_pt * 20)
+    space_dxa = max(0, space_pt * 20)
+    offset_from = (borders.get(qn("w:offsetFrom")) or "page").strip().lower()
+    if offset_from == "text":
+        # Inner edge of the frame ≈ text margin. Return inset from page edge
+        # so (page_w - inset) equals the text-area side.
+        if side == "left":
+            return _section_metric(doc, "w:pgMar", "w:left", 1440)
+        if side == "right":
+            return _section_metric(doc, "w:pgMar", "w:right", 1440)
+        if side == "top":
+            return _section_metric(doc, "w:pgMar", "w:top", 1440)
+        if side == "bottom":
+            return _section_metric(doc, "w:pgMar", "w:bottom", 1440)
+    return space_dxa
 
 
 def _scale_table_widths(tbl, scale: float) -> int:

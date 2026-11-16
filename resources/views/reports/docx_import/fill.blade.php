@@ -883,12 +883,16 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                 <form action="{{ route('reports.docx-import.fill', $report) }}" method="POST" id="docxFillForm" class="esign-required {{ (!empty($requalFillLocked) && empty($isPreApprovalMode)) ? 'requal-fill-locked' : '' }}{{ (($importSource ?? '') === 'new_equipment_qualification') ? ' docx-import-neq' : '' }}" enctype="multipart/form-data">
                     @csrf
                     <input type="hidden" name="password">
-                    <input type="hidden" name="table_ops" id="docxTableOpsInput" value="{{ json_encode($report->data['table_ops'] ?? []) }}">
-                    {{-- Hidden header cell values synced from  and table inputs --}}
+                    <input type="hidden" name="table_ops" id="docxTableOpsInput" value="{{ json_encode($tableOps ?? []) }}">
+                    {{-- HVAC/requal wrap-header hidden cells. NEQ Att6 uses Word letterhead
+                         locations (facility=row3col2, version=row5col4, equip id=row4col4) —
+                         never bind HVAC coordinates or they overwrite Att6 values. --}}
+                    @if(($importSource ?? '') !== 'new_equipment_qualification')
                     <input type="hidden" name="fields[header_0_row_2_col_2]" id="header_facility_hidden"
                            value="{{ old('fields.header_0_row_2_col_2', $facilitySection) }}">
                     <input type="hidden" name="fields[header_0_row_4_col_4]" id="header_version_hidden"
                            value="{{ old('fields.header_0_row_4_col_4', $report->version ?? '') }}">
+                    @endif
                     <div class="card-body px-4 py-4">
 
                         @if (session('error'))
@@ -1034,18 +1038,19 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                                placeholder="From original protocol, or enter if blank">
                                         <small class="text-muted">Shown on the report header. Auto-filled when present in the uploaded DOCX.</small>
                                     </div>
-                                    {{-- <div class="col-md-4">
+                                    <div class="col-md-4">
                                         <label class="form-label font-weight-bold">Facility / Section</label>
                                         <input type="text" name="facility_section" id="fill_facility_section" class="form-control"
-                                               value="{{ old('facility_section', $facilitySection) }}">
-                                    </div> --}}
-                                    <div class="col-md-6">
+                                               value="{{ old('facility_section', $facilitySection) }}"
+                                               placeholder="From letterhead, or enter if blank">
+                                    </div>
+                                    <div class="col-md-4">
                                         <label class="form-label font-weight-bold">Equipment Name <span class="text-danger">*</span></label>
                                         <input type="text" name="equipment_name" id="fill_equipment_name" class="form-control"
                                                value="{{ old('equipment_name', $equipmentName) }}"
                                                required>
                                     </div>
-                                    <div class="col-md-6">
+                                    <div class="col-md-4">
                                         <label class="form-label font-weight-bold">Equipment ID <span class="text-danger">*</span></label>
                                         <input type="text" name="equipment_id" id="fill_equipment_id" class="form-control"
                                                value="{{ old('equipment_id', $equipmentId) }}"
@@ -1082,6 +1087,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                 'post_checked_by_production_name'  => 'post_checked_by_production_name_value',
                                 'post_checked_by_quality_name'     => 'post_checked_by_quality_name_value',
                                 'post_checked_by_validation_name'  => 'post_checked_by_validation_name_value',
+                                'post_approved_by_user_name'       => 'post_approved_by_user_name_value',
                                 'post_approved_by_quality_name'    => 'post_approved_by_quality_name_value',
                             ] as $roleKey => $inputId)
                                 @if(in_array($roleKey, $presentApproverRoles, true))
@@ -1381,7 +1387,21 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    let tableOps = @json($report->data['table_ops'] ?? []);
+    let tableOps = @json($tableOps ?? []);
+    if (!Array.isArray(tableOps)) {
+        // Recover from historically double-encoded draft payloads.
+        try {
+            let cur = tableOps;
+            for (let i = 0; i < 8; i++) {
+                if (Array.isArray(cur)) { tableOps = cur; break; }
+                if (typeof cur !== 'string') { tableOps = []; break; }
+                cur = JSON.parse(cur);
+                if (i === 7) tableOps = Array.isArray(cur) ? cur : [];
+            }
+        } catch (e) {
+            tableOps = [];
+        }
+    }
     let selectedRow = null;
     let selectedTable = null;
 
@@ -1422,13 +1442,7 @@ document.addEventListener('DOMContentLoaded', function () {
         newTable.className = sourceTable.className;
         newTable.setAttribute('data-table-index', tIdx);
 
-        const thRow = sourceTable.querySelector('tr:first-child');
-        if (thRow && thRow.querySelector('th')) {
-            const clonedTh = thRow.cloneNode(true);
-            clonedTh.classList.remove('docx-selected-row');
-            clonedTh.querySelectorAll('[name]').forEach(function (el) { el.removeAttribute('name'); });
-            newTable.appendChild(clonedTh);
-        }
+        appendClonedHeaderRows(newTable, sourceTable);
         newBody.appendChild(newTable);
         newPage.appendChild(newBody);
 
@@ -1707,6 +1721,67 @@ document.addEventListener('DOMContentLoaded', function () {
         return newPage;
     }
 
+    // Att08 Instrument Calibration: 2-row header (Calibration details + Done On/Due On).
+    // Clone the full header block — not only rows[0] — or page 2 loses column headings.
+    function leadingHeaderRowCount(sourceTable) {
+        if (!sourceTable || !sourceTable.rows.length) return 0;
+        const row0 = sourceTable.rows[0];
+        const looksHeader = !!(
+            row0.querySelector('th')
+            || row0.getAttribute('data-row-index') === '0'
+            || row0.classList.contains('docx-table-header')
+            || row0.querySelector('.docx-table-header')
+        );
+        if (!looksHeader) return 0;
+
+        let span = 1;
+        Array.from(row0.cells).forEach(function (cell) {
+            const rs = parseInt(cell.getAttribute('rowspan') || '1', 10);
+            if (!isNaN(rs) && rs > span) span = rs;
+        });
+
+        if (span < 2 && sourceTable.rows.length > 1) {
+            const row1 = sourceTable.rows[1];
+            const hasInput = !!row1.querySelector('input, textarea, select');
+            const text = (row1.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const subHints = ['done on', 'due on'];
+            if (!hasInput && subHints.some(function (h) { return text.indexOf(h) !== -1; })) {
+                span = 2;
+            }
+        }
+
+        const marked = parseInt(sourceTable.getAttribute('data-header-row-count') || '0', 10);
+        if (!isNaN(marked) && marked > span) span = marked;
+
+        return Math.max(1, Math.min(span, 3, sourceTable.rows.length - 1 || 1));
+    }
+
+    function appendClonedHeaderRows(targetTable, sourceTable) {
+        const n = leadingHeaderRowCount(sourceTable);
+        if (n <= 0) return 0;
+        for (let i = 0; i < n; i++) {
+            const src = sourceTable.rows[i];
+            if (!src) break;
+            const clone = src.cloneNode(true);
+            clone.classList.remove('docx-selected-row');
+            clone.setAttribute('data-cont-header', '1');
+            clone.querySelectorAll('input, textarea, select').forEach(function (el) {
+                el.removeAttribute('name');
+            });
+            targetTable.appendChild(clone);
+        }
+        targetTable.setAttribute('data-header-row-count', String(n));
+        return n;
+    }
+
+    function lastHeaderRow(table) {
+        const n = parseInt(table.getAttribute('data-header-row-count') || '0', 10);
+        if (n > 0 && table.rows[n - 1]) return table.rows[n - 1];
+        const computed = leadingHeaderRowCount(table);
+        if (computed > 0 && table.rows[computed - 1]) return table.rows[computed - 1];
+        return table.rows[0] || null;
+    }
+
     function continuationTable(page, sourceTable) {
         const nextPage = followingA4Page(page) || createContinuationPage(page);
         const body = nextPage.querySelector('.docx-page-body');
@@ -1723,21 +1798,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const table = document.createElement('table');
         table.className = sourceTable.className;
         if (tIdx !== '') table.setAttribute('data-table-index', tIdx);
-        const header = sourceTable.rows[0];
-        const headerIsHeader = header && (
-            header.querySelector('th')
-            || header.getAttribute('data-row-index') === '0'
-            || header.classList.contains('docx-table-header')
-            || !!header.querySelector('.docx-table-header')
-        );
-        if (headerIsHeader) {
-            const clonedHeader = header.cloneNode(true);
-            clonedHeader.classList.remove('docx-selected-row');
-            clonedHeader.querySelectorAll('input, textarea, select').forEach(function (el) {
-                el.removeAttribute('name');
-            });
-            table.appendChild(clonedHeader);
-        }
+        appendClonedHeaderRows(table, sourceTable);
         body.insertBefore(table, body.firstChild);
         return table;
     }
@@ -1796,9 +1857,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     ? nextBody.querySelector('table.docx-table[data-table-index="' + tIdx + '"]')
                     : null;
                 if (existing && existing !== last) {
-                    // Merge remaining data rows before the continuation's first data row.
-                    const dataRows = Array.from(last.rows).slice(1);
-                    const hostHeader = existing.rows[0];
+                    // Merge remaining data rows after the continuation's full header block.
+                    const hdrN = leadingHeaderRowCount(last);
+                    const dataRows = Array.from(last.rows).slice(hdrN);
+                    const hostHeader = lastHeaderRow(existing);
                     dataRows.reverse().forEach(function (r) {
                         if (hostHeader) hostHeader.after(r);
                         else existing.insertBefore(r, existing.rows[0] || null);
@@ -1810,19 +1872,20 @@ document.addEventListener('DOMContentLoaded', function () {
                 return true;
             }
             const table = continuationTable(page, last);
-            const header = table.rows[0];
+            const header = lastHeaderRow(table);
             if (header && header !== row) header.after(row);
             else table.appendChild(row);
             // If only header + Sr.No 1 remain on this sheet, move "1" with the
             // spilled block so it is not clipped under overflow:hidden.
-            if (last.rows.length === 2) {
-                const maybeFirst = last.rows[1];
+            const hdrLeft = leadingHeaderRowCount(last);
+            if (last.rows.length === hdrLeft + 1) {
+                const maybeFirst = last.rows[hdrLeft];
                 if (maybeFirst && maybeFirst.getAttribute('data-row-index') === '1') {
                     const hostRow2 = Array.from(table.rows).find(function (r) {
                         return r.getAttribute('data-row-index') === '2';
                     });
                     if (hostRow2) table.insertBefore(maybeFirst, hostRow2);
-                    else if (table.rows[0]) table.rows[0].after(maybeFirst);
+                    else if (header) header.after(maybeFirst);
                     else table.appendChild(maybeFirst);
                 }
             }
@@ -1944,11 +2007,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function pullTableRowBack(body, sourceTable) {
-        const head = sourceTable.rows[0] && (
-            sourceTable.rows[0].querySelector('th')
-            || (sourceTable.rows[0].getAttribute('data-row-index') === '0')
-        ) ? sourceTable.rows[0] : null;
-        const row = head ? sourceTable.rows[1] : sourceTable.rows[0];
+        // Att08: skip full 2-row header; first pullable data row is after Done On/Due On.
+        const hdrN = leadingHeaderRowCount(sourceTable);
+        const row = sourceTable.rows[hdrN] || null;
         if (!row) {
             if (!sourceTable.querySelector('[name]')) sourceTable.remove();
             return true;
@@ -1983,24 +2044,21 @@ document.addEventListener('DOMContentLoaded', function () {
             target.className = sourceTable.className;
             const tIdx = sourceTable.getAttribute('data-table-index') || '';
             if (tIdx) target.setAttribute('data-table-index', tIdx);
-            if (head) {
-                const clone = head.cloneNode(true);
-                clone.querySelectorAll('[id]').forEach(function (el) { el.removeAttribute('id'); });
-                clone.querySelectorAll('[name]').forEach(function (el) { el.removeAttribute('name'); });
-                target.appendChild(clone);
-            }
+            appendClonedHeaderRows(target, sourceTable);
             body.appendChild(target);
             created = true;
         }
         const marker = row.nextSibling;
-        target.appendChild(row);
+        const hostHeader = lastHeaderRow(target);
+        if (hostHeader) hostHeader.after(row);
+        else target.appendChild(row);
         if (pageIsOverfull(body) || pageFreeSpace(body) < -4) {
             if (marker) sourceTable.insertBefore(row, marker);
             else sourceTable.appendChild(row);
             if (created) target.remove();
             return false;
         }
-        const leftoverHead = sourceTable.rows.length === 1 && sourceTable.rows[0].querySelector('th') && !sourceTable.querySelector('[name]');
+        const leftoverHead = sourceTable.rows.length <= hdrN && !sourceTable.querySelector('[name]');
         if (!sourceTable.rows.length || leftoverHead) sourceTable.remove();
         return true;
     }
@@ -2595,6 +2653,161 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         window.dedupeIdenticalAddedRows = dedupeIdenticalAddedRows;
 
+        function tableRowsByIndex(tableIndex) {
+            const out = [];
+            const sel = '.docx-preview-wrapper table.docx-table[data-table-index="' + tableIndex + '"]';
+            document.querySelectorAll(sel).forEach(function (table) {
+                Array.from(table.rows || []).forEach(function (tr) {
+                    const raw = tr.getAttribute('data-row-index');
+                    if (raw === null || raw === '') return;
+                    const n = parseInt(raw, 10);
+                    if (isNaN(n)) return;
+                    out.push({ index: n, row: tr, table: table });
+                });
+            });
+            out.sort(function (a, b) { return a.index - b.index; });
+            return out;
+        }
+
+        function rowHasTypedValue(row) {
+            if (!row) return false;
+            const inputs = row.querySelectorAll('input:not([type="file"]):not([type="hidden"]), textarea, select');
+            for (let i = 0; i < inputs.length; i++) {
+                const el = inputs[i];
+                if (el.type === 'checkbox' || el.type === 'radio') {
+                    if (el.checked) return true;
+                    continue;
+                }
+                if (String(el.value || '').replace(/\s+/g, ' ').trim() !== '') return true;
+            }
+            return false;
+        }
+
+        function rewriteLocationToken(token, tableIndex, fromRow, toRow) {
+            if (!token) return token;
+            const re = new RegExp(
+                '(table_|header_)' + tableIndex + '_row_' + fromRow + '(?=_col_|$)'
+            );
+            return String(token).replace(re, '$1' + tableIndex + '_row_' + toRow);
+        }
+
+        function remapRowLocations(row, tableIndex, fromRow, toRow) {
+            if (!row || fromRow === toRow) return;
+            row.setAttribute('data-row-index', String(toRow));
+            row.querySelectorAll('[name], [data-field], [data-field-location], [data-attachment-location], [data-department-location], [data-signature-location]').forEach(function (el) {
+                ['name', 'data-field', 'data-field-location', 'data-attachment-location', 'data-department-location', 'data-signature-location'].forEach(function (attr) {
+                    const cur = el.getAttribute(attr);
+                    if (!cur) return;
+                    const next = rewriteLocationToken(cur, tableIndex, fromRow, toRow);
+                    if (next !== cur) el.setAttribute(attr, next);
+                });
+                if (el.dataset) {
+                    if (el.dataset.fieldLocation) {
+                        el.dataset.fieldLocation = rewriteLocationToken(el.dataset.fieldLocation, tableIndex, fromRow, toRow);
+                    }
+                    if (el.dataset.attachmentLocation) {
+                        el.dataset.attachmentLocation = rewriteLocationToken(el.dataset.attachmentLocation, tableIndex, fromRow, toRow);
+                    }
+                }
+            });
+        }
+
+        function clearRowInputs(row) {
+            if (!row) return;
+            row.querySelectorAll('input, textarea').forEach(function (inp) {
+                if (inp.type === 'radio' || inp.type === 'checkbox') {
+                    inp.checked = false;
+                } else {
+                    inp.value = '';
+                }
+                inp.removeAttribute('readonly');
+                inp.disabled = false;
+            });
+            row.querySelectorAll('select').forEach(function (sel) {
+                sel.selectedIndex = 0;
+                sel.disabled = false;
+            });
+            row.querySelectorAll('.docx-attachment-link, .docx-saved-file').forEach(function (el) {
+                el.remove();
+            });
+            row.querySelectorAll('.locked').forEach(function (el) {
+                el.classList.remove('locked');
+                el.classList.add('editable');
+            });
+        }
+
+        function assignRowLocations(row, tableIndex, rowIndex) {
+            if (!row) return;
+            row.setAttribute('data-row-index', String(rowIndex));
+            Array.from(row.cells || []).forEach(function (td, colIdx) {
+                const loc = 'table_' + tableIndex + '_row_' + rowIndex + '_col_' + colIdx;
+                td.setAttribute('data-field', loc);
+                td.querySelectorAll('input, textarea, select').forEach(function (inp) {
+                    if (inp.type === 'file') {
+                        inp.name = 'attachments[' + loc + ']';
+                        if (td.setAttribute) td.setAttribute('data-attachment-location', loc);
+                        const hiddenName = td.querySelector('.attachment-name-field');
+                        if (hiddenName) {
+                            hiddenName.value = '';
+                            hiddenName.name = 'fields[' + loc + ']';
+                            hiddenName.setAttribute('data-attachment-location', loc);
+                        }
+                        return;
+                    }
+                    if (inp.type === 'hidden' && inp.classList.contains('attachment-name-field')) {
+                        inp.name = 'fields[' + loc + ']';
+                        inp.setAttribute('data-attachment-location', loc);
+                        return;
+                    }
+                    inp.name = 'fields[' + loc + ']';
+                    if (inp.dataset) inp.dataset.fieldLocation = loc;
+                    inp.setAttribute('data-field-location', loc);
+                });
+            });
+        }
+
+        function shiftRowsAfter(tableIndex, afterRow) {
+            const rows = tableRowsByIndex(tableIndex).filter(function (item) {
+                return item.index > afterRow;
+            });
+            // Highest index first so renames do not collide.
+            rows.sort(function (a, b) { return b.index - a.index; });
+            rows.forEach(function (item) {
+                remapRowLocations(item.row, tableIndex, item.index, item.index + 1);
+            });
+        }
+
+        function tryReuseTrailingEmptyRow(tableIndex, afterRow, selectedRowEl) {
+            const rows = tableRowsByIndex(tableIndex).filter(function (item) {
+                return item.index > afterRow;
+            });
+            if (!rows.length) return null;
+            let empty = null;
+            for (let i = rows.length - 1; i >= 0; i--) {
+                if (rowHasTypedValue(rows[i].row)) break;
+                empty = rows[i];
+            }
+            if (!empty) return null;
+            const insertAt = afterRow + 1;
+            if (empty.index === insertAt) {
+                clearRowInputs(empty.row);
+                return empty.row;
+            }
+            // Shift locations insertAt .. empty.index-1 up by one, then park empty at insertAt.
+            const toShift = rows.filter(function (item) {
+                return item.index >= insertAt && item.index < empty.index;
+            });
+            toShift.sort(function (a, b) { return b.index - a.index; });
+            toShift.forEach(function (item) {
+                remapRowLocations(item.row, tableIndex, item.index, item.index + 1);
+            });
+            remapRowLocations(empty.row, tableIndex, empty.index, insertAt);
+            clearRowInputs(empty.row);
+            selectedRowEl.after(empty.row);
+            empty.row.setAttribute('data-is-added-row', '1');
+            return empty.row;
+        }
+
         // Add Row
         let addRowBusy = false;
         if (btnAddRow) {
@@ -2621,72 +2834,38 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (nextData) templateRow = nextData;
                 }
 
-                const newRow = templateRow.cloneNode(true);
-                newRow.classList.remove('docx-selected-row');
-                newRow.setAttribute('data-is-added-row', '1');
-                newRow.removeAttribute('data-row-index');
-
-                newRow.querySelectorAll('input, textarea').forEach(function (inp) {
-                    const token = 'new_row_' + Math.random().toString(36).substring(2, 9);
-                    if (inp.type === 'radio' || inp.type === 'checkbox') {
-                        inp.checked = false;
-                    } else if (inp.type !== 'file') {
-                        inp.value = '';
-                    } else {
-                        inp.value = '';
-                    }
-                    if (inp.type !== 'file') {
-                        inp.name = 'fields[' + token + ']';
-                    } else {
-                        // Fresh attachment slot — never reuse the source row's location name.
-                        inp.name = 'attachments[' + token + ']';
-                        const hiddenName = inp.parentElement && inp.parentElement.querySelector('.attachment-name-field');
-                        if (hiddenName) {
-                            hiddenName.value = '';
-                            hiddenName.setAttribute('data-attachment-location', token);
-                            hiddenName.name = 'attachment_names[' + token + ']';
-                        }
-                        if (inp.parentElement && inp.parentElement.getAttribute) {
-                            inp.parentElement.setAttribute('data-attachment-location', token);
-                        }
-                    }
-                    inp.removeAttribute('readonly');
-                    inp.disabled = false;
-                });
-                newRow.querySelectorAll('select').forEach(function (sel) {
-                    sel.selectedIndex = 0;
-                    sel.disabled = false;
-                    sel.name = 'fields[new_row_' + Math.random().toString(36).substring(2, 9) + ']';
-                });
-                newRow.querySelectorAll('.docx-attachment-link, .docx-saved-file').forEach(function (el) {
-                    el.remove();
-                });
-                newRow.querySelectorAll('.locked').forEach(function (el) {
-                    el.classList.remove('locked');
-                    el.classList.add('editable');
-                });
-                newRow.querySelectorAll('td').forEach(function (td) {
-                    if (td.querySelector('input, textarea, select')) return;
-                    td.textContent = '';
-                    td.innerHTML = '<input type="text" class="docx-input" name="fields[new_row_' + Math.random().toString(36).substring(2, 9) + ']" value="">';
-                    td.classList.add('editable');
-                });
-
-                selectedRow.after(newRow);
-
-                const tIdx = parseInt(selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable));
-                const afterRow = parseInt(selectedRow.getAttribute('data-row-index') || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow));
+                const tIdx = parseInt(selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable), 10);
+                const afterRow = parseInt(selectedRow.getAttribute('data-row-index') || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow), 10);
                 const headers = Array.from(selectedTable.querySelectorAll('tr:first-child td, tr:first-child th')).map(function (th) {
                     return th.textContent.trim();
                 });
 
-                tableOps.push({
-                    op: 'insert',
-                    table: tIdx,
-                    after_row: afterRow,
-                    headers: headers,
-                    _rowEl: newRow
-                });
+                // Prefer sliding a trailing blank template row up (Att08 already has empty slots).
+                let newRow = tryReuseTrailingEmptyRow(tIdx, afterRow, selectedRow);
+                let usedStructuralInsert = false;
+                if (!newRow) {
+                    usedStructuralInsert = true;
+                    shiftRowsAfter(tIdx, afterRow);
+                    newRow = templateRow.cloneNode(true);
+                    newRow.classList.remove('docx-selected-row');
+                    newRow.setAttribute('data-is-added-row', '1');
+                    clearRowInputs(newRow);
+                    newRow.querySelectorAll('td').forEach(function (td) {
+                        if (td.querySelector('input, textarea, select')) return;
+                        td.textContent = '';
+                        td.innerHTML = '<input type="text" class="docx-input" value="">';
+                        td.classList.add('editable');
+                    });
+                    assignRowLocations(newRow, tIdx, afterRow + 1);
+                    selectedRow.after(newRow);
+                    tableOps.push({
+                        op: 'insert',
+                        table: tIdx,
+                        after_row: afterRow,
+                        headers: headers,
+                        _rowEl: newRow
+                    });
+                }
 
                 // Move selection to newly added row
                 document.querySelectorAll('.docx-preview-wrapper table.docx-table tr.docx-selected-row').forEach(function (r) {
@@ -2718,7 +2897,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 newRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
 
                 if (rowInfo) {
-                    rowInfo.innerHTML = '<span class="text-success font-weight-bold">Row Added!</span> Type text into the new cells.';
+                    rowInfo.innerHTML = '<span class="text-success font-weight-bold">Row Added!</span> Type text into the new cells.'
+                        + (usedStructuralInsert ? '' : ' (reused blank row)');
                 }
                 const firstInput = newRow.querySelector('input:not([type="file"]), textarea');
                 if (firstInput) firstInput.focus();
@@ -2883,6 +3063,7 @@ document.addEventListener('DOMContentLoaded', function () {
         post_checked_by_production_name: document.getElementById('post_checked_by_production_name_value'),
         post_checked_by_quality_name: document.getElementById('post_checked_by_quality_name_value'),
         post_checked_by_validation_name: document.getElementById('post_checked_by_validation_name_value'),
+        post_approved_by_user_name: document.getElementById('post_approved_by_user_name_value'),
         post_approved_by_quality_name: document.getElementById('post_approved_by_quality_name_value'),
     };
 
@@ -2939,10 +3120,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (idx < 0) return '';
         if (title.includes('checked by')) {
             const roles = [
-                'post_checked_by_engineering_name',
-                'post_checked_by_production_name',
-                'post_checked_by_quality_name',
                 'post_checked_by_validation_name',
+                'post_checked_by_production_name',
+                'post_checked_by_engineering_name',
+                'post_checked_by_quality_name',
             ];
             return roles[idx] || '';
         }
@@ -2950,7 +3131,11 @@ document.addEventListener('DOMContentLoaded', function () {
             return 'post_prepared_by_name';
         }
         if (title.includes('approved by')) {
-            return 'post_approved_by_quality_name';
+            const roles = [
+                'post_approved_by_user_name',
+                'post_approved_by_quality_name',
+            ];
+            return roles[idx] || 'post_approved_by_user_name';
         }
         return '';
     };
@@ -2974,9 +3159,11 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
         const text = (row.textContent || '').toLowerCase();
+        const tableTitle = ((sel.closest('table') || {}).innerText || '').slice(0, 120).toLowerCase();
+        const isApprovedBy = tableTitle.includes('approved by');
+        const isCheckedBy = tableTitle.includes('checked by') && !isApprovedBy;
         if (text.includes('quality') || text.includes('assurance') || /\bqa\b/.test(text)) {
-            const tableTitle = ((sel.closest('table') || {}).innerText || '').slice(0, 80).toLowerCase();
-            if (tableTitle.includes('checked by') && !tableTitle.includes('approved by')) {
+            if (isCheckedBy) {
                 return 'post_checked_by_quality_name';
             }
             return 'post_approved_by_quality_name';
@@ -2990,7 +3177,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (text.includes('production')) {
             return 'post_checked_by_production_name';
         }
-        if (text.includes('validation') || text.includes('user/validation')) {
+        if (text.includes('validation') || text.includes('user/validation') || text.includes('user / validation')) {
+            if (isApprovedBy) {
+                return 'post_approved_by_user_name';
+            }
             return 'post_checked_by_validation_name';
         }
         if (text.includes('performed') || text.includes('recorded') || text.includes('complied')) {
@@ -3762,24 +3952,26 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     if (isNeqLetterhead) {
-        // Att11/Att14 Word letterhead locations — never cross-wire equipment ↔ facility.
-        // Att11: row2=Reference, row3=Equipment name/ID, row4=Facility.
+        // NEQ Att6/Att11/Att14: ONLY sync via PHP-detected coverLocations.
+        // Hardcoded HVAC/Att11 fallbacks cross-wire Att6
+        // (facility=row3col2, equip name=row3col4, ref=row4col2, equip id=row4col4,
+        //  document no=row5col2, version=row5col4).
         syncMappingToHeader(
             'fill_equipment_name',
             'header_equipment_name',
-            uniqLocs([coverLocations.equipment_name, 'header_0_row_3_col_2']),
+            uniqLocs([coverLocations.equipment_name]),
             'equipment_name'
         );
         syncMappingToHeader(
             'fill_equipment_id',
             'header_equipment_id',
-            uniqLocs([coverLocations.equipment_id, 'header_0_row_3_col_4']),
+            uniqLocs([coverLocations.equipment_id]),
             'equipment_id'
         );
         syncMappingToHeader(
             'fill_facility_section',
             null,
-            uniqLocs([coverLocations.facility_section, 'header_0_row_4_col_2']),
+            uniqLocs([coverLocations.facility_section]),
             'facility_section'
         );
         syncMappingToHeader(
@@ -3788,7 +3980,6 @@ document.addEventListener('DOMContentLoaded', function () {
             uniqLocs([
                 coverLocations.reference_protocol_no,
                 coverLocations.reference_document_no,
-                'header_0_row_2_col_2',
                 'header_ref_protocol',
             ]),
             'reference_protocol_no'
@@ -3799,7 +3990,8 @@ document.addEventListener('DOMContentLoaded', function () {
             uniqLocs([coverLocations.document_no]),
             'document_no'
         );
-        // Do not map document_title onto header_0_row_3_col_2 (that cell is Equipment Name).
+        // VERSION stays as Python rendered from Word (e.g. "0.2"). Do not
+        // syncMappingToHeader(version) — empty stored values would wipe it.
         if (coverLocations.document_title) {
             syncMappingToHeader(
                 'fill_document_title',
@@ -3854,9 +4046,16 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!isNeqLetterhead && headerFacilityHidden && headerFacilityHidden.value.trim() !== '') {
         syncLetterheadCells('facility_section', headerFacilityHidden.value);
     }
+    // Requal only: header_version_hidden is bound to HVAC header_0_row_4_col_4.
+    // On NEQ Att6 that location is Equipment ID — never push it into VERSION.
     const headerVersionHidden = document.getElementById('header_version_hidden');
-    if (headerVersionHidden && headerVersionHidden.value.trim() !== '') {
-        syncLetterheadCells('version', headerVersionHidden.value);
+    if (!isNeqLetterhead && headerVersionHidden && headerVersionHidden.value.trim() !== '') {
+        const verText = headerVersionHidden.value.trim();
+        // Ignore broken python-docx "." reads and page chrome.
+        if (verText !== '.' && verText !== '0.' && verText !== '.2'
+            && !/\bpage\s+\d+\s+of\s+\d+\b/i.test(verText)) {
+            syncLetterheadCells('version', verText);
+        }
     }
 
     const documentTitleLocation = @json($documentTitleLocation ?? null);
@@ -4666,7 +4865,9 @@ document.addEventListener('DOMContentLoaded', function () {
             const text = String(value || '').replace(/\s+/g, ' ').trim();
             if (!/\d{2}-\d{2}-\d{4}\s+\d{1,2}:\d{2}\s+(AM|PM)$/i.test(text)) return false;
             return text.indexOf(signerName) === 0
-                || text.indexOf('Verified by sign and date : ' + signerName) === 0;
+                || text.indexOf('Verified by sign and date : ' + signerName) === 0
+                || /^safety\s*(?:checks?\s*)?s?\s*by\b.*:\s*/i.test(text)
+                    && text.indexOf(signerName) !== -1;
         };
 
         const undoEsignValue = function (field) {
@@ -4763,8 +4964,15 @@ document.addEventListener('DOMContentLoaded', function () {
                     .replace(/\s+/g, ' ')
                     .trim();
                 const verifiedLabel = /^verified\s*by\s*sign\s*and\s*date\b/i.test(hint);
+                const safetyByMatch = hint.match(/^(safety\s*(?:checks?\s*)?s?\s*by\b.*?(?:sign\.?\s*\/?\s*date)?)/i);
                 if (verifiedLabel) {
                     field.value = 'Verified by sign and date : ' + signerName + ' ' + when;
+                } else if (safetyByMatch) {
+                    const base = (safetyByMatch[1] || 'Safety Checks By (Sign./Date)')
+                        .replace(/\s*:\s*$/, '')
+                        .replace(/\s+/g, ' ')
+                        .trim();
+                    field.value = base + ' : ' + signerName + ' ' + when;
                 } else if ((field.tagName || '').toLowerCase() === 'textarea') {
                     field.value = signerName + '\n' + when;
                 } else {

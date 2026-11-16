@@ -92,13 +92,42 @@ def _normalize_cover_label(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower()).rstrip(":")
 
 
+def _cell_plain_text(cell) -> str:
+    """
+    Full cell text from every w:t node.
+
+    python-docx cell.text / paragraph.text can drop sibling runs (Att6 VERSION
+    stores "0.2" as separate w:t nodes "0", ".", "2" but .text returns only ".").
+    """
+    if cell is None:
+        return ""
+    try:
+        parts = [
+            (node.text or "")
+            for node in cell._tc.findall(
+                ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
+            )
+        ]
+        joined = "".join(parts).strip()
+        if joined:
+            return joined
+    except Exception:
+        pass
+    return (cell.text or "").strip()
+
+
 def _match_cover_label_cell(text: str) -> tuple[str, str] | None:
     """Return (cover_field key, display label) for protocol / report cover cells."""
     ll = _normalize_cover_label(text)
     if not ll:
         return None
+    # REF. DOCUMENT / Reference Protocol must win before bare "Document No."
     patterns = (
-        (r"(?:reference\s*(?:protocol|document)|ref\.?\s*protocol)", "reference_protocol_no", "Reference Protocol No."),
+        (
+            r"(?:ref\.?\s*document|reference\s*document|reference\s*protocol|ref\.?\s*protocol)",
+            "reference_protocol_no",
+            "Reference Document No.",
+        ),
         (r"document\s*title", "document_title", "Document Title"),
         (r"(?:document|doc\.?)\s*(?:no\.?|number)\b", "document_no", "Document No."),
         (r"equipment(?:\s*/\s*system)?\s*name\b", "equipment_name", "Equipment Name"),
@@ -141,7 +170,7 @@ def _scan_cover_table_fields(
     for row_index, row in enumerate(table.rows):
         cells = row.cells
         for col_index, cell in enumerate(cells):
-            matched = _match_cover_label_cell(cell.text)
+            matched = _match_cover_label_cell(_cell_plain_text(cell))
             if not matched:
                 continue
             key, display = matched
@@ -150,7 +179,7 @@ def _scan_cover_table_fields(
                 if cells[value_col]._tc is cell._tc:
                     value_col += 1
                     continue
-                neighbor = cells[value_col].text.strip()
+                neighbor = _cell_plain_text(cells[value_col])
                 if neighbor and _match_cover_label_cell(neighbor):
                     value_col += 1
                     continue
@@ -167,12 +196,15 @@ def _scan_cover_table_fields(
                 continue
             seen_locations.add(location)
             skip.add(location)
-            val_text = cells[value_col].text.strip()
+            val_text = _cell_plain_text(cells[value_col])
+            # Keep Word letterhead values; leave unlocked so empty cells stay fillable
+            # and filled cells still show the original text (PHP will not overwrite).
             fillable_fields.append({
                 "label": display,
                 "value": val_text,
-                # Cover cells with more than one character are treated as pre-filled and locked.
-                "locked": len(val_text) > 1,
+                "locked": False,
+                "prefilled": bool(val_text),
+                "draft_editable": True,
                 "type": "protocol_cover",
                 "location": location,
                 "widget": "date" if key == "effective_date" else "text",
@@ -822,9 +854,24 @@ def is_certificate_number_column(header_label: str) -> bool:
         return False
     if re.search(r"certificate\s*(?:no\.?|number|#)", ll):
         return True
+    # "Ref No. of Certificate" / "Reference No. of Certificate"
+    if re.search(r"(?:ref(?:erence)?\.?\s*no\.?|ref\.?)\s*(?:of\s+)?certificate", ll):
+        return True
     if re.search(r"\bcert\.?\s*no\.?", ll):
         return True
     return False
+
+
+def is_annexure_id_column(header_label: str) -> bool:
+    """True for Annexure No. ID columns (keep ANNEX_* text; never file upload)."""
+    ll = re.sub(r"\s+", " ", (header_label or "").strip().lower())
+    return bool(re.match(r"^(annexure|annex)\s*(no\.?|number|#)?$", ll))
+
+
+def is_placeholder_table_value(text: str) -> bool:
+    """True for NA / dash placeholders that users must still be able to edit."""
+    t = re.sub(r"\s+", " ", (text or "").strip().lower())
+    return t in {"na", "n/a", "n.a.", "n.a", "-", "–", "—", ".", "...", "nil", "none"}
 
 
 # True when column expects a supporting document upload (certificate/proof/annexure).
@@ -838,6 +885,8 @@ def is_attachment_column(header_label: str) -> bool:
     if "attachment no" in ll or "attachment type" in ll:
         return False
     if is_certificate_number_column(header_label):
+        return False
+    if is_annexure_id_column(header_label):
         return False
     return any(kw in ll for kw in ATTACHMENT_KEYWORDS)
 
@@ -1221,11 +1270,48 @@ def looks_like_sl_no_value(value: str) -> bool:
     return bool(_SL_NO_VALUE_RE.match((value or "").strip()))
 
 
+def cell_has_word_numbering(cell) -> bool:
+    """True when a cell paragraph uses Word auto-numbering (w:numPr)."""
+    from docx.oxml.ns import qn
+
+    tc = getattr(cell, "_tc", None)
+    if tc is None:
+        return False
+    for p_el in tc.findall(qn("w:p")):
+        p_pr = p_el.find(qn("w:pPr"))
+        if p_pr is not None and p_pr.find(qn("w:numPr")) is not None:
+            return True
+    return False
+
+
 # True for footer rows containing "Verified by sign and date".
 def is_verified_by_sign_row(row) -> bool:
     """Footer row: Verified by sign and date."""
     text = " ".join(c.text.strip().lower() for c in row.cells)
     return "verified by" in text
+
+
+def is_safety_by_sign_row(row) -> bool:
+    """Att10 footer: Safety Checks By (Sign./Date) / Safety By (Sign./Date)."""
+    seen: set[int] = set()
+    parts: list[str] = []
+    for cell in row.cells:
+        tc_id = id(cell._tc)
+        if tc_id in seen:
+            continue
+        seen.add(tc_id)
+        text = (cell.text or "").strip()
+        if text:
+            parts.append(text)
+    if not parts:
+        return False
+    text = re.sub(r"\s+", " ", " ".join(parts)).strip()
+    if len(text) > 180:
+        return False
+    return bool(
+        re.match(r"^safety\s*(?:checks?\s*)?s?\s*by\b", text, re.I)
+        and re.search(r"sign", text, re.I)
+    )
 
 
 # True for merged section-title rows inside composite component tables.
@@ -1287,8 +1373,8 @@ def is_repeated_column_header_row(row, col_headers: list[str] | None = None) -> 
 
 def is_equipment_section_banner_row(row) -> bool:
     """True for AHU / Dust Extractor / Equipment full-width section banners."""
-    # Att07 signature footers are merged like banners but must stay fillable for e-sign.
-    if is_verified_by_sign_row(row):
+    # Att07 / Att10 signature footers are merged like banners but must stay fillable for e-sign.
+    if is_verified_by_sign_row(row) or is_safety_by_sign_row(row):
         return False
     texts: list[str] = []
     seen: set[int] = set()
@@ -1456,10 +1542,12 @@ def resolve_signature_approver_role(table_header: str, row_label: str) -> str | 
             return "post_checked_by_validation_name"
         return None
     if "approved by" in th:
+        # POST workflow role (not pre-approval approved_by_user_name) so fill shows a user select.
         if "validation" in rl or "user" in rl:
-            return "approved_by_user_name"
+            return "post_approved_by_user_name"
         if "quality" in rl or "assurance" in rl:
             return "post_approved_by_quality_name"
+        return "post_approved_by_user_name"
     if "quality" in rl and "assurance" in rl:
         return "post_approved_by_quality_name"
     return None
@@ -1470,20 +1558,27 @@ def resolve_report_approval_approver_role(table, row_index: int) -> str | None:
     if not table.rows:
         return None
     title = table.rows[0].cells[0].text.strip().lower()
+    row_label = ""
+    if row_index < len(table.rows) and table.rows[row_index].cells:
+        row_label = table.rows[row_index].cells[0].text.strip().lower()
     if "prepared by" in title:
         return "post_prepared_by_name"
     if "approved by" in title:
-        return "post_approved_by_quality_name"
+        if "quality" in row_label or "assurance" in row_label:
+            return "post_approved_by_quality_name"
+        if "validation" in row_label or "user" in row_label:
+            return "post_approved_by_user_name"
+        # First Approved By data row = User/Validation; later = QA.
+        return "post_approved_by_user_name" if row_index <= 2 else "post_approved_by_quality_name"
     if "checked by" in title:
-        if row_index < len(table.rows) and table.rows[row_index].cells:
-            label = table.rows[row_index].cells[0].text.strip().lower()
-            if "engineering" in label:
+        if row_label:
+            if "engineering" in row_label:
                 return "post_checked_by_engineering_name"
-            if "production" in label:
+            if "production" in row_label:
                 return "post_checked_by_production_name"
-            if "quality" in label or label in ("qa", "q.a.", "q. a."):
+            if "quality" in row_label or row_label in ("qa", "q.a.", "q. a."):
                 return "post_checked_by_quality_name"
-            if "validation" in label or "user" in label:
+            if "validation" in row_label or "user" in row_label:
                 return "post_checked_by_validation_name"
         checked_by_row = {
             2: "post_checked_by_engineering_name",
@@ -1520,9 +1615,23 @@ _LOCKED_SECTION_TITLES_EXACT = {
     "list of attachments",
     "list of sops identified",
     "verification of draft sops",
+    # NEQ IOQ section titles (often stored without the Word auto-number).
+    "installation checks",
+    "pre-installation checks",
+    "pre installation checks",
+    "motor verification",
+    "identification of major components",
+    "identification of the contact surfaces",
+    "installation & operational checks/ review",
+    "installation and operational checks/ review",
+    "installation & operational checks / review",
+    "installation and operational checks / review",
 }
 # Longer lead-in sentences that are still headings, not fill lines.
-_LOCKED_SECTION_TITLE_LONG_PREFIXES = ()
+_LOCKED_SECTION_TITLE_LONG_PREFIXES = (
+    "identification and classification of process control instruments",
+    "identification of execution team members",
+)
 _LOCKED_SECTION_TITLE_PREFIXES = (
     "type of qualification",
     "equipment / system details",
@@ -1548,6 +1657,13 @@ _LOCKED_SECTION_TITLE_PREFIXES = (
     "approval page",
     "observation / results",
     "observation/results",
+    "installation checks",
+    "pre-installation checks",
+    "motor verification",
+    "identification of major components",
+    "identification of the contact surfaces",
+    "identification and classification",
+    "operational, functional, safety and performance checks",
 )
 
 
@@ -1595,18 +1711,30 @@ def is_section_heading_paragraph(text: str) -> bool:
         return True
     if is_toc_entry_text(t):
         return True
-    if has_paragraph_blank(t):
-        return False
     if SECTION_TOC_LINE_RE.match(t):
         return True
     if re.match(r"^\d+\.\d+\t", t):
         return True
+    # ALL-CAPS / Title-Case short headings ending with ":" are section titles
+    # (INSTALLATION CHECKS:, Motor Verification:), not Model No.: fill blanks.
     letters = [c for c in t if c.isalpha()]
     if letters:
         upper_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
         if upper_ratio >= 0.85 and len(t) < 120:
             if not re.search(r":\s+\S", t):
                 return True
+    bare = re.sub(r":\s*$", "", t).strip()
+    if (
+        PARA_COLON_BLANK_RE.search(t)
+        and bare
+        and len(bare) < 80
+        and len(bare.split()) <= 8
+        and not find_paragraph_blanks(t)
+        and is_locked_section_title(bare)
+    ):
+        return True
+    if has_paragraph_blank(t):
+        return False
     return False
 
 
@@ -1659,11 +1787,9 @@ def _scan_header_tables(doc, fillable_fields: list) -> None:
             if col_index >= len(row.cells):
                 continue
             cell = row.cells[col_index]
-            cell_text = cell.text.strip()
-            if len(cell_text) > 1:
-                continue
+            cell_text = _cell_plain_text(cell)
             label_cell = row.cells[col_index - 1] if col_index > 0 else cell
-            if _normalize_header_label(label_cell.text) != _normalize_header_label(label_text):
+            if _normalize_header_label(_cell_plain_text(label_cell)) != _normalize_header_label(label_text):
                 continue
             # Always use header_0_* — fill_docx writes section 0 and Word propagates to pages.
             location = f"header_0_row_{row_index}_col_{col_index}"
@@ -1671,10 +1797,13 @@ def _scan_header_tables(doc, fillable_fields: list) -> None:
                 continue
             seen_locations.add(location)
             matched_cover = _match_cover_label_cell(label_text)
+            # Keep Word letterhead text when present; empty cells stay fillable.
             entry = {
                 "label": label_text.strip(),
-                "value": "",
+                "value": cell_text,
                 "locked": False,
+                "prefilled": bool(cell_text),
+                "draft_editable": True,
                 "type": "header_cell",
                 "location": location,
                 "widget": infer_field_widget(label_text, "header_cell"),
@@ -1786,6 +1915,8 @@ def parse_docx(file_path: str) -> dict:
         signature_table = dept_signature or report_approval_block
         col_headers = get_table_column_headers(table, report_approval_block)
         sl_no_col = resolve_sl_no_column_index(col_headers, header_row)
+        # Att02: empty Sr. No. cells still carry Word list numbering (1., 2., …).
+        numbered_sl_counter = 0
         component_serial_rows = (
             resolve_component_section_sl_no_rows(table)
             if not approval_page
@@ -2037,6 +2168,34 @@ def parse_docx(file_path: str) -> dict:
                         break
                     continue
 
+                # Att10: merged "Safety Checks By (Sign./Date)" footer — one e-sign field.
+                if is_safety_by_sign_row(row):
+                    seen_safety_tc: set = set()
+                    for col_index, cell in enumerate(cells):
+                        tc_el = cell._tc
+                        if tc_el in seen_safety_tc or tc_el in table_emitted_tc_els:
+                            continue
+                        seen_safety_tc.add(tc_el)
+                        table_emitted_tc_els.add(tc_el)
+                        raw = re.sub(r"\s+", " ", dedupe_colon_label(cell.text.strip()) or "").strip()
+                        label = raw or "Safety Checks By (Sign./Date)"
+                        if not label.endswith(":"):
+                            label = label.rstrip() + " :"
+                        result["fillable_fields"].append({
+                            "label": label,
+                            "value": "",
+                            "locked": False,
+                            "type": "table_multicol",
+                            "location": (
+                                f"table_{table_index}_row_{row_index}_col_{col_index}"
+                            ),
+                            "widget": "text",
+                            "stamp_eligible": True,
+                            "draft_editable": True,
+                        })
+                        break
+                    continue
+
                 row_label = cells[0].text.strip() if cells else ""
                 seen_row_tc_els: set = set()
                 for col_index, cell in enumerate(cells):
@@ -2098,6 +2257,13 @@ def parse_docx(file_path: str) -> dict:
                         if row_index == 0:
                             continue
                         if cell_text:
+                            if looks_like_sl_no_value(cell_text):
+                                try:
+                                    numbered_sl_counter = int(
+                                        re.match(r"(\d+)", cell_text.strip()).group(1)
+                                    )
+                                except Exception:
+                                    pass
                             result["fillable_fields"].append({
                                 "label": combined_label or "Sl. No.",
                                 "value": cell_text,
@@ -2107,6 +2273,21 @@ def parse_docx(file_path: str) -> dict:
                                     f"table_{table_index}_row_{row_index}_col_{col_index}"
                                 ),
                                 "widget": "text",
+                            })
+                        elif cell_has_word_numbering(cell):
+                            # Att02 Pre-installation: Sr. No. is list-numbering only.
+                            numbered_sl_counter += 1
+                            display_val = f"{numbered_sl_counter}."
+                            result["fillable_fields"].append({
+                                "label": combined_label or "Sr. No.",
+                                "value": display_val,
+                                "locked": True,
+                                "type": "table_sl_no",
+                                "location": (
+                                    f"table_{table_index}_row_{row_index}_col_{col_index}"
+                                ),
+                                "widget": "text",
+                                "auto_serial": numbered_sl_counter,
                             })
                         else:
                             result["fillable_fields"].append({
@@ -2189,7 +2370,19 @@ def parse_docx(file_path: str) -> dict:
                             field_type = "attachment"
                             widget = "file"
 
-                        locked = len(cell_text) > 1 and not signature_table
+                        placeholder_cell = is_placeholder_table_value(cell_text)
+                        # Annexure No. keeps the printed ANNEX_* id as locked text (never upload).
+                        if is_annexure_id_column(header_label):
+                            field_type = "table_multicol"
+                            widget = "text"
+                        # Ref No. of Certificate is a typed ref (NA / certificate id), not a file.
+                        elif is_certificate_number_column(header_label):
+                            field_type = "table_multicol"
+                            widget = "text"
+
+                        locked = len(cell_text) > 1 and not signature_table and not placeholder_cell
+                        if is_annexure_id_column(header_label) and cell_text:
+                            locked = True
                         # Revision-history dates already in the template stay editable.
                         header_blob = " ".join(header_row).lower()
                         if (
@@ -2211,7 +2404,7 @@ def parse_docx(file_path: str) -> dict:
                             "widget": widget,
                         }
                         # Word template text (e.g. "Checks for major components") stays locked.
-                        if locked and cell_text:
+                        if locked and cell_text and not placeholder_cell:
                             field_entry["prefilled"] = True
                         if field_type == "approver":
                             if approver_role:
