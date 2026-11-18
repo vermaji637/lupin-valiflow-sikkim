@@ -1061,10 +1061,10 @@ def _is_equipment_section_banner_row(row) -> bool:
             texts.append(text)
     if not texts:
         return False
-    # A list-of-attachment data row can have only the title filled.
-    # "Dust Extractor CFM Measurement" and "Area Recovery Test report"
-    # are those rows, not section banners.
-    if len(seen) >= 3 and len(texts) < len(seen):
+    # A list-of-attachment / 2-col label|value row can have only the left
+    # label filled ("Equipment location", "Area Classification", …).
+    # Those are fill targets, not AHU/Dust Extractor section banners.
+    if len(seen) >= 2 and len(texts) < len(seen):
         return False
     unique = {_normalize_header_compare(t) for t in texts}
     if len(unique) != 1:
@@ -1608,24 +1608,81 @@ def _split_bold_label(p_element) -> bool:
     return True
 
 
+def _paragraph_numbering_ilvl(p_element) -> int | None:
+    """Return Word list level (0 = 7.0 / OBJECTIVE, 1 = 7.1 subsection), if any."""
+    p_pr = p_element.find(qn("w:pPr"))
+    if p_pr is None:
+        return None
+    num = p_pr.find(qn("w:numPr"))
+    if num is None:
+        return None
+    ilvl = num.find(qn("w:ilvl"))
+    if ilvl is None:
+        return 0
+    try:
+        return int(ilvl.get(qn("w:val")) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _should_keep_neq_heading_bold(text: str, ilvl: int | None) -> bool:
+    """
+    NEQ original: major titles (OBJECTIVE) and short subsection titles
+    (Pre-Installation Checks:) stay bold; body lines under 7.1 / 14.0 do not.
+    """
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned:
+        return False
+    letters = [c for c in cleaned if c.isalpha()]
+    if letters and len(cleaned) < 90:
+        upper = sum(1 for c in letters if c.isupper()) / len(letters)
+        # INSTALLATION CHECKS / REFERENCES / OBJECTIVE
+        if upper >= 0.75:
+            return True
+    level = 0 if ilvl is None else ilvl
+    if level >= 1:
+        # Short subsection titles, often ending with ':'
+        if cleaned.endswith(".") and len(cleaned) > 70:
+            return False
+        words = cleaned.split()
+        if cleaned.endswith(":") or len(words) <= 10:
+            return True
+    return False
+
+
 def _unbold_filled_body_lines(doc) -> None:
     """
     Dotted remark lines and the blank lines under SUMMARY & CONCLUSION
     carry bold in the template. Typed text must stay regular weight.
     The label before the colon stays bold.
+
+    NEQ: do not force Arial-11-bold on every numbered paragraph — that made
+    body lines under 7.1 / 7.2 / 14.0–16.0 bold unlike the original IOQ.
     """
+    is_neq = _active_is_neq()
     body = doc.element.body
     for child in list(body):
         if child.tag != qn("w:p"):
             continue
         if _split_bold_label(child):
             continue
+        text = _paragraph_plain_text(child)
         # Keep bold on auto-numbered subsection titles (8.1 Calibration, etc.).
         if _paragraph_has_numbering(child):
+            if is_neq:
+                ilvl = _paragraph_numbering_ilvl(child)
+                if _should_keep_neq_heading_bold(text, ilvl):
+                    _ensure_arial_11_on_heading_runs(child)
+                else:
+                    _strip_paragraph_bold(child)
+                continue
             _ensure_arial_11_on_heading_runs(child)
             continue
-        text = _paragraph_plain_text(child)
         if _looks_like_kept_heading(text):
+            if is_neq and not _should_keep_neq_heading_bold(text, 0):
+                # Title-case body sentences must stay regular on NEQ.
+                _strip_paragraph_bold(child)
+                continue
             _ensure_arial_11_on_heading_runs(child)
             continue
         _strip_paragraph_bold(child)
@@ -1771,6 +1828,112 @@ def _is_neq_import_source(import_source: str | None) -> bool:
     return (import_source or "").strip().lower() == "new_equipment_qualification"
 
 
+def _ensure_neq_header_logo_title_gap(doc) -> int:
+    """
+    NEQ letterhead: floating Lupin logo + centered protocol title.
+    Word respects wrapSquare distR; LibreOffice PDF often ignores it so
+    "INSTALLATION AND OPERATIONAL QUALIFICATION PROTOCOL" sits flush on the
+    logo. Bump wrap distance and left-indent the title past the logo + gap.
+    """
+    if not _active_is_neq():
+        return 0
+    wp_ns = DRAWING_NS
+    a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    changed = 0
+    # ~0.25" wrap gap (original is ~0.125"; LO needs more to show a clear gap).
+    min_dist_emu = 228600
+    for section in doc.sections:
+        try:
+            header = section.header
+        except Exception:
+            continue
+        logo_right_emu = 0
+        for para in header.paragraphs:
+            for anchor in para._element.iter(f"{{{wp_ns}}}anchor"):
+                for attr in ("distR", "distL"):
+                    try:
+                        cur = int(anchor.get(attr) or 0)
+                    except (TypeError, ValueError):
+                        cur = 0
+                    if cur < min_dist_emu:
+                        anchor.set(attr, str(min_dist_emu))
+                        changed += 1
+                extent = anchor.find(f"{{{wp_ns}}}extent")
+                try:
+                    cx = int(extent.get("cx") or 0) if extent is not None else 0
+                except (TypeError, ValueError):
+                    cx = 0
+                pos_off = 0
+                pos_h = anchor.find(f"{{{wp_ns}}}positionH")
+                if pos_h is not None:
+                    off_el = pos_h.find(f"{{{wp_ns}}}posOffset")
+                    if off_el is not None and (off_el.text or "").strip():
+                        try:
+                            pos_off = int(off_el.text)
+                        except (TypeError, ValueError):
+                            pos_off = 0
+                try:
+                    dist_r = int(anchor.get("distR") or min_dist_emu)
+                except (TypeError, ValueError):
+                    dist_r = min_dist_emu
+                # Content-left-relative right edge of logo + wrap gap.
+                logo_right_emu = max(logo_right_emu, pos_off + cx + dist_r)
+        if logo_right_emu <= 0:
+            continue
+        # EMU → twips (1440 twips/inch, 914400 EMU/inch).
+        clear_twips = max(720, int(round(logo_right_emu * 1440 / 914400)))
+        for para in header.paragraphs:
+            text = re.sub(r"\s+", " ", (para.text or "")).strip().upper()
+            if not text:
+                continue
+            if "PROTOCOL" not in text:
+                continue
+            if not (
+                "INSTALLATION AND OPERATIONAL QUALIFICATION" in text
+                or "PERIODIC REQUALIFICATION" in text
+                or "QUALIFICATION PROTOCOL" in text
+            ):
+                continue
+            p_el = para._element
+            p_pr = p_el.find(qn("w:pPr"))
+            if p_pr is None:
+                p_pr = OxmlElement("w:pPr")
+                p_el.insert(0, p_pr)
+            ind = p_pr.find(qn("w:ind"))
+            if ind is None:
+                ind = OxmlElement("w:ind")
+                p_pr.append(ind)
+            try:
+                cur_left = int(ind.get(qn("w:left")) or 0)
+            except (TypeError, ValueError):
+                cur_left = 0
+            if cur_left < clear_twips:
+                ind.set(qn("w:left"), str(clear_twips))
+                changed += 1
+            # Drop a large negative right indent that pulls title into the logo.
+            try:
+                cur_right = int(ind.get(qn("w:right")) or 0)
+            except (TypeError, ValueError):
+                cur_right = 0
+            if cur_right < 0:
+                ind.set(qn("w:right"), "0")
+                changed += 1
+    return changed
+
+
+# Active during fill_docx / normalize_existing_filled_docx so TOC/bold helpers
+# can apply NEQ-safe rules without threading import_source through every call.
+_CURRENT_IMPORT_SOURCE: str | None = None
+
+
+def _active_import_source() -> str | None:
+    return _CURRENT_IMPORT_SOURCE
+
+
+def _active_is_neq() -> bool:
+    return _is_neq_import_source(_CURRENT_IMPORT_SOURCE)
+
+
 def fill_docx(
     template_path: str,
     field_values: dict,
@@ -1792,6 +1955,32 @@ def fill_docx(
     Returns (output_path, repaired_values) where repaired_values maps location →
     restored template cell text for fields that had column-header echo corruption.
     """
+    global _CURRENT_IMPORT_SOURCE
+    prev_source = _CURRENT_IMPORT_SOURCE
+    _CURRENT_IMPORT_SOURCE = import_source
+    try:
+        return _fill_docx_inner(
+            template_path,
+            field_values,
+            output_path,
+            attachment_links=attachment_links,
+            equipment_id=equipment_id,
+            table_ops=table_ops,
+            import_source=import_source,
+        )
+    finally:
+        _CURRENT_IMPORT_SOURCE = prev_source
+
+
+def _fill_docx_inner(
+    template_path: str,
+    field_values: dict,
+    output_path: str,
+    attachment_links: dict | None = None,
+    equipment_id: str | None = None,
+    table_ops: list | None = None,
+    import_source: str | None = None,
+) -> tuple[str, dict[str, str]]:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     shutil.copy2(template_path, output_path)
     doc = Document(output_path)
@@ -1919,6 +2108,7 @@ def fill_docx(
     _keep_approval_names_inside_cells(doc)
     _apply_heading_font_from_paragraph_mark(doc)
     _unbold_filled_body_lines(doc)
+    _ensure_neq_header_logo_title_gap(doc)
     _inject_page_number_fields(doc)
     _normalize_header_table_fonts(doc, font_name="Arial", font_size_pt=12.0)
     # Font unify runs after the footer is written and can leave footer distance at 0.
@@ -1944,24 +2134,31 @@ def normalize_existing_filled_docx(docx_path: str, import_source: str | None = N
 
     Requal/reval use 14/11 layout_v1 profile. NEQ uses layout_v2 (header pct→dxa).
     """
+    global _CURRENT_IMPORT_SOURCE
     if not docx_path or not os.path.isfile(docx_path):
         raise FileNotFoundError(f"Filled DOCX not found: {docx_path}")
-    profile = "neq" if _is_neq_import_source(import_source) else "legacy"
-    doc = Document(docx_path)
-    _normalize_filled_docx_layout(doc, profile=profile)
-    _ensure_body_cell_margins(doc)
-    _keep_approval_names_inside_cells(doc)
-    _repair_mashed_bullet_cells(doc)
-    _repair_abbreviation_entries(doc)
-    _pin_annex_footer_inside_page(doc)
-    from neq_docx_save import _clamp_inflated_letterhead_top_margin
-    _clamp_inflated_letterhead_top_margin(doc)
-    _trim_empty_paras_before_attachment_heading(doc, keep=2)
-    # Re-apply heading keep/Arial-11 after layout so 8.1 Calibration matches original.
-    _unbold_filled_body_lines(doc)
-    _realign_toc_page_columns(doc)
-    doc.save(docx_path)
-    return docx_path
+    prev_source = _CURRENT_IMPORT_SOURCE
+    _CURRENT_IMPORT_SOURCE = import_source
+    try:
+        profile = "neq" if _is_neq_import_source(import_source) else "legacy"
+        doc = Document(docx_path)
+        _normalize_filled_docx_layout(doc, profile=profile)
+        _ensure_body_cell_margins(doc)
+        _keep_approval_names_inside_cells(doc)
+        _repair_mashed_bullet_cells(doc)
+        _repair_abbreviation_entries(doc)
+        _pin_annex_footer_inside_page(doc)
+        from neq_docx_save import _clamp_inflated_letterhead_top_margin
+        _clamp_inflated_letterhead_top_margin(doc)
+        _trim_empty_paras_before_attachment_heading(doc, keep=2)
+        # Re-apply heading keep/Arial-11 after layout so 8.1 Calibration matches original.
+        _unbold_filled_body_lines(doc)
+        _ensure_neq_header_logo_title_gap(doc)
+        _realign_toc_page_columns(doc)
+        doc.save(docx_path)
+        return docx_path
+    finally:
+        _CURRENT_IMPORT_SOURCE = prev_source
 
 
 # ── TOC recompute after final fill (post-approval stamps included) ───────────
@@ -2528,18 +2725,21 @@ def _ppr_insert_tabs(p_pr, tabs_el) -> None:
     p_pr.insert(insert_at, tabs_el)
 
 
-def _make_toc_tab_stops():
+def _make_toc_tab_stops(*, for_neq: bool = False):
     """
     Match original requal TOC1 stops used by Word:
       left 1495  → section title column after the number
       right 9000 → page-number column (dot leaders)
     Extra style stops (left 0 / right 9656) make LibreOffice land the first
     content tab too early, so page digits no longer share one vertical line.
+
+    NEQ IOQ titles are longer (10.0 / 13.0); use a tighter left stop so the
+    title + page digit still fit on one line like the original template.
     """
     tabs = OxmlElement("w:tabs")
     left = OxmlElement("w:tab")
     left.set(qn("w:val"), "left")
-    left.set(qn("w:pos"), "1495")
+    left.set(qn("w:pos"), "900" if for_neq else "1495")
     tabs.append(left)
     right = OxmlElement("w:tab")
     right.set(qn("w:val"), "right")
@@ -2550,11 +2750,12 @@ def _make_toc_tab_stops():
 
 
 def _fix_toc1_style_tabs(doc) -> None:
-    """Force TOC1/TOC2 style tab stops to the original requal two-stop layout."""
+    """Force TOC1/TOC2 style tab stops to the original requal / NEQ two-stop layout."""
     try:
         styles_el = doc.styles.element
     except Exception:
         return
+    for_neq = _active_is_neq()
     for style in styles_el.findall(qn("w:style")):
         sid = (style.get(qn("w:styleId")) or "").upper()
         name_el = style.find(qn("w:name"))
@@ -2565,7 +2766,15 @@ def _fix_toc1_style_tabs(doc) -> None:
         if p_pr is None:
             p_pr = OxmlElement("w:pPr")
             style.insert(0, p_pr)
-        _ppr_insert_tabs(p_pr, _make_toc_tab_stops())
+        _ppr_insert_tabs(p_pr, _make_toc_tab_stops(for_neq=for_neq))
+        # NEQ original TOC1 is not run-bold at line level (smallCaps, regular).
+        if for_neq:
+            r_pr = style.find(qn("w:rPr"))
+            if r_pr is not None:
+                for tag in ("w:b", "w:bCs"):
+                    node = r_pr.find(qn(tag))
+                    if node is not None:
+                        r_pr.remove(node)
 
 
 def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
@@ -2576,6 +2785,9 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
 
     Two content tabs + the two style/paragraph stops keep every page digit on
     one right column in both Word and LibreOffice PDF (final view).
+
+    NEQ: regular weight (not bold), tighter left stop, slight condensed spacing
+    so long titles like 10.0 / 13.0 stay on one line like the original IOQ.
     """
     title = re.sub(r"\s+", " ", (title or "")).strip()
     # Drop trailing leader junk if a prior bad fill left dots on the title.
@@ -2591,6 +2803,8 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
     else:
         num_part = title
         rest_part = ""
+
+    for_neq = _active_is_neq()
 
     # Keep style id (TOC1) if present.
     style_id = "TOC1"
@@ -2609,7 +2823,7 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
     ps.set(qn("w:val"), style_id)
     p_pr.append(ps)
     # Paragraph-level stops override/merge cleanly; same two stops as style.
-    _ppr_insert_tabs(p_pr, _make_toc_tab_stops())
+    _ppr_insert_tabs(p_pr, _make_toc_tab_stops(for_neq=for_neq))
 
     def _append_text_run(text: str, *, bold: bool = True) -> None:
         if text is None:
@@ -2620,13 +2834,17 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
         fonts.set(qn("w:ascii"), "Arial")
         fonts.set(qn("w:hAnsi"), "Arial")
         r_pr.append(fonts)
-        if bold:
+        if for_neq:
+            # Match original IOQ TOC glyph density (small caps, not bold).
+            r_pr.append(OxmlElement("w:smallCaps"))
+        elif bold:
             r_pr.append(OxmlElement("w:b"))
         sz = OxmlElement("w:sz")
-        sz.set(qn("w:val"), "22")
+        # NEQ: 10pt fits long 10.0 / 13.0 titles on one line; requal stays 11pt.
+        sz.set(qn("w:val"), "20" if for_neq else "22")
         r_pr.append(sz)
         sz_cs = OxmlElement("w:szCs")
-        sz_cs.set(qn("w:val"), "22")
+        sz_cs.set(qn("w:val"), "20" if for_neq else "22")
         r_pr.append(sz_cs)
         # Slight negative spacing matches original requal TOC glyph density.
         spacing = OxmlElement("w:spacing")
@@ -2645,12 +2863,12 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
         tab_run.append(OxmlElement("w:tab"))
         p_el.append(tab_run)
 
-    _append_text_run(num_part)
+    _append_text_run(num_part, bold=not for_neq)
     _append_tab()
     if rest_part:
-        _append_text_run(rest_part)
+        _append_text_run(rest_part, bold=not for_neq)
     _append_tab()
-    _append_text_run(page_value)
+    _append_text_run(page_value, bold=not for_neq)
     return True
 
 
@@ -3620,6 +3838,11 @@ def _is_tight_gap_section_heading(text: str) -> bool:
         "EQUIPMENT /SYSTEM DETAILS",
         "EQUIPMENT / SYSTEM DETAILS",
         "EQUIPMENT/SYSTEM DETAILS",
+        "EQUIPMENT/ SYSTEM IDENTIFICATION",
+        "EQUIPMENT/SYSTEM IDENTIFICATION",
+        "EQUIPMENT/SYSTEM DESCRIPTION",
+        "EQUIPMENT / SYSTEM DESCRIPTION",
+        "EQUIPMENT/ SYSTEM DESCRIPTION",
         "PRE-REQUISITES",
         "PRE-REQUISITE",
         "APPLICABLE STANDARD OPERATING PROCEDURE (SOP'S)",
@@ -3646,7 +3869,8 @@ def _is_tight_gap_section_heading(text: str) -> bool:
         r"^\d+(\.\d+)*\.?\s+(OBJECTIVE|SCOPE|RESPONSIBILITY|TYPE OF QUALIFICATION|"
         r"EQUIPMENT|PRE-REQUISITE|APPLICABLE STANDARD|PRE-QUALIFICATION|"
         r"REQUALIFICATION|DEVIATION|METHODOLOGY|OBSERVATION|SUMMARY|"
-        r"LIST OF ATTACH|REFERENCE|ABBREVIATION|REVISION HISTORY|POST APPROVAL)",
+        r"LIST OF ATTACH|REFERENCE|ABBREVIATION|REVISION HISTORY|POST APPROVAL|"
+        r"INSTALLATION CHECKS|OPERATIONAL CHECKS|TRAINING|ATTACHMENTS)",
         t,
     ):
         return True

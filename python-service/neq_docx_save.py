@@ -1563,13 +1563,20 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
             seen_insert_fp.add(content_fp)
         unique_inserts.append(op)
     inserts = unique_inserts
-    # Highest after_row first so earlier indexes stay valid when client sent original positions.
+    # Keep client submit order within each table. Highest-after_row-first + addnext
+    # on the same anchor reversed multiple Add Rows (…,10, B, A instead of …,10, A, B).
+    # chain_after keeps successive inserts after the same after_row in typed order.
     inserts.sort(
         key=lambda op: (
             int(op.get("table", -1)),
-            -(int(op.get("after_row", -1)) if op.get("after_row") not in (None, "") else -1),
+            int(op.get("after_row", -1)) if op.get("after_row") not in (None, "") else 10**9,
         )
     )
+    # Keyed by (table index, original after_row) → last inserted <w:tr> for that anchor.
+    chain_after: dict[tuple[int, int], object] = {}
+    # How many inserts already applied at/before each original after_row (per table).
+    shift_by_table: dict[int, int] = {}
+
     for op in inserts:
         tables = collect_docx_tables(doc)
         table = _resolve_table_for_op(doc, tables, op)
@@ -1578,11 +1585,20 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
         # Never grow the repeating page heading. A data row stays in its body table.
         if _table_zone(doc, table) == "header":
             continue
+        try:
+            table_key = int(op.get("table", -1))
+        except (TypeError, ValueError):
+            table_key = -1
         after_row = op.get("after_row")
         try:
             after_index = int(after_row) if after_row is not None and after_row != "" else -1
         except (TypeError, ValueError):
             after_index = -1
+        original_after = after_index
+        # Account for rows already inserted above this anchor in this pass.
+        if after_index >= 0:
+            after_index = after_index + int(shift_by_table.get(table_key, 0))
+
         tr_list = list(table._tbl.tr_lst)
         safety_at = None
         for i, row in enumerate(table.rows):
@@ -1618,7 +1634,9 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
             else:
                 continue
 
-        anchor = tr_list[insert_after] if 0 <= insert_after < len(tr_list) else tr_list[-1]
+        base_anchor = tr_list[insert_after] if 0 <= insert_after < len(tr_list) else tr_list[-1]
+        chain_key = (table_key, original_after if original_after >= 0 else after_index)
+        anchor = chain_after.get(chain_key, base_anchor)
         new_tr = deepcopy(template_tr)
         # Data rows must not inherit tblHeader/cantSplit — that blocks page splits
         # and leaves a blank page under headings like "9.1 Installation…".
@@ -1628,6 +1646,8 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
                 for node in list(new_tr_pr.findall(qn(tag))):
                     new_tr_pr.remove(node)
         anchor.addnext(new_tr)
+        chain_after[chain_key] = new_tr
+        shift_by_table[table_key] = int(shift_by_table.get(table_key, 0)) + 1
         tr_list = list(table._tbl.tr_lst)
         try:
             insert_at = tr_list.index(new_tr)
@@ -1639,6 +1659,14 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
         if len(list(new_row.cells)) > len(_unique_row_cells(new_row)):
             _split_horizontal_merges_in_row(new_row)
         values = op.get("values") if isinstance(op.get("values"), list) else []
+        # Persist user/default Sr. No. (integer). Drop outline junk like "10.0".
+        if values:
+            values = list(values)
+            first = _normalize_text_value(values[0] if values[0] is not None else "").strip()
+            if first and re.fullmatch(r"\d+\.\d+", first):
+                values[0] = ""
+            elif first and re.fullmatch(r"\d+\.?", first):
+                values[0] = re.sub(r"\.+$", "", first)
         for i, text_raw in enumerate(values):
             cell = _prepare_row_for_column_writes(new_row, i)
             if cell is None:
@@ -1646,6 +1674,15 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
             text = _normalize_text_value(text_raw if text_raw is not None else "")
             if text != "":
                 _set_cell_text_preserve(cell, text)
+        # Strip leftover Word list numbering on Sl. No. so outline 10.0 cannot reappear.
+        try:
+            cells0 = _unique_row_cells(new_row)
+            if cells0:
+                for para in cells0[0].paragraphs:
+                    if _para_has_numbering(para):
+                        _remove_paragraph_numbering(para)
+        except Exception:
+            pass
         inserted += 1
 
     return inserted, deleted
@@ -3114,10 +3151,8 @@ def _strip_manual_serial_autonumber(doc: Document) -> int:
             for para in cells[0].paragraphs:
                 if not _para_has_numbering(para):
                     continue
-                # An unused template row only has a list number. Leave that number.
-                # Stripping it turned the row into a blank line between 3 and 3.3.
-                if _normalize_preview_text(para.text) == "":
-                    continue
+                # Always strip Sl. No. list numbering — including empty cells.
+                # Leaving empty numPr produced outline junk (10.0 / 10.1) after bake.
                 _remove_paragraph_numbering(para)
                 removed += 1
     return removed

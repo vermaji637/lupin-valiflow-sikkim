@@ -1261,12 +1261,12 @@ def resolve_sl_no_column_index(col_headers: list, header_row: list) -> int | Non
     return None
 
 
-# Regex for serial-number cell values like 1, 1., 1.0, 2) — not arbitrary text.
-_SL_NO_VALUE_RE = re.compile(r"^\d+[\.\)]?$|^\d+\.\d+$")
+# Integer serials only (1, 1., 2)). Outline section numbers like 10.0 / 10.1 are NOT Sl. No.
+_SL_NO_VALUE_RE = re.compile(r"^\d+[\.\)]?$")
 
 
 def looks_like_sl_no_value(value: str) -> bool:
-    """True for 1, 1., 1.0, 2) — not arbitrary user text."""
+    """True for 1, 1., 2) — not outline headings like 10.0 / 10.1."""
     return bool(_SL_NO_VALUE_RE.match((value or "").strip()))
 
 
@@ -1754,7 +1754,21 @@ def infer_field_widget(label: str, field_type: str) -> str:
     if is_date_field_label(label):
         return "date"
     ll = (label or "").lower()
-    if any(k in ll for k in ("comment", "remarks", "observation", "description", "summary and conclusion", "summary & conclusion")):
+    if any(
+        k in ll
+        for k in (
+            "comment",
+            "remarks",
+            "observation",
+            "description",
+            "acceptance",
+            "methodology",
+            "corrective",
+            "preventive",
+            "summary and conclusion",
+            "summary & conclusion",
+        )
+    ):
         return "textarea"
     return "text"
 
@@ -1821,6 +1835,71 @@ def _scan_header_tables(doc, fillable_fields: list) -> None:
 
 
 # Lock signature rows that already have Signature & Date text in the source DOCX.
+def _is_summary_conclusion_heading(text: str) -> bool:
+    """True for SUMMARY AND CONCLUSION / SUMMARY & CONCLUSION section titles."""
+    key = _section_title_key(text or "")
+    return key in ("summary and conclusion", "summary & conclusion") or key.startswith(
+        "summary and conclusion"
+    ) or key.startswith("summary & conclusion")
+
+
+def _ensure_summary_conclusion_body_field(result: dict, doc, para_texts: dict) -> None:
+    """
+    PERIODIC HVAC (and similar) templates leave empty paragraphs under
+    SUMMARY AND CONCLUSION before REPORT APPROVAL. Register the first empty
+    body para as an unlocked textarea so pre-approval can fill it.
+    """
+    existing = {
+        f.get("location")
+        for f in result.get("fillable_fields", [])
+        if isinstance(f, dict)
+    }
+    paragraphs = list(doc.paragraphs)
+    n = len(paragraphs)
+    for i, para in enumerate(paragraphs):
+        text = dedupe_repeated_text(para_texts.get(i, (para.text or "").strip()))
+        if not text or not _is_summary_conclusion_heading(text):
+            continue
+
+        body_idx = None
+        for j in range(i + 1, n):
+            nxt = dedupe_repeated_text(para_texts.get(j, (paragraphs[j].text or "").strip()))
+            if not nxt:
+                if body_idx is None:
+                    body_idx = j
+                continue
+            # Stop at the next section heading (e.g. REPORT APPROVAL).
+            if is_section_heading_paragraph(nxt) or is_locked_section_title(nxt):
+                break
+            # Non-empty body already exists — leave existing fillable field alone.
+            body_idx = None
+            break
+
+        if body_idx is None:
+            continue
+        loc = f"para_{body_idx}"
+        if loc in existing:
+            continue
+
+        result.setdefault("paragraphs", []).append({
+            "para_index": body_idx,
+            "original_text": "",
+            "template_text": "",
+            "blank_count": 0,
+            "locked": False,
+        })
+        result.setdefault("fillable_fields", []).append({
+            "label": "Summary and Conclusion",
+            "value": "",
+            "locked": False,
+            "type": "paragraph_content",
+            "location": loc,
+            "widget": "textarea",
+        })
+        # Only one summary body field per document.
+        break
+
+
 def _mark_prefilled_signature_rows(fillable_fields: list) -> list:
     """
     Signature rows that already contain a real Signature & Date stamp in the source DOCX
@@ -2252,54 +2331,40 @@ def parse_docx(file_path: str) -> dict:
                     if dept_signature and col_index == 0:
                         continue
 
-                    # Sl. No. column: Word serials (1., 2.) stay locked; blank cells are fillable.
+                    # Sl. No. column: default serial visible + editable (user may change).
                     if sl_no_col is not None and col_index == sl_no_col:
                         if row_index == 0:
                             continue
-                        if cell_text:
-                            if looks_like_sl_no_value(cell_text):
-                                try:
-                                    numbered_sl_counter = int(
-                                        re.match(r"(\d+)", cell_text.strip()).group(1)
-                                    )
-                                except Exception:
-                                    pass
-                            result["fillable_fields"].append({
-                                "label": combined_label or "Sl. No.",
-                                "value": cell_text,
-                                "locked": True,
-                                "type": "table_sl_no",
-                                "location": (
-                                    f"table_{table_index}_row_{row_index}_col_{col_index}"
-                                ),
-                                "widget": "text",
-                            })
-                        elif cell_has_word_numbering(cell):
-                            # Att02 Pre-installation: Sr. No. is list-numbering only.
+                        display_val = ""
+                        if cell_text and looks_like_sl_no_value(cell_text):
+                            try:
+                                numbered_sl_counter = int(
+                                    re.match(r"(\d+)", cell_text.strip()).group(1)
+                                )
+                            except Exception:
+                                pass
+                            display_val = cell_text.strip()
+                        elif cell_has_word_numbering(cell) or not cell_text:
+                            # List-numbering / blank: assign next integer (ignore outline 10.0).
                             numbered_sl_counter += 1
                             display_val = f"{numbered_sl_counter}."
-                            result["fillable_fields"].append({
-                                "label": combined_label or "Sr. No.",
-                                "value": display_val,
-                                "locked": True,
-                                "type": "table_sl_no",
-                                "location": (
-                                    f"table_{table_index}_row_{row_index}_col_{col_index}"
-                                ),
-                                "widget": "text",
-                                "auto_serial": numbered_sl_counter,
-                            })
                         else:
-                            result["fillable_fields"].append({
-                                "label": combined_label or "Sr. No.",
-                                "value": "",
-                                "locked": False,
-                                "type": "table_multicol",
-                                "location": (
-                                    f"table_{table_index}_row_{row_index}_col_{col_index}"
-                                ),
-                                "widget": "text",
-                            })
+                            # Non-serial junk in Sl. No. cell — replace with next integer.
+                            numbered_sl_counter += 1
+                            display_val = f"{numbered_sl_counter}."
+                        result["fillable_fields"].append({
+                            "label": combined_label or "Sr. No.",
+                            "value": display_val,
+                            "locked": False,
+                            "type": "table_multicol",
+                            "location": (
+                                f"table_{table_index}_row_{row_index}_col_{col_index}"
+                            ),
+                            "widget": "text",
+                            "auto_serial": numbered_sl_counter if display_val else None,
+                            "draft_editable": True,
+                            "user_filled": True,
+                        })
                         continue
 
                     # Main Body / Components tables: col 0 serial (1., 2., 3.) between section headers.
@@ -2561,6 +2626,10 @@ def parse_docx(file_path: str) -> dict:
                 "location": f"para_{para_index}",
                 "widget": "textarea",
             })
+
+    # SUMMARY AND CONCLUSION often has only empty spacer paragraphs under the heading.
+    # Register the first empty body para as a fillable textarea (heading stays locked).
+    _ensure_summary_conclusion_body_field(result, doc, para_texts)
 
     # Final pass: lock entire signature rows that were pre-stamped in the template DOCX.
     result["fillable_fields"] = _mark_prefilled_signature_rows(result["fillable_fields"])

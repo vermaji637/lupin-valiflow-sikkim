@@ -173,6 +173,13 @@ body.premium-app #docxFillForm .docx-preview-wrapper {
     box-sizing: border-box;
 }
 
+.docx-keep-section {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    flex-shrink: 0;
+}
+
 .docx-para,
 .docx-para-edit-wrapper,
 .docx-para-content {
@@ -487,7 +494,9 @@ body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.heade
     white-space: normal !important;
     overflow-wrap: anywhere;
     word-break: break-word;
+    overflow: visible !important;
     height: auto;
+    vertical-align: top;
 }
 body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) input,
 body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) textarea,
@@ -638,13 +647,28 @@ body.premium-app #docxFillForm .docx-preview-wrapper .docx-para {
     line-height: 1.5;
 }
 
+/* Table cell textareas: compact min height, but grow with content so multi-line
+ * Acceptance criteria (1..4) is never clipped like a single-line input. */
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) textarea.docx-input {
+    min-height: 28px !important;
+    height: auto !important;
+    overflow: hidden !important;
+    white-space: pre-wrap !important;
+    resize: vertical;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) td.docx-cell.locked {
+    white-space: normal !important;
+    overflow: visible !important;
+    vertical-align: top !important;
+    line-height: 1.45 !important;
+}
 body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-input {
-    min-height: 72px !important;
+    min-height: 40px !important;
     resize: vertical;
 }
 
 body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-para-content {
-    min-height: 48px !important;
+    min-height: 36px !important;
     width: 100% !important;
     background-color: #fffde7 !important;
     background-image: none !important;
@@ -1514,22 +1538,48 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const selectJump = document.getElementById('docxSelectPageJump');
         if (selectJump) {
-            const curr = selectJump.value || '1';
-            selectJump.innerHTML = '';
-            for (let i = 1; i <= total; i++) {
-                const opt = document.createElement('option');
-                opt.value = String(i);
-                opt.textContent = 'Page ' + i + ' of ' + total;
-                selectJump.appendChild(opt);
+            // Prefer the page currently in view — never snap the dropdown (and scroll) to page 1.
+            let currNum = parseInt(selectJump.value, 10);
+            if (!currNum || currNum < 1) {
+                const mid = window.scrollY + Math.min(240, window.innerHeight * 0.35);
+                currNum = 1;
+                for (let i = 0; i < allPages.length; i++) {
+                    const top = allPages[i].getBoundingClientRect().top + window.scrollY;
+                    if (top <= mid) currNum = i + 1;
+                    else break;
+                }
             }
-            selectJump.value = parseInt(curr, 10) <= total ? curr : '1';
+            if (currNum > total) currNum = total;
+            const prevTotal = selectJump.options.length;
+            if (prevTotal !== total) {
+                selectJump.innerHTML = '';
+                for (let i = 1; i <= total; i++) {
+                    const opt = document.createElement('option');
+                    opt.value = String(i);
+                    opt.textContent = 'Page ' + i + ' of ' + total;
+                    selectJump.appendChild(opt);
+                }
+            } else {
+                Array.from(selectJump.options).forEach(function (opt, i) {
+                    opt.textContent = 'Page ' + (i + 1) + ' of ' + total;
+                });
+            }
+            selectJump.value = String(Math.max(1, currNum || 1));
         }
+    }
+
+    // <tr> nodes parsed from /preview HTML live inside an implicit <tbody>;
+    // table.insertBefore(row, refRow) throws NotFoundError there and aborts
+    // paginateDocxPreview() half-way (9.0/9.1/T12 left clipped under 8.6).
+    function insertRowBefore(table, row, ref) {
+        const parent = (ref && ref.parentNode) || (table.tBodies && table.tBodies[0]) || table;
+        parent.insertBefore(row, ref || null);
     }
 
     function placeRowAtStart(table, row) {
         const first = table.rows[0];
         if (first && first.querySelector('th')) first.after(row);
-        else if (first) table.insertBefore(row, first);
+        else if (first) insertRowBefore(table, row, first);
         else table.appendChild(row);
     }
 
@@ -1563,25 +1613,51 @@ document.addEventListener('DOMContentLoaded', function () {
                         const hostHeader = existing.rows[0];
                         dataRows.reverse().forEach(function (r) {
                             if (hostHeader) hostHeader.after(r);
-                            else existing.insertBefore(r, existing.rows[0] || null);
+                            else insertRowBefore(existing, r, existing.rows[0] || null);
                         });
                         last.remove();
                     } else {
-                        nextBody.insertBefore(last, nextBody.firstChild);
+                        const glued = [];
+                        let prevH = last.previousElementSibling;
+                        while (prevH && isRequalChecksHeading(prevH)) {
+                            glued.unshift(prevH);
+                            prevH = prevH.previousElementSibling;
+                        }
+                        const keep = last.closest && last.closest('.docx-keep-section[data-keep-section="requal-91"]');
+                        if (keep && keep.parentNode === pageBody) {
+                            nextBody.insertBefore(keep, nextBody.firstChild);
+                        } else {
+                            nextBody.insertBefore(last, nextBody.firstChild);
+                            for (let gi = glued.length - 1; gi >= 0; gi--) {
+                                nextBody.insertBefore(glued[gi], last);
+                            }
+                        }
                     }
                     continue;
                 }
                 const before = lastRow.previousElementSibling;
                 const cont = continuationTable(page, last);
-                placeRowAtStart(cont, lastRow);
-                if (last.contains(lastRow) || (before && before.nextElementSibling === lastRow)) break;
+                const header = lastHeaderRow(cont);
+                if (header && header !== lastRow) header.after(lastRow);
+                else placeRowAtStart(cont, lastRow);
+                // If the row did not move, push the whole leftover table — never
+                // leave General Checks / major-component rows clipped under overflow:hidden.
+                if (last.contains(lastRow) || (before && before.nextElementSibling === lastRow)) {
+                    const nextPage = followingA4Page(page) || createContinuationPage(page);
+                    const nextBody = nextPage.querySelector('.docx-page-body');
+                    if (nextBody && last.parentNode === pageBody) {
+                        nextBody.insertBefore(last, nextBody.firstChild);
+                    }
+                    continue;
+                }
                 if (last.rows.length === 2) {
                     const maybeFirst = last.rows[1];
                     if (maybeFirst && maybeFirst.getAttribute('data-row-index') === '1') {
                         const hostRow2 = Array.from(cont.rows).find(function (r) {
                             return r.getAttribute('data-row-index') === '2';
                         });
-                        if (hostRow2) cont.insertBefore(maybeFirst, hostRow2);
+                        if (hostRow2) insertRowBefore(cont, maybeFirst, hostRow2);
+                        else if (header) header.after(maybeFirst);
                         else placeRowAtStart(cont, maybeFirst);
                     }
                 }
@@ -1704,14 +1780,63 @@ document.addEventListener('DOMContentLoaded', function () {
         return newPage;
     }
 
+    function rowPlainLabel(row) {
+        return ((row && (row.innerText || row.textContent)) || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+    }
+
+    function rowLooksLikeColumnHeader(row) {
+        const text = rowPlainLabel(row);
+        if (!text) return false;
+        // 9.1 / 9.2 / 9.3 style column titles — not section banners.
+        return (
+            /\bchecks\b/.test(text)
+            && (
+                /\bmethodology\b/.test(text)
+                || /\bacceptance\s*criteria\b/.test(text)
+                || /\bobservation\b/.test(text)
+                || /\bdone\s*by\b/.test(text)
+            )
+        ) || (
+            /\bsr\.?\s*no\b/.test(text)
+            && /\bacceptance\s*criteria\b/.test(text)
+        );
+    }
+
+    function rowLooksLikeSectionBanner(row) {
+        if (!row || rowLooksLikeColumnHeader(row)) return false;
+        const text = rowPlainLabel(row);
+        if (!text || text.length > 80) return false;
+        return /^(?:\d+\.\s*)?(major\s*components|machine\s*frame|mechanical\s*component|electrical\s*component|mechanical\s*adjustment|machine\s*performance)\b/.test(text);
+    }
+
     // Att08 Instrument Calibration: 2-row header (Calibration details + Done On/Due On).
     // Clone the full header block — not only rows[0] — or page 2 loses column headings.
+    // For 9.2 Major components: row0 is a banner; the real column header is Checks/Methodology.
+    // Cloning only the banner made Checks spill as a "data" row and reappear twice.
     function leadingHeaderRowCount(sourceTable) {
         if (!sourceTable || !sourceTable.rows.length) return 0;
+
+        let colHdrIdx = -1;
+        const scan = Math.min(6, sourceTable.rows.length);
+        for (let i = 0; i < scan; i++) {
+            if (rowLooksLikeColumnHeader(sourceTable.rows[i])) {
+                colHdrIdx = i;
+                break;
+            }
+        }
+        if (colHdrIdx >= 0) {
+            // Include banner rows above the column header (e.g. "Major components :").
+            return Math.max(1, Math.min(colHdrIdx + 1, 3, sourceTable.rows.length - 1 || 1));
+        }
+
         const row0 = sourceTable.rows[0];
         const looksHeader = !!(
             row0.querySelector('th')
             || row0.getAttribute('data-row-index') === '0'
+            || row0.getAttribute('data-cont-header') === '1'
             || row0.classList.contains('docx-table-header')
             || row0.querySelector('.docx-table-header')
         );
@@ -1726,7 +1851,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (span < 2 && sourceTable.rows.length > 1) {
             const row1 = sourceTable.rows[1];
             const hasInput = !!row1.querySelector('input, textarea, select');
-            const text = (row1.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            const text = rowPlainLabel(row1);
             const subHints = ['done on', 'due on'];
             if (!hasInput && subHints.some(function (h) { return text.indexOf(h) !== -1; })) {
                 span = 2;
@@ -1742,9 +1867,17 @@ document.addEventListener('DOMContentLoaded', function () {
     function appendClonedHeaderRows(targetTable, sourceTable) {
         const n = leadingHeaderRowCount(sourceTable);
         if (n <= 0) return 0;
+        // Avoid stacking a second Checks/Methodology block when the host already
+        // has the real column header (merge/pull after soft page-break).
+        if (Array.from(targetTable.rows || []).some(rowLooksLikeColumnHeader)) {
+            targetTable.setAttribute('data-header-row-count', String(Math.max(1, leadingHeaderRowCount(targetTable))));
+            return 0;
+        }
         for (let i = 0; i < n; i++) {
             const src = sourceTable.rows[i];
             if (!src) break;
+            // Prefer cloning from the real header block (banner + Checks), not a
+            // prior continuation that only carried a banner.
             const clone = src.cloneNode(true);
             clone.classList.remove('docx-selected-row');
             clone.setAttribute('data-cont-header', '1');
@@ -1755,6 +1888,22 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         targetTable.setAttribute('data-header-row-count', String(n));
         return n;
+    }
+
+    function dedupeDuplicateColumnHeaderRows() {
+        // Keep one Checks/Methodology (or Sr.No/Acceptance) header per table fragment.
+        document.querySelectorAll('.docx-preview table.docx-table:not(.header-table)').forEach(function (table) {
+            let seenColHdr = false;
+            Array.from(table.rows).forEach(function (row) {
+                if (!rowLooksLikeColumnHeader(row)) return;
+                if (!seenColHdr) {
+                    seenColHdr = true;
+                    return;
+                }
+                // Extra repeated header from Word soft-break / bad continuation clone.
+                row.remove();
+            });
+        });
     }
 
     function lastHeaderRow(table) {
@@ -1806,6 +1955,31 @@ document.addEventListener('DOMContentLoaded', function () {
         const last = body.lastElementChild;
         if (!last) return false;
 
+        // 9.0/9.1 keep-section: spill rows from the inner Installation table, or
+        // move the whole keep block — never orphan headings on this sheet.
+        if (last.classList && last.classList.contains('docx-keep-section')
+            && last.getAttribute('data-keep-section') === 'requal-91') {
+            const innerTable = last.querySelector('table.docx-table');
+            // Keep block shares the sheet with earlier content (8.6 spill-over):
+            // move the WHOLE unit forward. Never peel T12 rows off it — that left a
+            // header-only keep hopping page-to-page with 9.0/9.1 stripped out.
+            if (body.childElementCount > 1) {
+                const nextPage = followingA4Page(page) || createContinuationPage(page);
+                const nextBody = nextPage.querySelector('.docx-page-body');
+                nextBody.insertBefore(last, nextBody.firstChild);
+                return true;
+            }
+            // Alone on its sheet: split rows only for a genuinely tall table, and
+            // never push a header-only keep to the next sheet.
+            if (!innerTable || innerTable.rows.length <= 1) return false;
+            const row = innerTable.rows[innerTable.rows.length - 1];
+            const table = continuationTable(page, innerTable);
+            const header = lastHeaderRow(table);
+            if (header && header !== row) header.after(row);
+            else table.appendChild(row);
+            return true;
+        }
+
         if (last.classList.contains('docx-toc-card')) {
             const lines = last.querySelectorAll(':scope > .docx-toc-line');
             if (lines.length > 1) {
@@ -1846,11 +2020,22 @@ document.addEventListener('DOMContentLoaded', function () {
                     const hostHeader = lastHeaderRow(existing);
                     dataRows.reverse().forEach(function (r) {
                         if (hostHeader) hostHeader.after(r);
-                        else existing.insertBefore(r, existing.rows[0] || null);
+                        else insertRowBefore(existing, r, existing.rows[0] || null);
                     });
                     last.remove();
                 } else {
+                    // Keep 9.0/9.1 (or 9.2) glued to their table when the whole
+                    // table moves — never leave headings clipped on the prior sheet.
+                    const glued = [];
+                    let prev = last.previousElementSibling;
+                    while (prev && isRequalChecksHeading(prev)) {
+                        glued.unshift(prev);
+                        prev = prev.previousElementSibling;
+                    }
                     nextBody.insertBefore(last, nextBody.firstChild);
+                    for (let gi = glued.length - 1; gi >= 0; gi--) {
+                        nextBody.insertBefore(glued[gi], last);
+                    }
                 }
                 return true;
             }
@@ -1867,7 +2052,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     const hostRow2 = Array.from(table.rows).find(function (r) {
                         return r.getAttribute('data-row-index') === '2';
                     });
-                    if (hostRow2) table.insertBefore(maybeFirst, hostRow2);
+                    if (hostRow2) insertRowBefore(table, maybeFirst, hostRow2);
                     else if (header) header.after(maybeFirst);
                     else table.appendChild(maybeFirst);
                 }
@@ -1889,13 +2074,61 @@ document.addEventListener('DOMContentLoaded', function () {
             if (body.children.length === 1) return false;
         }
 
-        const overflowPx = body.scrollHeight - body.clientHeight;
-        if (last.offsetHeight > Math.max(overflowPx, 0) + 48 && body.childElementCount > 1) {
-            return false;
+        // History / recommendation textboxes: spill one line at a time so
+        // 8.5 content is never clipped under the A4 footer.
+        if (last.classList && last.classList.contains('docx-textbox')) {
+            const lines = last.querySelectorAll(':scope > .docx-textbox-line, :scope > p');
+            if (lines.length > 1) {
+                const line = lines[lines.length - 1];
+                const nextPage = followingA4Page(page) || createContinuationPage(page);
+                const nextBody = nextPage.querySelector('.docx-page-body');
+                let cont = nextBody.firstElementChild;
+                if (!(cont && cont.classList && cont.classList.contains('docx-textbox')
+                    && (cont.getAttribute('data-txbx') || '') === (last.getAttribute('data-txbx') || ''))) {
+                    cont = document.createElement('div');
+                    cont.className = last.className || 'docx-textbox';
+                    const tx = last.getAttribute('data-txbx');
+                    if (tx !== null) cont.setAttribute('data-txbx', tx);
+                    nextBody.insertBefore(cont, nextBody.firstChild);
+                }
+                cont.insertBefore(line, cont.firstChild);
+                if (!last.querySelector('.docx-textbox-line, p')) last.remove();
+                return true;
+            }
         }
 
+        // Never refuse to spill an overfull last block — with overflow:hidden a
+        // tall History textbox / notes box used to stay clipped forever.
+        // Orphan 9.x headings (table already on a later sheet): park them in
+        // front of their table instead of dumping onto a random next sheet.
+        if (isRequalChecksHeading(last)) {
+            const t12 = document.querySelector('.docx-preview table.docx-table[data-table-index="12"]');
+            const t13 = document.querySelector('.docx-preview table.docx-table[data-table-index="13"]');
+            const text = headingTextOf(last);
+            let target = null;
+            if (/\b9\.0\b|\b9\.1\b/.test(text) && t12) target = t12;
+            else if (/\b9\.2\b|GENERAL\s+CHECKS/.test(text) && t13) target = t13;
+            if (target && target.closest('.docx-page-body')) {
+                const tb = target.closest('.docx-page-body');
+                tb.insertBefore(last, target);
+                return true;
+            }
+        }
         const nextPage = followingA4Page(page) || createContinuationPage(page);
         const nextBody = nextPage.querySelector('.docx-page-body');
+        if (last.matches && last.matches('table.docx-table')) {
+            const glued = [];
+            let prev = last.previousElementSibling;
+            while (prev && isRequalChecksHeading(prev)) {
+                glued.unshift(prev);
+                prev = prev.previousElementSibling;
+            }
+            nextBody.insertBefore(last, nextBody.firstChild);
+            for (let gi = glued.length - 1; gi >= 0; gi--) {
+                nextBody.insertBefore(glued[gi], last);
+            }
+            return true;
+        }
         nextBody.insertBefore(last, nextBody.firstChild);
         return true;
     }
@@ -1915,6 +2148,10 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         if (last.classList && last.classList.contains('docx-toc-card')) {
             const lines = last.querySelectorAll('.docx-toc-line');
+            if (lines.length) return lines[lines.length - 1].getBoundingClientRect().bottom;
+        }
+        if (last.classList && last.classList.contains('docx-textbox')) {
+            const lines = last.querySelectorAll('.docx-textbox-line, p');
             if (lines.length) return lines[lines.length - 1].getBoundingClientRect().bottom;
         }
         return last.getBoundingClientRect().bottom;
@@ -1989,6 +2226,24 @@ document.addEventListener('DOMContentLoaded', function () {
         return /major\s*components|mechanical\s*adjustment|machine\s*performance|general\s*checks/i.test(text);
     }
 
+    function rowFullyInsideBody(body, row) {
+        if (!body || !row) return false;
+        const box = body.getBoundingClientRect();
+        const limit = box.top + Math.max(body.clientHeight || 0, box.height || 0) - 4;
+        return row.getBoundingClientRect().bottom <= limit;
+    }
+
+    function isHvacChecklistTable(table) {
+        if (!table || !table.querySelector) return false;
+        // 9.1 Installation (12), 9.2 Major components (13), 9.3 Functional (14):
+        // never pull these rows onto a prior sheet (clips 9.0/9.1 headings).
+        const tIdx = table.getAttribute && table.getAttribute('data-table-index');
+        if (tIdx === '12' || tIdx === '13' || tIdx === '14') return true;
+        const text = (table.innerText || table.textContent || '').replace(/\s+/g, ' ').toLowerCase();
+        if (!/acceptance\s*criteria/.test(text)) return false;
+        return /sr\.?\s*no|identification|methodology|observation\s*\/\s*result|mechanical\s*adjustment|machine\s*performance|major\s*components|installation|done\s*by\s*\(?\s*engineering/.test(text);
+    }
+
     function pullTableRowBack(body, sourceTable) {
         // Att08: skip full 2-row header; first pullable data row is after Done On/Due On.
         const hdrN = leadingHeaderRowCount(sourceTable);
@@ -1996,6 +2251,22 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!row) {
             if (!sourceTable.querySelector('[name]')) sourceTable.remove();
             return true;
+        }
+        // Never pull 9.1 / 9.2 / 9.3 checklist rows back onto a prior sheet —
+        // that clips Mechanical/Electrical rows and causes Sr.No 7→13 jumps.
+        const lastEl = body && body.lastElementChild;
+        if (
+            isHvacChecklistTable(sourceTable)
+            || (lastEl && lastEl.matches && lastEl.matches('table.docx-table') && isHvacChecklistTable(lastEl))
+        ) {
+            return false;
+        }
+        // Never pull a row back if it clearly won't fit — that recreates the
+        // Sr.No 7→10 jump (rows 8–9 get clipped under overflow:hidden).
+        const free = pageFreeSpace(body);
+        const need = Math.max(row.offsetHeight || 0, 28) + 40;
+        if (free < need + 28) {
+            return false;
         }
         // Never pull Sr.No 1 back onto the previous sheet when 2+ already
         // live on this continuation — that clips "1" under overflow:hidden.
@@ -2031,12 +2302,36 @@ document.addEventListener('DOMContentLoaded', function () {
             body.appendChild(target);
             created = true;
         }
+        // Keep Mechanical Adjustment sequence contiguous (…7,8,9,10…).
+        // Do not pull a non-consecutive row onto this sheet.
+        const hostData = Math.max(0, target.rows.length - hdrN);
+        // Already-dense host: do not squeeze another tall HVAC row into a
+        // remaining sliver — that is exactly the clipped 8/9 failure mode.
+        if (hostData >= 5 && free < 160) {
+            if (created) target.remove();
+            return false;
+        }
+        if (target.rows.length > hdrN) {
+            const lastHost = target.rows[target.rows.length - 1];
+            const lastIdx = parseInt(lastHost.getAttribute('data-row-index') || '-1', 10);
+            const pullN = parseInt(pullIdx || '-1', 10);
+            if (lastIdx >= 0 && pullN >= 0 && pullN !== lastIdx + 1) {
+                if (created) target.remove();
+                return false;
+            }
+        }
         const marker = row.nextSibling;
-        const hostHeader = lastHeaderRow(target);
-        if (hostHeader) hostHeader.after(row);
-        else target.appendChild(row);
-        if (pageIsOverfull(body) || pageFreeSpace(body) < -4) {
-            if (marker) sourceTable.insertBefore(row, marker);
+        // Always append at the end of the host table. Prepending after the header
+        // (hostHeader.after) reverses Sl.No order across spill→pull cycles (11,10,9…).
+        target.appendChild(row);
+        if (
+            pageIsOverfull(body)
+            || contentOverflows(body)
+            || pageFreeSpace(body) < 12
+            || body.scrollHeight > body.clientHeight + 2
+            || !rowFullyInsideBody(body, row)
+        ) {
+            if (marker && marker.parentNode) marker.parentNode.insertBefore(row, marker);
             else sourceTable.appendChild(row);
             if (created) target.remove();
             return false;
@@ -2046,11 +2341,60 @@ document.addEventListener('DOMContentLoaded', function () {
         return true;
     }
 
+    function isTocTitleHeading(el) {
+        if (!el || (el.classList && el.classList.contains('docx-toc-card'))) {
+            return false;
+        }
+        // Title inside the TOC card must stay with the card.
+        if (el.classList && el.classList.contains('docx-toc-heading')) {
+            return true;
+        }
+        if (el.closest && el.closest('.docx-toc-card')) {
+            return false;
+        }
+        const text = ((el.dataset && el.dataset.headingText) || el.innerText || el.textContent || '')
+            .replace(/\s+/g, ' ')
+            .replace(/^[📋\s]+/, '')
+            .trim()
+            .toUpperCase();
+        return /^(TABLE OF CONTENTS|TABLE OF CONTENT|CONTENTS)$/.test(text);
+    }
+
     function pageHasTocCard(page) {
         if (!page || !page.querySelector) {
             return false;
         }
-        return !!page.querySelector('.docx-page-body .docx-toc-card, .docx-page-body .docx-toc-line');
+        if (page.querySelector('.docx-page-body .docx-toc-card, .docx-page-body .docx-toc-line')) {
+            return true;
+        }
+        // Orphan "TABLE OF CONTENTS" heading still counts as TOC page content
+        // so 1.0 OBJECTIVE is never pulled under it.
+        const body = page.querySelector('.docx-page-body');
+        if (!body) return false;
+        return Array.from(body.children).some(isTocTitleHeading);
+    }
+
+    function removeOrphanTocTitleAboveBody() {
+        // Word: TOC title is only on the TOC sheet. Strip any free-floating
+        // "TABLE OF CONTENTS" heading that landed above 1.0 OBJECTIVE.
+        document.querySelectorAll('.docx-preview .docx-a4-page').forEach(function (page) {
+            const body = page.querySelector('.docx-page-body');
+            if (!body) return;
+            const kids = Array.from(body.children);
+            const hasBodySection = kids.some(function (el) {
+                if (el.classList && el.classList.contains('docx-toc-card')) return false;
+                const t = ((el.dataset && el.dataset.headingText) || el.innerText || el.textContent || '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                return /^\d+(?:\.\d+)+\s+\S/.test(t) || /^OBJECTIVE\b/i.test(t);
+            });
+            if (!hasBodySection) return;
+            kids.forEach(function (el) {
+                if (el.classList && el.classList.contains('docx-toc-card')) return;
+                if (el.closest && el.closest('.docx-toc-card')) return;
+                if (isTocTitleHeading(el)) el.remove();
+            });
+        });
     }
 
     function isBodySectionBlock(el) {
@@ -2060,6 +2404,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (el.classList && el.classList.contains('docx-toc-card')) {
             return false;
         }
+        if (isTocTitleHeading(el)) {
+            return false;
+        }
         const text = (el.dataset && el.dataset.headingText)
             || (el.innerText || el.textContent || '');
         const flat = String(text).replace(/\s+/g, ' ').trim();
@@ -2067,18 +2414,211 @@ document.addEventListener('DOMContentLoaded', function () {
         return /^\d+(?:\.\d+)+\s+\S/.test(flat);
     }
 
+    function isMajorTailHeading(el) {
+        if (!el) return false;
+        const text = ((el.dataset && el.dataset.headingText) || el.innerText || el.textContent || '').toUpperCase();
+        return /\b(DEVIATIONS?\s*\(IF ANY\)|LIST OF ATTACHMENT|SUMMARY\s*&\s*CONCLUSION|REFERENCES|ABBREVIATIONS|REVISION\s+HISTORY|POST-APPROVAL)\b/.test(text);
+    }
+
+    function headingTextOf(el) {
+        if (!el) return '';
+        return ((el.dataset && el.dataset.headingText) || el.innerText || el.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toUpperCase();
+    }
+
+    function isRequalChecksHeading(el) {
+        const text = headingTextOf(el);
+        return /\b(9\.0\s+REQUALIFICATION\s+CHECKS|9\.1\s+INSTALLATION\s+RE-?QUALIFICATION|9\.2\s+GENERAL\s+CHECKS|GENERAL\s+CHECKS\s*:\s*VERIFICATION\s+OF\s+MAJOR\s+COMPONENTS|9\.3\s+OPERATIONAL\s+QUALIFICATION|OPERATIONAL\s+QUALIFICATION\s+CHECKS\s*:\s*FUNCTIONAL)\b/.test(text);
+    }
+
+    function nextBodyContentHeight(nextBody) {
+        if (!nextBody) return 0;
+        return Array.from(nextBody.children).reduce(function (sum, el) {
+            return sum + (el.offsetHeight || 0);
+        }, 0);
+    }
+
+    function collectRequalHeadingBlock(first) {
+        // 9.0 (+ 9.1) + Installation table, or 9.2 + Major-components table, or 9.3 + intro + FT table.
+        const blocks = [first];
+        let walk = first.nextElementSibling;
+        while (walk && isRequalChecksHeading(walk)) {
+            blocks.push(walk);
+            walk = walk.nextElementSibling;
+        }
+        // Optional intro paragraph under 9.3 before the FT table.
+        while (
+            walk
+            && !(walk.matches && walk.matches('table.docx-table'))
+            && !isRequalChecksHeading(walk)
+            && !isMajorTailHeading(walk)
+            && !isBodySectionBlock(walk)
+        ) {
+            blocks.push(walk);
+            walk = walk.nextElementSibling;
+        }
+        if (walk && walk.matches && walk.matches('table.docx-table') && !walk.classList.contains('header-table')) {
+            blocks.push(walk);
+        }
+        return blocks;
+    }
+
+    function findRequalBodyHeading(re) {
+        // Prefer real section titles near protocol body — never TOC card lines.
+        const nodes = Array.from(document.querySelectorAll(
+            '.docx-preview p.docx-heading-target, .docx-preview p.docx-para.docx-heading-target, .docx-preview p.docx-para'
+        ));
+        let best = null;
+        for (let i = 0; i < nodes.length; i++) {
+            const el = nodes[i];
+            if (el.closest && el.closest('.docx-toc-card')) continue;
+            if (el.closest && el.closest('table.docx-table')) continue;
+            if (!re.test(headingTextOf(el))) continue;
+            best = el;
+            // Keep scanning so a later body heading wins over an earlier stray.
+        }
+        return best;
+    }
+
+    function forceRequalInstallationOwnPage() {
+        // HARD guarantee: 9.0 + 9.1 + Installation table (T12) sit alone at the
+        // top of a sheet BEFORE 9.2 / Machine-frame (T13). Pages may grow;
+        // content must never stay clipped under 8.6 or skipped before T13.
+        const t12 = document.querySelector('.docx-preview table.docx-table[data-table-index="12"]');
+        if (!t12 || !document.body.contains(t12)) return;
+        const h90 = findRequalBodyHeading(/\b9\.0\s+REQUALIFICATION\s+CHECKS\b/);
+        const h91 = findRequalBodyHeading(/\b9\.1\s+INSTALLATION\s+RE-?QUALIFICATION\b/);
+        const h92 = findRequalBodyHeading(/\b9\.2\s+GENERAL\s+CHECKS\b|\bGENERAL\s+CHECKS\s*:\s*VERIFICATION\s+OF\s+MAJOR\s+COMPONENTS\b/);
+        const t13 = document.querySelector('.docx-preview table.docx-table[data-table-index="13"]');
+
+        function glueBefore(node, target) {
+            if (!node || !target || !document.body.contains(target)) return;
+            if (node.nextElementSibling === target) return;
+            target.parentNode.insertBefore(node, target);
+        }
+
+        // Keep wrapper moves as one unit when present.
+        const keep = t12.closest('.docx-keep-section[data-keep-section="requal-91"]');
+        if (!keep) {
+            glueBefore(h91, t12);
+            glueBefore(h90, (h91 && document.body.contains(h91)) ? h91 : t12);
+        }
+
+        const blockRoot = keep || ((h90 && document.body.contains(h90)) ? h90 : ((h91 && document.body.contains(h91)) ? h91 : t12));
+        const page = t12.closest('.docx-a4-page');
+        const body = page && page.querySelector('.docx-page-body');
+        if (!page || !body || !blockRoot) return;
+
+        const atTop = body.firstElementChild === (keep || blockRoot);
+        const orderOk = !t13 || !!(t12.compareDocumentPosition(t13) & Node.DOCUMENT_POSITION_FOLLOWING);
+        const hasBothHeadings = !!(h90 && document.body.contains(h90) && h91 && document.body.contains(h91));
+        const glued = keep
+            ? (keep.contains(t12) && (!h90 || keep.contains(h90)) && (!h91 || keep.contains(h91)))
+            : (hasBothHeadings && h90.nextElementSibling === h91 && h91.nextElementSibling === t12);
+
+        if (atTop && orderOk && glued) {
+            page.setAttribute('data-requal-91-lock', '1');
+            // 9.2 heading directly in front of T13 (may share later sheets).
+            if (h92 && t13) glueBefore(h92, t13);
+            return;
+        }
+
+        const t13Page = t13 ? t13.closest('.docx-a4-page') : null;
+        const anchor = t13Page || page;
+        const prev = precedingA4Page(anchor);
+        const host = prev ? createContinuationPage(prev) : createContinuationPage(anchor);
+        const nb = host.querySelector('.docx-page-body');
+        if (!nb) return;
+
+        if (keep) {
+            nb.appendChild(keep);
+        } else {
+            if (h90 && document.body.contains(h90)) nb.appendChild(h90);
+            if (h91 && document.body.contains(h91)) nb.appendChild(h91);
+            nb.appendChild(t12);
+        }
+        host.setAttribute('data-requal-91-lock', '1');
+        if (h92 && t13 && document.body.contains(t13)) {
+            glueBefore(h92, t13);
+        }
+    }
+
+    function reattachRequalCheckHeadings() {
+        forceRequalInstallationOwnPage();
+    }
+
     function pullOneBack(page) {
         const body = page.querySelector('.docx-page-body');
         const next = followingA4Page(page);
-        if (!body || !next || pageFreeSpace(body) < 36) return false;
+        if (!body || !next || pageFreeSpace(body) < 24) return false;
         const nextBody = next.querySelector('.docx-page-body');
         const first = nextBody && nextBody.firstElementChild;
         if (!first) return false;
+        // Never pull 9.0/9.1/9.2/9.3 (or their glued table) onto the previous
+        // sheet — free space after 8.6 used to yank headings alone, then
+        // overflow:hidden clipped REQUALIFICATION CHECKS entirely. Pages may grow.
+        if (next.hasAttribute('data-requal-91-lock') || page.hasAttribute('data-requal-91-lock')) {
+            return false;
+        }
+        if (first.getAttribute && first.getAttribute('data-keep-section') === 'requal-91') {
+            return false;
+        }
+        if (isRequalChecksHeading(first)) {
+            return false;
+        }
+        if (
+            first.matches
+            && first.matches('table.docx-table')
+            && (first.getAttribute('data-table-index') === '12' || first.getAttribute('data-table-index') === '13')
+        ) {
+            return false;
+        }
+        // Tail sections (10.0–16.0): pull one section at a time (heading + body
+        // until the next major heading). Requiring the *entire next page* meant
+        // SUMMARY would not absorb REFERENCES when ABBREVIATIONS shared that
+        // sheet — leaving large blank bands.
+        if (isMajorTailHeading(first)) {
+            const free = pageFreeSpace(body);
+            const section = [first];
+            let walk = first.nextElementSibling;
+            while (walk && !isMajorTailHeading(walk)) {
+                section.push(walk);
+                walk = walk.nextElementSibling;
+            }
+            const sectionNeed = section.reduce(function (sum, el) {
+                return sum + (el.offsetHeight || 0);
+            }, 0) + 12;
+            if (sectionNeed > 0 && sectionNeed <= free) {
+                let moved = false;
+                for (let si = 0; si < section.length; si++) {
+                    if (!pullBlockBack(body, nextBody, section[si])) break;
+                    moved = true;
+                }
+                if (moved) dropEmptySheet(next);
+                return moved;
+            }
+            // Whole next page still OK when it is only this one short section.
+            const need = nextBodyContentHeight(nextBody) + 12;
+            if (need > 0 && need <= free) {
+                let moved = false;
+                while (nextBody.firstElementChild) {
+                    if (!pullBlockBack(body, nextBody, nextBody.firstElementChild)) break;
+                    moved = true;
+                }
+                if (moved) dropEmptySheet(next);
+                return moved;
+            }
+            return false;
+        }
         // Never pull protocol body onto the Table of Contents page.
         if (pageHasTocCard(page) && !first.classList.contains('docx-toc-card')) {
             return false;
         }
         if (first.matches('table.docx-table') && !first.classList.contains('header-table')) {
+            // Installation / major-components / FT tables stay on their sheets.
+            if (isHvacChecklistTable(first)) return false;
             return pullTableRowBack(body, first);
         }
         if (first.classList.contains('docx-toc-card')) {
@@ -2111,8 +2651,29 @@ document.addEventListener('DOMContentLoaded', function () {
         if (isBodySectionBlock(first) && pageHasTocCard(page)) {
             return false;
         }
+        // Other numbered section titles: only pull when the following table also
+        // fits — never leave a lone 9.x heading clipped under the footer.
+        if (isBodySectionBlock(first)) {
+            const blocks = collectRequalHeadingBlock(first);
+            if (blocks.length > 1) {
+                const need = blocks.reduce(function (sum, el) {
+                    return sum + (el.offsetHeight || 0);
+                }, 0) + 16;
+                if (need > pageFreeSpace(body)) return false;
+                let moved = false;
+                for (let bi = 0; bi < blocks.length; bi++) {
+                    if (!pullBlockBack(body, nextBody, blocks[bi])) break;
+                    moved = true;
+                }
+                if (moved) dropEmptySheet(next);
+                return moved;
+            }
+            return false;
+        }
+        const freeNow = pageFreeSpace(body);
         // Do not leave a short title alone when the next block still fits.
-        if (first.offsetHeight + 6 <= pageFreeSpace(body)) {
+        // With large free bands, always try — pullBlockBack reverts if overfull.
+        if (first.offsetHeight + 6 <= freeNow || freeNow >= 100) {
             return pullBlockBack(body, nextBody, first);
         }
         return false;
@@ -2257,7 +2818,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!next) break;
             const body = page.querySelector('.docx-page-body');
             const free = pageFreeSpace(body);
-            if (free < 36 || !pullOneBack(page)) {
+            if (free < 24 || !pullOneBack(page)) {
                 // Sparse title pages (Major components :) must keep pulling rows.
                 const last = body && body.lastElementChild;
                 if (
@@ -2277,11 +2838,46 @@ document.addEventListener('DOMContentLoaded', function () {
                         continue;
                     }
                 }
+                // Half-empty sheets (Deviations/References/Revision alone): keep
+                // pulling following section blocks while free space remains.
+                if (free >= 120) {
+                    let local = 0;
+                    let progressed = false;
+                    while (local++ < 30 && pageFreeSpace(body) >= 64 && pullOneBack(page)) {
+                        pulls++;
+                        progressed = true;
+                        dropEmptySheet(followingA4Page(page));
+                    }
+                    if (progressed) continue;
+                }
                 page = next;
                 continue;
             }
             pulls++;
             dropEmptySheet(next);
+        }
+    }
+
+    function packSparsePages() {
+        // Extra passes so short tail sections (10–15) share sheets instead of
+        // leaving large unprofessional white bands above the footer.
+        let guard = 0;
+        while (guard++ < 6) {
+            let moved = 0;
+            const pages = Array.from(document.querySelectorAll('.docx-preview .docx-a4-page'));
+            for (let i = 0; i < pages.length; i++) {
+                const page = pages[i];
+                if (!document.body.contains(page)) continue;
+                const body = page.querySelector('.docx-page-body');
+                if (!body || pageFreeSpace(body) < 100) continue;
+                let local = 0;
+                while (local++ < 40 && pageFreeSpace(body) >= 56 && pullOneBack(page)) {
+                    moved++;
+                    const nxt = followingA4Page(page);
+                    if (nxt) dropEmptySheet(nxt);
+                }
+            }
+            if (!moved) break;
         }
     }
 
@@ -2321,6 +2917,29 @@ document.addEventListener('DOMContentLoaded', function () {
         return Array.from(table.rows || []).map(function (r) {
             return parseInt(r.getAttribute('data-row-index') || '-1', 10);
         });
+    }
+
+    function spillClippedTableRows() {
+        // After pack/pull, any data row / textbox line / block whose bottom sits
+        // past the A4 body clip must move forward — History (8.5), 9.1 rows, and
+        // REFERENCES bullets must never stay hidden under overflow:hidden.
+        let guard = 0;
+        let moved = true;
+        while (moved && guard++ < 120) {
+            moved = false;
+            const pages = Array.from(document.querySelectorAll('.docx-preview .docx-a4-page'));
+            for (let pi = 0; pi < pages.length; pi++) {
+                const page = pages[pi];
+                if (!document.body.contains(page)) continue;
+                const body = page.querySelector('.docx-page-body');
+                if (!body) continue;
+                if (!(pageIsOverfull(body) || contentOverflows(body))) continue;
+                if (spillOneBlock(page)) {
+                    moved = true;
+                    break;
+                }
+            }
+        }
     }
 
     function repairSplitTableFirstDataRows() {
@@ -2388,7 +3007,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     return r.getAttribute('data-row-index') === '2';
                 });
                 if (row2 && firstData.row.nextElementSibling !== row2) {
-                    host.insertBefore(firstData.row, row2);
+                    insertRowBefore(host, firstData.row, row2);
                 }
                 return;
             }
@@ -2396,11 +3015,11 @@ document.addEventListener('DOMContentLoaded', function () {
             const row2 = Array.from(host.rows).find(function (r) {
                 return r.getAttribute('data-row-index') === '2';
             });
-            if (row2) host.insertBefore(firstData.row, row2);
+            if (row2) insertRowBefore(host, firstData.row, row2);
             else {
                 const hostHeader = host.rows[0];
                 if (hostHeader) hostHeader.after(firstData.row);
-                else host.insertBefore(firstData.row, host.rows[0] || null);
+                else insertRowBefore(host, firstData.row, host.rows[0] || null);
             }
 
             if (firstData.table.rows.length <= 1 && !firstData.table.querySelector('[name]')) {
@@ -2421,6 +3040,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Keep protocol body off the TOC page before measuring free space.
         moveBodyOffTocPages();
+        removeOrphanTocTitleAboveBody();
 
         // Pull content into empty bands first.
         fillPageGaps();
@@ -2452,13 +3072,42 @@ document.addEventListener('DOMContentLoaded', function () {
         // Reunite Sr.No 1 before more pull-back can clip it again.
         repairSplitTableFirstDataRows();
         fillPageGaps();
+        // Pack only whole short sections that fit — never yank table rows back
+        // onto an almost-full sheet (that caused Sr.No 7→10 with 8–9 clipped).
+        packSparsePages();
+        // If packing overfilled a sheet, spill again so rows stay visible.
+        (function respillOverfull() {
+            let p = document.querySelector('.docx-preview .docx-a4-page');
+            let n = 0;
+            while (p && n < 160) {
+                const pb = p.querySelector('.docx-page-body');
+                if (!pb || (!contentOverflows(pb) && !pageIsOverfull(pb))) {
+                    p = followingA4Page(p);
+                    continue;
+                }
+                if (!spillOneBlock(p)) {
+                    p = followingA4Page(p);
+                    continue;
+                }
+                n++;
+            }
+        })();
+        // Explicit geometry check: clipped HVAC rows (8/9) must leave the sheet.
+        spillClippedTableRows();
         // Fold orphan TOC rows (e.g. lone "10.0 post approval") off empty sheets.
         compactOrphanTocPages();
         repairSplitTableFirstDataRows();
         fillPageGaps();
+        spillClippedTableRows();
         moveBodyOffTocPages();
+        removeOrphanTocTitleAboveBody();
         // Final pass: Sr.No 1 must sit with 2/3/4 after all pull/spill settles.
         repairSplitTableFirstDataRows();
+        reattachRequalCheckHeadings();
+        spillClippedTableRows();
+        reattachRequalCheckHeadings();
+        spillClippedTableRows();
+        removeOrphanTocTitleAboveBody();
 
         document.querySelectorAll('.docx-preview .docx-a4-page').forEach(function (sheet) {
             const sheetBody = sheet.querySelector('.docx-page-body');
@@ -2477,6 +3126,10 @@ document.addEventListener('DOMContentLoaded', function () {
             dropEmptySheet(sheet);
         });
         repairSplitTableFirstDataRows();
+        // After empty-sheet cleanup, force 9.0/9.1/T12 onto their own sheet again
+        // (pack/drop can re-hide them under 8.6 or skip them before Machine frame).
+        reattachRequalCheckHeadings();
+        dedupeDuplicateColumnHeaderRows();
         updateAllPageNumbers();
         if (typeof window.dedupeIdenticalAddedRows === 'function') {
             window.dedupeIdenticalAddedRows();
@@ -2518,31 +3171,93 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let paginateFrame = null;
     let tocAfterPaginateTimer = null;
+    // Keep the focused field / current page stable across layout passes.
+    // Absolute scrollY restore fails when A4 reflow changes page heights.
+    window.docxWithPreservedScroll = function (fn) {
+        const active = document.activeElement;
+        const anchor = (active && active.closest)
+            ? (active.closest('.docx-a4-page, tr, .docx-para-edit-wrapper, textarea, input') || active)
+            : null;
+        const beforeTop = anchor && anchor.getBoundingClientRect
+            ? anchor.getBoundingClientRect().top
+            : null;
+        const x = window.scrollX || window.pageXOffset || 0;
+        const y = window.scrollY || window.pageYOffset || 0;
+        try {
+            fn();
+        } finally {
+            if (anchor && document.contains(anchor) && beforeTop !== null) {
+                const afterTop = anchor.getBoundingClientRect().top;
+                window.scrollBy(0, afterTop - beforeTop);
+            } else {
+                window.scrollTo(x, y);
+            }
+            if (active && typeof active.focus === 'function' && document.contains(active)) {
+                try {
+                    active.focus({ preventScroll: true });
+                } catch (err) {
+                    try { active.focus(); } catch (err2) {}
+                    if (anchor && document.contains(anchor) && beforeTop !== null) {
+                        window.scrollBy(0, anchor.getBoundingClientRect().top - beforeTop);
+                    } else {
+                        window.scrollTo(x, y);
+                    }
+                }
+            }
+        }
+    };
     function scheduleDocxPaginate() {
         if (paginateFrame) cancelAnimationFrame(paginateFrame);
         paginateFrame = requestAnimationFrame(function () {
-            unlockDeviationColumns();
-            paginateDocxPreview();
-            // Keep TOC in sync whenever layout changes (Add Row, typing, etc.).
+            window.docxWithPreservedScroll(function () {
+                unlockDeviationColumns();
+                paginateDocxPreview();
+            });
+            // Light TOC number sync only — never full prepareDocxTocForSave here
+            // (that double-paginates and jumps the user back to page 1).
             if (tocAfterPaginateTimer) clearTimeout(tocAfterPaginateTimer);
             tocAfterPaginateTimer = setTimeout(function () {
-                if (typeof window.prepareDocxTocForSave === 'function') {
-                    window.prepareDocxTocForSave();
-                } else if (typeof window.syncTocPageNumbers === 'function') {
-                    window.syncTocPageNumbers(true);
-                }
+                window.docxWithPreservedScroll(function () {
+                    if (typeof window.syncTocPageNumbers === 'function') {
+                        window.syncTocPageNumbers(true);
+                    }
+                });
             }, 80);
+            // After letterhead/images settle, pack short sections that fully fit,
+            // then respill so table rows are never left clipped (7→10 jump).
+            setTimeout(function () {
+                window.docxWithPreservedScroll(function () {
+                    if (typeof packSparsePages === 'function') packSparsePages();
+                    if (typeof reattachRequalCheckHeadings === 'function') reattachRequalCheckHeadings();
+                    let p = document.querySelector('.docx-preview .docx-a4-page');
+                    let n = 0;
+                    while (p && n < 120) {
+                        const pb = p.querySelector('.docx-page-body');
+                        if (pb && (contentOverflows(pb) || pageIsOverfull(pb))) {
+                            if (spillOneBlock(p)) { n++; continue; }
+                        }
+                        p = followingA4Page(p);
+                    }
+                    if (typeof spillClippedTableRows === 'function') spillClippedTableRows();
+                    if (typeof reattachRequalCheckHeadings === 'function') reattachRequalCheckHeadings();
+                    if (typeof spillClippedTableRows === 'function') spillClippedTableRows();
+                    // Final lock: 9.0/9.1/Installation table must precede Machine frame.
+                    if (typeof reattachRequalCheckHeadings === 'function') reattachRequalCheckHeadings();
+                    if (typeof dedupeDuplicateColumnHeaderRows === 'function') dedupeDuplicateColumnHeaderRows();
+                    if (typeof updateAllPageNumbers === 'function') updateAllPageNumbers();
+                });
+            }, 700);
         });
     }
     window.scheduleDocxPaginate = scheduleDocxPaginate;
 
+    // Typing: only grow the textarea. Never reflow/paginate on each keystroke —
+    // that was yanking requal fill back to the top page while editing.
     document.addEventListener('input', function (event) {
         const el = event.target;
-        if (!el || !el.matches || !el.matches('.docx-preview textarea')) return;
+        if (!el || !el.matches || !el.matches('.docx-preview textarea, .docx-preview-wrapper textarea')) return;
         el.style.height = 'auto';
-        el.style.height = el.scrollHeight + 'px';
-        const page = el.closest('.docx-a4-page');
-        if (page) reflowPageOverflow(page);
+        el.style.height = Math.min(el.scrollHeight, 480) + 'px';
     });
 
     if (isPreApprovalMode) {
@@ -2551,25 +3266,36 @@ document.addEventListener('DOMContentLoaded', function () {
         const btnDeleteRow = document.getElementById('btnDocxDeleteRow');
         const tableOpsInput = document.getElementById('docxTableOpsInput');
 
-        // Row selection on cell click inside preview tables
-        document.addEventListener('click', function (e) {
-            const cell = e.target.closest('.docx-preview-wrapper table.docx-table:not(.header-table) td, .docx-preview-wrapper table.docx-table:not(.header-table) th');
-            if (!cell) return;
-            const row = cell.closest('tr');
+        // Row selection on cell click / focus inside preview tables (any table on any page).
+        function selectPreviewTableRow(row) {
             if (!row) return;
-
+            const table = row.closest('table.docx-table:not(.header-table)');
+            if (!table || !table.closest('.docx-preview-wrapper')) return;
             document.querySelectorAll('.docx-preview-wrapper table.docx-table tr.docx-selected-row').forEach(function (r) {
                 r.classList.remove('docx-selected-row');
             });
-
             row.classList.add('docx-selected-row');
             selectedRow = row;
-            selectedTable = row.closest('table');
-
+            selectedTable = table;
+            ensureTableIndex(selectedTable);
             if (rowInfo) {
-                const tIdx = selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable);
-                const rIdx = selectedRow.getAttribute('data-row-index') || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow);
+                const tIdx = selectedTable.getAttribute('data-table-index') || '?';
+                const rIdx = selectedRow.getAttribute('data-row-index')
+                    || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow);
+                rowInfo.innerHTML = '<i class="fas fa-check text-success mr-1"></i> Table ' + tIdx + ', row ' + rIdx + ' selected';
             }
+        }
+        document.addEventListener('click', function (e) {
+            const cell = e.target.closest('.docx-preview-wrapper table.docx-table:not(.header-table) td, .docx-preview-wrapper table.docx-table:not(.header-table) th');
+            if (!cell) return;
+            selectPreviewTableRow(cell.closest('tr'));
+        });
+        document.addEventListener('focusin', function (e) {
+            const cell = e.target && e.target.closest
+                ? e.target.closest('.docx-preview-wrapper table.docx-table:not(.header-table) td')
+                : null;
+            if (!cell) return;
+            selectPreviewTableRow(cell.closest('tr'));
         });
 
         function rowContentFingerprint(row) {
@@ -2598,6 +3324,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     Array.from(table.rows).forEach(function (row) {
                         if (row.querySelector('th')) return;
                         if (row.getAttribute('data-is-added-row') !== '1') return;
+                        // Fresh Add Row inserts stay — never auto-delete mid-click.
+                        if (row.getAttribute('data-add-token')) return;
                         const fp = rowContentFingerprint(row);
                         if (!fp || fp.length < 2) return;
                         if (seen.has(fp)) {
@@ -2772,72 +3500,161 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             if (!empty) return null;
             const insertAt = afterRow + 1;
+            // Only reuse a blank that is already at the insert slot.
+            // Remapping distant blanks is session-only and is lost on refresh — use structural insert instead.
             if (empty.index === insertAt) {
                 clearRowInputs(empty.row);
                 return empty.row;
             }
-            // Shift locations insertAt .. empty.index-1 up by one, then park empty at insertAt.
-            const toShift = rows.filter(function (item) {
-                return item.index >= insertAt && item.index < empty.index;
-            });
-            toShift.sort(function (a, b) { return b.index - a.index; });
-            toShift.forEach(function (item) {
-                remapRowLocations(item.row, tableIndex, item.index, item.index + 1);
-            });
-            remapRowLocations(empty.row, tableIndex, empty.index, insertAt);
-            clearRowInputs(empty.row);
-            selectedRowEl.after(empty.row);
-            empty.row.setAttribute('data-is-added-row', '1');
-            return empty.row;
+            return null;
         }
 
-        // Add Row
+        function persistTableOpsDraftSoon() {
+            syncTableOpsInput();
+            // Immediate save so refresh keeps Add/Delete (debounce alone can miss a quick reload).
+            if (typeof window.docxSaveDraftNow === 'function') {
+                window.docxSaveDraftNow({ silent: true });
+            }
+        }
+
+        function pickVisibleEditableTable() {
+            const tables = Array.from(document.querySelectorAll(
+                '.docx-preview-wrapper table.docx-table:not(.header-table)'
+            ));
+            if (!tables.length) return null;
+            const viewMid = window.scrollY + (window.innerHeight * 0.45);
+            let best = null;
+            let bestDist = Infinity;
+            tables.forEach(function (table) {
+                const rect = table.getBoundingClientRect();
+                const top = rect.top + window.scrollY;
+                const bottom = top + Math.max(rect.height, 1);
+                const center = (top + bottom) / 2;
+                const dist = (viewMid >= top && viewMid <= bottom)
+                    ? 0
+                    : Math.min(Math.abs(center - viewMid), Math.abs(top - viewMid));
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = table;
+                }
+            });
+            return best || tables[0];
+        }
+
+        function ensureTableIndex(table) {
+            if (!table) return 0;
+            let raw = table.getAttribute('data-table-index');
+            if (raw !== null && raw !== '' && !isNaN(parseInt(raw, 10))) {
+                return parseInt(raw, 10);
+            }
+            const all = Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table:not(.header-table)'));
+            const idx = Math.max(0, all.indexOf(table));
+            table.setAttribute('data-table-index', String(idx));
+            return idx;
+        }
+
+        // Add Row — always insert a real new row (never "reuse" a trailing blank:
+        // that looked like Add Row failed when the next template row was already empty).
         let addRowBusy = false;
+        let addRowBusyTimer = null;
+        window.docxAddRowBusy = false;
+        function releaseAddRowBusy() {
+            addRowBusy = false;
+            window.docxAddRowBusy = false;
+            if (addRowBusyTimer) {
+                clearTimeout(addRowBusyTimer);
+                addRowBusyTimer = null;
+            }
+            if (btnAddRow) btnAddRow.disabled = false;
+        }
         if (btnAddRow) {
-            btnAddRow.addEventListener('click', function () {
+            // Keep the selected table row — do not let the button steal focus first.
+            btnAddRow.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+            });
+            btnAddRow.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
                 if (addRowBusy) return;
-                if (!selectedTable || !selectedRow) {
-                    const firstTable = document.querySelector('.docx-preview-wrapper table.docx-table:not(.header-table)');
-                    if (!firstTable) {
-                        alert('No editable table found in document.');
-                        return;
+
+                // Prefer the highlighted row; recover if DOM was reflowed away.
+                if (!selectedTable || !selectedRow || !document.contains(selectedRow)) {
+                    const highlighted = document.querySelector(
+                        '.docx-preview-wrapper table.docx-table:not(.header-table) tr.docx-selected-row'
+                    );
+                    if (highlighted && document.contains(highlighted)) {
+                        selectPreviewTableRow(highlighted);
+                    } else {
+                        const visibleTable = pickVisibleEditableTable();
+                        if (!visibleTable) {
+                            alert('No editable table found in document.');
+                            return;
+                        }
+                        const rows = Array.from(visibleTable.querySelectorAll('tr')).filter(function (r) {
+                            return !r.querySelector('th') && !(r.querySelector('td[colspan]') && r.querySelectorAll('td').length === 1);
+                        });
+                        selectedTable = visibleTable;
+                        selectedRow = rows.length ? rows[rows.length - 1] : visibleTable.querySelector('tr');
+                        if (!selectedRow) {
+                            alert('No editable row found in this table.');
+                            return;
+                        }
+                        selectPreviewTableRow(selectedRow);
                     }
-                    const rows = firstTable.querySelectorAll('tr');
-                    selectedTable = firstTable;
-                    selectedRow = rows[rows.length - 1];
-                    selectedRow.classList.add('docx-selected-row');
                 }
 
                 addRowBusy = true;
+                window.docxAddRowBusy = true;
                 btnAddRow.disabled = true;
+                // Safety: never leave the button permanently disabled.
+                if (addRowBusyTimer) clearTimeout(addRowBusyTimer);
+                addRowBusyTimer = setTimeout(releaseAddRowBusy, 2500);
 
-                let templateRow = selectedRow;
-                if (templateRow.querySelector('th')) {
-                    const nextData = templateRow.nextElementSibling;
-                    if (nextData) templateRow = nextData;
-                }
+                try {
+                    let templateRow = selectedRow;
+                    if (templateRow.querySelector('th')) {
+                        const nextData = templateRow.nextElementSibling;
+                        if (nextData) templateRow = nextData;
+                    }
 
-                const tIdx = parseInt(selectedTable.getAttribute('data-table-index') || Array.from(document.querySelectorAll('.docx-preview-wrapper table.docx-table')).indexOf(selectedTable), 10);
-                const afterRow = parseInt(selectedRow.getAttribute('data-row-index') || Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow), 10);
-                const headers = Array.from(selectedTable.querySelectorAll('tr:first-child td, tr:first-child th')).map(function (th) {
-                    return th.textContent.trim();
-                });
+                    const tIdx = ensureTableIndex(selectedTable);
+                    let afterRow = parseInt(selectedRow.getAttribute('data-row-index') || '', 10);
+                    if (isNaN(afterRow)) {
+                        afterRow = Array.from(selectedTable.querySelectorAll('tr')).indexOf(selectedRow);
+                    }
+                    if (isNaN(afterRow) || afterRow < 0) afterRow = Math.max(0, selectedTable.rows.length - 1);
+                    const headers = Array.from(selectedTable.querySelectorAll('tr:first-child td, tr:first-child th')).map(function (th) {
+                        return th.textContent.trim();
+                    });
 
-                // Prefer sliding a trailing blank template row up (Att08 already has empty slots).
-                let newRow = tryReuseTrailingEmptyRow(tIdx, afterRow, selectedRow);
-                let usedStructuralInsert = false;
-                if (!newRow) {
-                    usedStructuralInsert = true;
+                    // Always structural insert so every click visibly adds a row.
                     shiftRowsAfter(tIdx, afterRow);
-                    newRow = templateRow.cloneNode(true);
+                    const newRow = templateRow.cloneNode(true);
                     newRow.classList.remove('docx-selected-row');
                     newRow.setAttribute('data-is-added-row', '1');
+                    // Unique token so blank-row dedupe cannot delete this insert.
+                    newRow.setAttribute('data-add-token', String(Date.now()) + '-' + Math.random().toString(36).slice(2, 8));
                     clearRowInputs(newRow);
                     newRow.querySelectorAll('td').forEach(function (td) {
                         if (td.querySelector('input, textarea, select')) return;
                         td.textContent = '';
                         td.innerHTML = '<input type="text" class="docx-input" value="">';
                         td.classList.add('editable');
+                        td.classList.remove('locked', 'readonly');
+                    });
+                    Array.from(newRow.cells || []).forEach(function (td) {
+                        let inp = td.querySelector('input:not([type="file"]):not([type="hidden"]), textarea, select');
+                        if (!inp) {
+                            td.textContent = '';
+                            td.innerHTML = '<input type="text" class="docx-input" value="" placeholder="Enter details...">';
+                            td.classList.add('editable');
+                            td.classList.remove('locked', 'readonly');
+                        } else {
+                            inp.removeAttribute('readonly');
+                            inp.disabled = false;
+                            td.classList.add('editable');
+                            td.classList.remove('locked', 'readonly');
+                        }
                     });
                     assignRowLocations(newRow, tIdx, afterRow + 1);
                     selectedRow.after(newRow);
@@ -2848,43 +3665,91 @@ document.addEventListener('DOMContentLoaded', function () {
                         headers: headers,
                         _rowEl: newRow
                     });
-                }
 
-                // Move selection to newly added row
-                document.querySelectorAll('.docx-preview-wrapper table.docx-table tr.docx-selected-row').forEach(function (r) {
-                    r.classList.remove('docx-selected-row');
-                });
-                newRow.classList.add('docx-selected-row');
-                selectedRow = newRow;
-                selectedTable = newRow.closest('table');
+                    // Default next Sr. No. (max existing integer + 1) — user may edit it.
+                    (function assignDefaultSrNo() {
+                        const h0 = String(headers[0] || '').toLowerCase();
+                        if (!/sl\.?\s*no|sr\.?\s*no|s\.?\s*no|#/.test(h0)) return;
+                        let maxN = 0;
+                        tableRowsByIndex(tIdx).forEach(function (item) {
+                            if (item.row === newRow) return;
+                            const cell = item.row.cells && item.row.cells[0];
+                            if (!cell) return;
+                            const inp = cell.querySelector('input, textarea');
+                            const raw = inp ? String(inp.value || '') : String(cell.textContent || '');
+                            const m = raw.trim().match(/^(\d+)/);
+                            if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+                        });
+                        const next = String(maxN + 1);
+                        const firstTd = newRow.cells && newRow.cells[0];
+                        if (!firstTd) return;
+                        let inp = firstTd.querySelector('input:not([type="file"]):not([type="hidden"]), textarea');
+                        if (!inp) {
+                            firstTd.textContent = '';
+                            firstTd.innerHTML = '<input type="text" class="docx-input" value="">';
+                            firstTd.classList.add('editable');
+                            firstTd.classList.remove('locked', 'readonly');
+                            inp = firstTd.querySelector('input');
+                            assignRowLocations(newRow, tIdx, afterRow + 1);
+                        }
+                        if (inp) {
+                            inp.value = next;
+                            inp.removeAttribute('readonly');
+                            inp.disabled = false;
+                        }
+                    })();
 
-                syncTableOpsInput();
-                dedupeIdenticalAddedRows();
+                    document.querySelectorAll('.docx-preview-wrapper table.docx-table tr.docx-selected-row').forEach(function (r) {
+                        r.classList.remove('docx-selected-row');
+                    });
+                    newRow.classList.add('docx-selected-row');
+                    selectedRow = newRow;
+                    selectedTable = newRow.closest('table') || selectedTable;
+                    if (selectedTable) ensureTableIndex(selectedTable);
 
-                reflowPageOverflow(newRow.closest('.docx-a4-page'));
-                // Single paginate + TOC sync (avoid double prepare which re-ran layout thrice).
-                setTimeout(function () {
-                    if (typeof window.paginateDocxPreview === 'function') {
-                        window.paginateDocxPreview();
+                    // Soft local reflow only; keep user on the same sheet.
+                    if (typeof window.docxWithPreservedScroll === 'function') {
+                        window.docxWithPreservedScroll(function () {
+                            const page = newRow.closest('.docx-a4-page');
+                            if (page && typeof reflowPageOverflow === 'function') {
+                                reflowPageOverflow(page);
+                            }
+                        });
                     }
-                    dedupeIdenticalAddedRows();
-                    if (typeof window.syncTocPageNumbers === 'function') {
-                        window.syncTocPageNumbers(true);
-                    }
+
                     if (rowInfo) {
-                        rowInfo.innerHTML = '<span class="text-success font-weight-bold">Row Added!</span> TOC page numbers updated.';
+                        rowInfo.innerHTML = '<span class="text-success font-weight-bold">Row Added!</span> Type text into the new cells.';
                     }
-                    addRowBusy = false;
-                    btnAddRow.disabled = false;
-                }, 80);
-                newRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
 
-                if (rowInfo) {
-                    rowInfo.innerHTML = '<span class="text-success font-weight-bold">Row Added!</span> Type text into the new cells.'
-                        + (usedStructuralInsert ? '' : ' (reused blank row)');
+                    setTimeout(function () {
+                        try {
+                            if (typeof window.docxWithPreservedScroll === 'function') {
+                                window.docxWithPreservedScroll(function () {
+                                    if (typeof window.syncTocPageNumbers === 'function') {
+                                        window.syncTocPageNumbers(true);
+                                    }
+                                });
+                            }
+                            // Persist after DOM settles — one draft, not during the click race.
+                            persistTableOpsDraftSoon();
+                            try {
+                                newRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                            } catch (err) {}
+                            const firstInput = newRow.querySelector('input:not([type="file"]), textarea');
+                            if (firstInput) {
+                                try { firstInput.focus({ preventScroll: true }); } catch (err2) { firstInput.focus(); }
+                            }
+                        } finally {
+                            releaseAddRowBusy();
+                        }
+                    }, 80);
+                } catch (addErr) {
+                    console.warn('Add Row failed', addErr);
+                    releaseAddRowBusy();
+                    if (rowInfo) {
+                        rowInfo.innerHTML = '<span class="text-danger">Add Row failed — select a row and try again.</span>';
+                    }
                 }
-                const firstInput = newRow.querySelector('input:not([type="file"]), textarea');
-                if (firstInput) firstInput.focus();
             });
         }
 
@@ -2947,7 +3812,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 selectedRow = null;
                 selectedTable = null;
-                syncTableOpsInput();
+                persistTableOpsDraftSoon();
 
                 if (parentPage) {
                     let guard = 0;
@@ -2960,29 +3825,36 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 setTimeout(function () {
-                    if (typeof window.prepareDocxTocForSave === 'function') {
-                        window.prepareDocxTocForSave();
-                    } else if (typeof window.paginateDocxPreview === 'function') {
-                        window.paginateDocxPreview();
+                    if (typeof window.docxWithPreservedScroll === 'function') {
+                        window.docxWithPreservedScroll(function () {
+                            if (typeof window.syncTocPageNumbers === 'function') {
+                                window.syncTocPageNumbers(true);
+                            } else if (typeof updateAllPageNumbers === 'function') {
+                                updateAllPageNumbers();
+                            }
+                        });
                     }
+                    persistTableOpsDraftSoon();
                 }, 60);
 
                 if (rowInfo) {
-                    rowInfo.textContent = 'Row deleted. TOC page numbers updated.';
+                    rowInfo.textContent = 'Row deleted.';
                 }
             });
         }
 
-        function syncTableOpsInput() {
+        function syncTableOpsInput(opts) {
+            opts = opts || {};
             if (!tableOpsInput) return;
             const serialized = tableOps.map(function (op) {
                 if (op.op === 'insert') {
+                    // Keep Sr. No. (default next serial or user-typed) in values for bake.
                     const values = op._rowEl
                         ? Array.from(op._rowEl.querySelectorAll('td')).map(function (td) {
                             const inp = td.querySelector('input, textarea, select');
                             return inp ? (inp.value || '').trim() : td.textContent.trim();
                         })
-                        : (op.values || []);
+                        : (op.values || []).slice();
                     return {
                         op: 'insert',
                         table: op.table,
@@ -2999,12 +3871,175 @@ document.addEventListener('DOMContentLoaded', function () {
                 };
             });
             tableOpsInput.value = JSON.stringify(serialized);
-            if (typeof window.docxScheduleDraftSave === 'function') {
+            // quiet=true when collecting FormData mid-save (avoid re-entrancy / extra timers).
+            if (!opts.quiet && typeof window.docxScheduleDraftSave === 'function') {
                 window.docxScheduleDraftSave();
             }
         }
 
+        function findPreviewTablesByIndex(tableIndex) {
+            return Array.from(document.querySelectorAll(
+                '.docx-preview-wrapper table.docx-table[data-table-index="' + tableIndex + '"]:not(.header-table)'
+            ));
+        }
+
+        function findRowByDataIndex(tables, rowIndex) {
+            for (let t = 0; t < tables.length; t++) {
+                const rows = Array.from(tables[t].rows || []);
+                for (let i = 0; i < rows.length; i++) {
+                    const raw = rows[i].getAttribute('data-row-index');
+                    if (raw === null || raw === '') continue;
+                    if (parseInt(raw, 10) === rowIndex) return rows[i];
+                }
+            }
+            return null;
+        }
+
+        function applyValuesToRow(row, values) {
+            if (!row || !Array.isArray(values)) return;
+            Array.from(row.cells || []).forEach(function (td, colIdx) {
+                if (colIdx >= values.length) return;
+                const v = values[colIdx];
+                if (v === undefined || v === null || String(v).trim() === '') return;
+                const inp = td.querySelector('input:not([type="file"]):not([type="hidden"]), textarea, select');
+                if (!inp) {
+                    td.textContent = String(v);
+                    return;
+                }
+                if (inp.tagName === 'SELECT') {
+                    inp.value = String(v);
+                    return;
+                }
+                if (inp.type === 'checkbox' || inp.type === 'radio') {
+                    inp.checked = ['1', 'yes', 'true', 'on'].indexOf(String(v).toLowerCase()) >= 0;
+                    return;
+                }
+                inp.value = String(v);
+            });
+        }
+
+        // Replay draft table_ops only when rows are not already in the Word preview
+        // (after pre-approval submit, inserts are baked into the template — replaying
+        // them again caused duplicate locked rows on send-back).
+        function replayDraftTableOps() {
+            if (!Array.isArray(tableOps) || !tableOps.length) return;
+
+            const wantFingerprint = function (values) {
+                if (!Array.isArray(values) || !values.length) return '';
+                return values.map(function (v) {
+                    return String(v || '').replace(/\s+/g, ' ').trim().toLowerCase();
+                }).filter(Boolean).join('|');
+            };
+
+            const rowMatchesValues = function (tr, values) {
+                const want = wantFingerprint(values);
+                if (!want) return false;
+                const fp = rowContentFingerprint(tr);
+                if (fp === want) return true;
+                // Partial match: any non-empty typed cell from the op appears in the row.
+                const parts = want.split('|').filter(Boolean);
+                if (!parts.length) return false;
+                return parts.every(function (p) { return fp.indexOf(p) !== -1; });
+            };
+
+            const deletes = tableOps.filter(function (op) { return op && op.op === 'delete'; })
+                .slice()
+                .sort(function (a, b) {
+                    if (a.table !== b.table) return a.table - b.table;
+                    return b.row - a.row;
+                });
+            deletes.forEach(function (op) {
+                const tables = findPreviewTablesByIndex(op.table);
+                if (!tables.length) return;
+                const row = findRowByDataIndex(tables, op.row);
+                if (row && !row.querySelector('th')) {
+                    row.remove();
+                }
+            });
+
+            const keptOps = [];
+            tableOps.forEach(function (op) {
+                if (!op || op.op !== 'insert') {
+                    if (op && op.op === 'delete') keptOps.push(op);
+                    return;
+                }
+                if (op._rowEl && document.contains(op._rowEl)) {
+                    keptOps.push(op);
+                    return;
+                }
+
+                const tables = findPreviewTablesByIndex(op.table);
+                if (!tables.length) {
+                    keptOps.push(op);
+                    return;
+                }
+
+                // Skip when Word preview already has this row (baked after pre-approval).
+                let already = false;
+                tables.forEach(function (table) {
+                    Array.from(table.rows || []).forEach(function (tr) {
+                        if (already || tr.querySelector('th')) return;
+                        if (rowMatchesValues(tr, op.values || [])) {
+                            already = true;
+                        }
+                    });
+                });
+                if (already) {
+                    // Drop stale insert — content is already in the template.
+                    return;
+                }
+
+                let afterRowEl = findRowByDataIndex(tables, op.after_row);
+                let hostTable = afterRowEl
+                    ? (afterRowEl.closest('table') || tables[0])
+                    : tables[tables.length - 1];
+                if (!afterRowEl) {
+                    const dataRows = Array.from(hostTable.rows || []).filter(function (r) {
+                        return !r.querySelector('th');
+                    });
+                    afterRowEl = dataRows[dataRows.length - 1] || hostTable.rows[hostTable.rows.length - 1];
+                }
+                if (!afterRowEl) {
+                    keptOps.push(op);
+                    return;
+                }
+
+                shiftRowsAfter(op.table, op.after_row);
+
+                let templateRow = afterRowEl;
+                if (templateRow.querySelector('th') && templateRow.nextElementSibling) {
+                    templateRow = templateRow.nextElementSibling;
+                }
+                const newRow = templateRow.cloneNode(true);
+                newRow.classList.remove('docx-selected-row');
+                newRow.setAttribute('data-is-added-row', '1');
+                clearRowInputs(newRow);
+                newRow.querySelectorAll('td').forEach(function (td) {
+                    if (td.querySelector('input, textarea, select')) return;
+                    td.textContent = '';
+                    td.innerHTML = '<input type="text" class="docx-input" value="">';
+                    td.classList.add('editable');
+                });
+                assignRowLocations(newRow, op.table, op.after_row + 1);
+                applyValuesToRow(newRow, op.values || []);
+                afterRowEl.after(newRow);
+                op._rowEl = newRow;
+                keptOps.push(op);
+            });
+
+            tableOps = keptOps;
+            syncTableOpsInput();
+            dedupeIdenticalAddedRows();
+            if (typeof window.scheduleDocxPaginate === 'function') {
+                window.scheduleDocxPaginate();
+            }
+        }
+
         window.syncDocxTableOps = syncTableOpsInput;
+        window.replayDocxTableOps = replayDraftTableOps;
+
+        // Restore Add/Delete rows from last draft before the user edits further.
+        replayDraftTableOps();
 
         // Keep tableOps continuously synced as user edits cells
         document.addEventListener('input', function (e) {
@@ -4151,6 +5186,9 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const collectDraftFormData = function () {
+        if (typeof window.syncDocxTableOps === 'function') {
+            window.syncDocxTableOps({ quiet: true });
+        }
         const fd = new FormData(form);
         fd.delete('password');
         // Empty file inputs must not be posted. A chosen file is part of the draft.
@@ -4160,7 +5198,21 @@ document.addEventListener('DOMContentLoaded', function () {
                 fd.delete(input.name);
             }
         });
-        return fd;
+        // Pagination may clone header inputs; keep last value per fields[...] key.
+        const seen = {};
+        const cleaned = new FormData();
+        fd.forEach(function (value, key) {
+            if (key === 'password') return;
+            if (typeof key === 'string' && key.indexOf('fields[') === 0) {
+                seen[key] = value;
+                return;
+            }
+            cleaned.append(key, value);
+        });
+        Object.keys(seen).forEach(function (key) {
+            cleaned.append(key, seen[key]);
+        });
+        return cleaned;
     };
 
     const paintSavedAttachment = function (loc, info) {
@@ -4185,6 +5237,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const saveDraftNow = function (opts) {
         opts = opts || {};
+        const silent = opts.silent !== false; // autosave default: silent (no TOC reflow)
         if ((requalFillLocked && !isPreApprovalMode) || !form || finalSubmitting) {
             return Promise.resolve(false);
         }
@@ -4193,17 +5246,36 @@ document.addEventListener('DOMContentLoaded', function () {
             draftDirty = true;
             return Promise.resolve(false);
         }
-        // TOC page numbers must match the final A4 layout before save/approval.
-        if (typeof window.prepareDocxTocForSave === 'function') {
-            window.prepareDocxTocForSave();
+        // Heavy TOC/paginate only on explicit save/submit — never on every autosave.
+        // Running it here jumped the viewport to page 1 and re-fired draft in a loop.
+        if (!silent) {
+            try {
+                if (typeof window.prepareDocxTocForSave === 'function') {
+                    window.docxWithPreservedScroll
+                        ? window.docxWithPreservedScroll(window.prepareDocxTocForSave)
+                        : window.prepareDocxTocForSave();
+                }
+            } catch (tocErr) {
+                console.warn('DOCX TOC prepare skipped during draft save', tocErr);
+            }
         }
         draftSaving = true;
         draftDirty = false;
-        if (!opts.silent) {
-            setDraftStatus('<i class="fas fa-spinner fa-spin mr-1"></i> Saving draft…', 'saving');
-        }
+        setDraftStatus('<i class="fas fa-spinner fa-spin mr-1"></i> Saving draft…', 'saving');
         if (btnSaveDraft) {
             btnSaveDraft.disabled = true;
+        }
+
+        let body;
+        try {
+            body = collectDraftFormData();
+        } catch (collectErr) {
+            console.warn('DOCX draft FormData collect failed', collectErr);
+            draftSaving = false;
+            draftDirty = true;
+            setDraftStatus('<i class="fas fa-exclamation-triangle mr-1"></i> Draft could not be collected.', 'danger');
+            if (btnSaveDraft) btnSaveDraft.disabled = false;
+            return Promise.resolve(false);
         }
 
         return fetch(draftSaveUrl, {
@@ -4214,7 +5286,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 'X-CSRF-TOKEN': (form.querySelector('input[name="_token"]') || {}).value || '',
             },
             credentials: 'same-origin',
-            body: collectDraftFormData(),
+            body: body,
             keepalive: !!opts.keepalive,
         })
             .then(function (response) {
@@ -4257,58 +5329,86 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
                 if (draftPending && !finalSubmitting) {
                     draftPending = false;
-                    saveDraftNow();
+                    // Coalesce rapid keystroke queue into one follow-up save.
+                    setTimeout(function () {
+                        if (!finalSubmitting) saveDraftNow({ silent: true });
+                    }, 400);
                 }
             });
     };
 
     const scheduleDraftSave = function () {
         draftDirty = true;
+        // Don't stampede /draft while Add Row is mutating the DOM.
+        if (window.docxAddRowBusy) {
+            return;
+        }
         if (draftTimer) {
             clearTimeout(draftTimer);
         }
+        // Longer debounce — date pickers / typing were flooding /draft and
+        // making Add Row clicks feel ignored during saves.
         draftTimer = setTimeout(function () {
-            saveDraftNow();
-        }, 1500);
+            if (window.docxAddRowBusy) {
+                scheduleDraftSave();
+                return;
+            }
+            saveDraftNow({ silent: true });
+        }, 2200);
     };
     window.docxScheduleDraftSave = scheduleDraftSave;
     window.docxSaveDraftNow = saveDraftNow;
 
+    // Capture edits on preview fields even if pagination moves nodes; always autosave.
+    const draftInputTarget = function (t) {
+        if (!t) return false;
+        if (t.name === 'password') return false;
+        // Programmatic TOC page sync must not start another draft+paginate loop.
+        if (t.classList && (t.classList.contains('docx-toc-page-input') || t.classList.contains('docx-toc-title-input'))) {
+            return false;
+        }
+        if (window.docxTocSyncing) return false;
+        if (t.closest && !t.closest('#docxFillForm, .docx-preview-wrapper')) return false;
+        return true;
+    };
+    document.addEventListener('input', function (e) {
+        const t = e.target;
+        if (!draftInputTarget(t) || (t.type === 'file')) return;
+        scheduleDraftSave();
+    });
+    document.addEventListener('change', function (e) {
+        const t = e.target;
+        if (!draftInputTarget(t)) return;
+        if (t.type === 'file') {
+            if (!t.files || !t.files.length) return;
+            if (draftTimer) clearTimeout(draftTimer);
+            saveDraftNow({ silent: true });
+            return;
+        }
+        scheduleDraftSave();
+    });
+
     if (form) {
-        form.addEventListener('input', function (e) {
-            const t = e.target;
-            if (!t || t.name === 'password' || (t.type === 'file')) return;
-            scheduleDraftSave();
-        });
-        form.addEventListener('change', function (e) {
-            const t = e.target;
-            if (!t || t.name === 'password') return;
-            if (t.type === 'file') {
-                if (!t.files || !t.files.length) return;
-                if (draftTimer) {
-                    clearTimeout(draftTimer);
-                }
-                saveDraftNow();
-                return;
-            }
-            scheduleDraftSave();
-        });
         form.addEventListener('submit', function () {
             if (draftTimer) {
                 clearTimeout(draftTimer);
             }
             // Freeze TOC to the same pages the 2nd approver will see.
-            if (typeof window.prepareDocxTocForSave === 'function') {
-                window.prepareDocxTocForSave();
-            }
+            try {
+                if (typeof window.prepareDocxTocForSave === 'function') {
+                    window.prepareDocxTocForSave();
+                }
+            } catch (tocErr) {}
             if (!form.classList.contains('esign-required')) {
                 finalSubmitting = true;
             }
         });
         form.addEventListener('esign:confirmed', function () {
-            if (typeof window.prepareDocxTocForSave === 'function') {
-                window.prepareDocxTocForSave();
-            }
+            try {
+                if (typeof window.prepareDocxTocForSave === 'function') {
+                    window.prepareDocxTocForSave();
+                }
+            } catch (tocErr) {}
             finalSubmitting = true;
             if (draftTimer) {
                 clearTimeout(draftTimer);
@@ -4321,7 +5421,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (draftTimer) {
                 clearTimeout(draftTimer);
             }
-            saveDraftNow();
+            saveDraftNow({ silent: false });
         });
     }
 
@@ -4749,14 +5849,26 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
                 syncTocPageNumbers(true);
             };
-            runPass();
-            // Force layout, then recompute — fixes 15.0 showing 16 while content is on 17.
-            const preview = document.querySelector('.docx-preview-wrapper, .docx-preview');
-            if (preview) {
-                void preview.offsetHeight;
+            const exec = function () {
+                window.docxTocSyncing = true;
+                try {
+                    runPass();
+                    // Force layout, then recompute — fixes 15.0 showing 16 while content is on 17.
+                    const preview = document.querySelector('.docx-preview-wrapper, .docx-preview');
+                    if (preview) {
+                        void preview.offsetHeight;
+                    }
+                    runPass();
+                } finally {
+                    window.docxTocSyncing = false;
+                }
+                return true;
+            };
+            if (typeof window.docxWithPreservedScroll === 'function') {
+                window.docxWithPreservedScroll(exec);
+                return true;
             }
-            runPass();
-            return true;
+            return exec();
         };
 
         // Attach to sync button clicks
@@ -4778,45 +5890,58 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
 
+        let initialTocSynced = false;
         function scheduleTocPrepare(delay) {
             setTimeout(function () {
-                if (typeof window.prepareDocxTocForSave === 'function') {
-                    window.prepareDocxTocForSave();
+                if (initialTocSynced) return;
+                initialTocSynced = true;
+                if (typeof window.docxWithPreservedScroll === 'function') {
+                    window.docxWithPreservedScroll(function () {
+                        // Initial layout once, then stay put while the user edits.
+                        if (typeof window.scheduleDocxPaginate === 'function') {
+                            window.scheduleDocxPaginate();
+                        } else {
+                            syncTocPageNumbers(true);
+                        }
+                    });
+                } else if (typeof window.scheduleDocxPaginate === 'function') {
+                    window.scheduleDocxPaginate();
                 } else {
                     syncTocPageNumbers(true);
                 }
             }, delay);
         }
 
-        // Auto-run after layout/pagination is complete (and again after selects settle).
+        // One quiet layout pass after first paint (not a double prepareDocxTocForSave).
         window.addEventListener('DOMContentLoaded', function () {
             if (typeof window.dedupeIdenticalAddedRows === 'function') {
                 window.dedupeIdenticalAddedRows();
             }
-            scheduleTocPrepare(1200);
-            scheduleTocPrepare(2200);
+            scheduleTocPrepare(1600);
         });
 
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
             if (typeof window.dedupeIdenticalAddedRows === 'function') {
                 window.dedupeIdenticalAddedRows();
             }
-            scheduleTocPrepare(1200);
-            scheduleTocPrepare(2200);
+            scheduleTocPrepare(1600);
         }
 
-        // Optional debounce auto-sync when dynamic textareas or tables grow
+        // While typing: only refresh TOC page numbers (silent). Never paginate —
+        // full layout during edit was redirecting requal users to the top page.
         let tocDebounce = null;
         document.addEventListener('input', function (e) {
             if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.classList.contains('docx-para-content'))) {
                 clearTimeout(tocDebounce);
                 tocDebounce = setTimeout(function () {
-                    if (typeof window.paginateDocxPreview === 'function') {
-                        window.paginateDocxPreview();
+                    if (typeof window.docxWithPreservedScroll === 'function') {
+                        window.docxWithPreservedScroll(function () {
+                            syncTocPageNumbers(true);
+                        });
                     } else {
                         syncTocPageNumbers(true);
                     }
-                }, 1500);
+                }, 2500);
             }
         });
     })();
@@ -4975,11 +6100,8 @@ document.addEventListener('DOMContentLoaded', function () {
         const selectJump = document.getElementById('docxSelectPageJump');
         const btnPrev = document.getElementById('btnDocxPrevPage');
         const btnNext = document.getElementById('btnDocxNextPage');
-        if (typeof window.scheduleDocxPaginate === 'function') {
-            window.scheduleDocxPaginate();
-        } else if (typeof window.paginateDocxPreview === 'function') {
-            window.paginateDocxPreview();
-        }
+        // Do not paginate from the navigator boot path — that double layout was
+        // jumping the viewport to page 1 while the user typed on later pages.
         const pageList = function () {
             if (typeof previewA4Pages === 'function') {
                 return previewA4Pages();
@@ -5053,11 +6175,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }, { passive: true });
 
         setTimeout(function () {
-            if (typeof window.scheduleDocxPaginate === 'function') {
-                window.scheduleDocxPaginate();
-            } else if (typeof window.paginateDocxPreview === 'function') {
-                window.paginateDocxPreview();
-            }
             if (typeof window.updateAllPageNumbers === 'function') {
                 window.updateAllPageNumbers();
             }

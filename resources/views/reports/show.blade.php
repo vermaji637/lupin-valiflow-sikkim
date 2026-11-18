@@ -1306,9 +1306,9 @@ document.addEventListener('DOMContentLoaded', function () {
             created = true;
         }
         const marker = row.nextSibling;
-        const hostHeader = lastHeaderRow(target);
-        if (hostHeader) hostHeader.after(row);
-        else target.appendChild(row);
+        // Always append at the end of the host table. Prepending after the header
+        // reverses Sl.No order across spill→pull cycles (11,10,9…).
+        target.appendChild(row);
         if (pageIsOverfull(body) || pageFreeSpace(body) < -4) {
             if (marker) sourceTable.insertBefore(row, marker);
             else sourceTable.appendChild(row);

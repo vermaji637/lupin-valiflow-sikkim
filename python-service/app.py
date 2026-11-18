@@ -25,6 +25,8 @@ from doc_parser import (
     infer_field_widget,
     is_report_number_label,
     is_date_field_label,
+    is_signature_date_column,
+    _is_junk_signature_placeholder,
     element_has_drawing_checkbox,
     is_two_col_header_row,
     is_two_col_grid_table,
@@ -523,6 +525,53 @@ async def preview_document(
         # Comments / Severity S / Revision No. fillable when PHP unlocks them.
         is_requal_col0_lock = mode in ("pre_approval", "requalification")
 
+        def _is_sr_no_field(field: dict) -> bool:
+            """True for Sl./Sr. No. data cells — editable in pre-approval."""
+            ftype = str(field.get("type") or "").lower()
+            flabel = str(field.get("label") or "").lower().strip()
+            floc = str(field.get("location") or "")
+            if ftype == "table_sl_no":
+                return True
+            if re.match(r"^(sr\.?\s*no\.?|s\.?\s*no\.?|sl\.?\s*no\.?|#)\b", flabel):
+                return True
+            if re.search(r"_row_[1-9]\d*_col_0$", floc) and field.get("auto_serial") not in (
+                None,
+                "",
+            ):
+                return True
+            return False
+
+        def _is_qualification_history_template_lock(field: dict, stored: dict | None = None) -> bool:
+            """
+            Word Qualification History:
+            - Lock Initial Qualification (PQ) / Periodic labels (col_0)
+            - Lock true sub-header cells whose value is Report No. / Approval Date
+            - Initial 2nd sub-row + Periodic detail blanks stay fillable
+            """
+            stored = stored or {}
+            val = str(stored.get("value") or field.get("value") or "").strip()
+            loc = str(field.get("location") or stored.get("location") or "")
+            if re.match(r"(?i)^initial\s+qualification\b", val):
+                return True
+            if re.match(r"(?i)^periodic\s+requalification\b", val):
+                return bool(loc.endswith("_col_0"))
+            # Real sub-header text cells from Word.
+            if re.match(r"(?i)^report\s*no\.?$", val) or re.match(r"(?i)^approval\s*date$", val):
+                return True
+            return False
+
+        # Seed Initial Qualification row markers from stored + fresh so sibling cells lock.
+        for _src in (stored_by_loc.values(), fresh):
+            for _f in _src:
+                if not isinstance(_f, dict):
+                    continue
+                _loc = str(_f.get("location") or "")
+                _val = str(_f.get("value") or "").strip()
+                if re.match(r"(?i)^initial\s+qualification\b", _val):
+                    _m = re.match(r"^(table_\d+_row_\d+)_col_", _loc)
+                    if _m and f"{_m.group(1)}_col_0" not in stored_by_loc:
+                        stored_by_loc[f"{_m.group(1)}_col_0"] = {"value": _val, "location": f"{_m.group(1)}_col_0"}
+
         fields = []
         for ff in fresh:
             loc = ff.get("location")
@@ -532,8 +581,11 @@ async def preview_document(
                 any(k in lbl_lower for k in ("methodology", "report approval"))
                 or any(k in val_lower for k in ("methodology", "report approval"))
             )
+            # Sr./Sl. No. col_0 must NOT be treated as a locked label.
             is_col_0_label = ff.get("type") == "table_2col_label" or (
-                is_requal_col0_lock and bool(loc and loc.endswith("_col_0"))
+                is_requal_col0_lock
+                and bool(loc and loc.endswith("_col_0"))
+                and not _is_sr_no_field(ff)
             )
 
             if loc in stored_by_loc:
@@ -544,15 +596,101 @@ async def preview_document(
                 parse_widget = ff.get("widget")
                 parse_sig_date_loc = ff.get("signature_date_location")
                 if sv.get("value") not in (None, ""):
-                    ff["value"] = sv["value"]
+                    stored_val = sv.get("value")
+                    # Never re-inject template junk (lone "S") into Signature & Date.
+                    if _is_signature_date_field(ff) and _is_junk_signature_placeholder(
+                        str(stored_val or "")
+                    ):
+                        ff["value"] = ""
+                        ff["stamp_eligible"] = True
+                        ff["prefilled"] = False
+                    else:
+                        ff["value"] = stored_val
                 if is_heading_or_fixed or is_col_0_label:
                     ff["locked"] = True
                 # In pre-approval mode, unlock content fields (except row_0 headers and col_0 labels)
                 elif is_pre_approval_mode:
-                    if loc and loc.endswith("_row_0_col_1") and ff.get("type") == "table_2col":
+                    if _is_qualification_history_template_lock(ff, sv):
+                        # Word layout: PQ label locked; its Report No./Approval Date
+                        # DATA cells stay blank (never date pickers / never label text).
+                        ff["locked"] = True
+                        ff["widget"] = "text"
+                        ff["prefilled"] = True
+                        ff["draft_editable"] = False
+                        ff["user_filled"] = False
+                        loc_l = str(loc or "")
+                        val_now = str(ff.get("value") or "").strip()
+                        # Sub-header cells keep their Report No. / Approval Date text.
+                        if re.match(r"(?i)^report\s*no\.?$", val_now) or re.match(
+                            r"(?i)^approval\s*date$", val_now
+                        ):
+                            pass
+                        elif re.match(r"(?i)^initial\s+qualification\b", val_now):
+                            pass
+                        elif re.search(r"_col_[12]$", loc_l):
+                            # Initial data-row blanks under the sub-headers.
+                            ff["value"] = ""
+                    elif loc and loc.endswith("_row_0_col_1") and ff.get("type") == "table_2col":
                         ff["locked"] = False
-                    elif ff.get("type") not in ("approval_stamp", "table_sl_no") and not (loc and loc.endswith("_row_0")):
+                    elif _is_sr_no_field(ff):
+                        # Sr. No. always editable + show default during pre-approval.
                         ff["locked"] = False
+                        ff["type"] = "table_multicol"
+                        ff["widget"] = "text"
+                        ff["draft_editable"] = True
+                        ff["user_filled"] = True
+                        ff["prefilled"] = False
+                        if not str(ff.get("value") or "").strip() and ff.get("auto_serial") not in (
+                            None,
+                            "",
+                        ):
+                            try:
+                                ff["value"] = f"{int(ff['auto_serial'])}."
+                            except (TypeError, ValueError):
+                                pass
+                    elif (
+                        sv.get("locked") in (True, 1, "1", "true", "yes")
+                        and sv.get("draft_editable") is False
+                        and sv.get("user_filled") is not True
+                    ):
+                        # Honor explicit Laravel template locks during pre-approval.
+                        ff["locked"] = True
+                        if sv.get("widget"):
+                            ff["widget"] = sv.get("widget")
+                    elif ff.get("type") not in ("approval_stamp",) and not (
+                        loc and loc.endswith("_row_0")
+                    ):
+                        ff["locked"] = False
+                        # Qualification History Periodic row: blank text cells, not date pickers.
+                        m_per = re.match(r"^(table_\d+_row_\d+)_col_([12])$", str(loc or ""))
+                        if m_per:
+                            col0 = stored_by_loc.get(f"{m_per.group(1)}_col_0") or {}
+                            if not re.match(
+                                r"(?i)^periodic\s+requalification\b",
+                                str(col0.get("value") or "").strip(),
+                            ):
+                                # Also check fresh/sibling value already on this row.
+                                col0 = next(
+                                    (
+                                        x
+                                        for x in fresh
+                                        if isinstance(x, dict)
+                                        and str(x.get("location") or "") == f"{m_per.group(1)}_col_0"
+                                    ),
+                                    col0,
+                                )
+                            if re.match(
+                                r"(?i)^periodic\s+requalification\b",
+                                str(col0.get("value") or "").strip(),
+                            ):
+                                _pcol = int(m_per.group(2))
+                                ff["widget"] = "date" if _pcol == 2 else "text"
+                                ff["label"] = "Approval Date" if _pcol == 2 else ""
+                                if re.match(
+                                    r"(?i)^(report\s*no\.?|approval\s*date)$",
+                                    str(ff.get("value") or "").strip(),
+                                ):
+                                    ff["value"] = ""
                     else:
                         ff["locked"] = sv.get("locked", ff.get("locked", True))
                 else:
@@ -690,10 +828,13 @@ async def preview_document(
                     ff["locked"] = True
                     if parse_role:
                         ff["approver_role"] = parse_role
-                # Att07 component serials: keep fresh auto_serial / locked table_sl_no.
-                if parse_type == "table_sl_no" or ff.get("auto_serial") not in (None, ""):
-                    ff["type"] = "table_sl_no"
-                    ff["locked"] = True
+                # Sr. No. / auto_serial: show default number; editable in pre-approval / edit.
+                # Only keep locked display in readonly mode (approval show / PDF-style preview).
+                if (
+                    parse_type == "table_sl_no"
+                    or ff.get("auto_serial") not in (None, "")
+                    or _is_sr_no_field(ff)
+                ):
                     if not str(ff.get("value") or "").strip():
                         auto_serial = ff.get("auto_serial")
                         if auto_serial not in (None, ""):
@@ -708,6 +849,16 @@ async def preview_document(
                         "pneumatic components",
                     }:
                         ff["label"] = "Sr. No."
+                    if mode == "readonly":
+                        ff["type"] = "table_sl_no"
+                        ff["locked"] = True
+                    else:
+                        ff["type"] = "table_multicol"
+                        ff["widget"] = "text"
+                        ff["locked"] = False
+                        ff["draft_editable"] = True
+                        ff["user_filled"] = True
+                        ff["prefilled"] = False
                 # Empty Sr. No. cells stay fillable — do not keep legacy locked table_sl_no.
                 elif (
                     parse_type == "table_multicol"
@@ -741,18 +892,220 @@ async def preview_document(
                         ):
                             ff["locked"] = True
                 elif is_pre_approval_mode:
-                    if loc and loc.endswith("_row_0_col_1") and ff.get("type") == "table_2col":
+                    if _is_qualification_history_template_lock(ff, None):
+                        ff["locked"] = True
+                        ff["widget"] = "text"
+                        ff["prefilled"] = True
+                        ff["draft_editable"] = False
+                        loc_l = str(loc or "")
+                        val_now = str(ff.get("value") or "").strip()
+                        if re.search(r"_col_[12]$", loc_l) and not (
+                            re.match(r"(?i)^report\s*no\.?$", val_now)
+                            or re.match(r"(?i)^approval\s*date$", val_now)
+                        ):
+                            ff["value"] = ""
+                    elif loc and loc.endswith("_row_0_col_1") and ff.get("type") == "table_2col":
                         ff["locked"] = False
-                    elif ff.get("type") not in ("approval_stamp", "table_sl_no") and not (loc and loc.endswith("_row_0")):
+                    elif _is_sr_no_field(ff):
+                        ff["locked"] = False
+                        ff["type"] = "table_multicol"
+                        ff["widget"] = "text"
+                        ff["draft_editable"] = True
+                        if not str(ff.get("value") or "").strip() and ff.get("auto_serial") not in (
+                            None,
+                            "",
+                        ):
+                            try:
+                                ff["value"] = f"{int(ff['auto_serial'])}."
+                            except (TypeError, ValueError):
+                                pass
+                    elif ff.get("type") not in ("approval_stamp",) and not (
+                        loc and loc.endswith("_row_0")
+                    ):
                         ff["locked"] = False
                 else:
-                    if ff.get("type") in ("paragraph_content", "table_2col_label") or (
-                        is_requal_col0_lock and loc and loc.endswith("_col_0")
+                    if _is_sr_no_field(ff) and mode != "readonly":
+                        ff["locked"] = False
+                        ff["type"] = "table_multicol"
+                        ff["widget"] = "text"
+                    elif ff.get("type") in ("paragraph_content", "table_2col_label") or (
+                        is_requal_col0_lock and loc and loc.endswith("_col_0") and not _is_sr_no_field(ff)
                     ):
                         ff["locked"] = True
                     elif ff.get("type") == "table_2col" or (loc and (loc.endswith("_col_1") or re.match(r"^table_\d+_row_\d+$", loc))):
                         ff["locked"] = False
             fields.append(ff)
+
+        # Final pass: Qualification History must match Word even if earlier
+        # auto_serial / prefilled / meta-merge re-unlocked cells.
+        if is_pre_approval_mode:
+            _qual_initial_rows: set[str] = set()
+            _qual_periodic_rows: set[str] = set()
+            _qual_subheader_rows: set[str] = set()
+            _qual_by_row: dict[str, dict[int, dict]] = {}
+            for _f in fields:
+                if not isinstance(_f, dict):
+                    continue
+                _loc = str(_f.get("location") or "")
+                _m = re.match(r"^(table_\d+_row_\d+)_col_(\d+)$", _loc)
+                if not _m:
+                    continue
+                _row, _col = _m.group(1), int(_m.group(2))
+                _qual_by_row.setdefault(_row, {})[_col] = _f
+                _val = str(_f.get("value") or "").strip()
+                if re.match(r"(?i)^initial\s+qualification\b", _val):
+                    _qual_initial_rows.add(_row)
+                if re.match(r"(?i)^periodic\s+requalification\b", _val):
+                    _qual_periodic_rows.add(_row)
+            for _row, _cols in _qual_by_row.items():
+                _c1 = str((_cols.get(1) or {}).get("value") or "").strip()
+                _c2 = str((_cols.get(2) or {}).get("value") or "").strip()
+                if re.match(r"(?i)^report\s*no\.?$", _c1) and re.match(
+                    r"(?i)^approval\s*date$", _c2
+                ):
+                    _qual_subheader_rows.add(_row)
+            for _f in fields:
+                if not isinstance(_f, dict):
+                    continue
+                _loc = str(_f.get("location") or "")
+                _m = re.match(r"^(table_\d+_row_\d+)_col_(\d+)$", _loc)
+                if not _m:
+                    continue
+                _row, _col = _m.group(1), int(_m.group(2))
+                _val = str(_f.get("value") or "").strip()
+                if _row in _qual_subheader_rows:
+                    _f["locked"] = True
+                    _f["widget"] = "text"
+                    _f["draft_editable"] = False
+                    _f["user_filled"] = False
+                    _f["prefilled"] = True
+                    continue
+                if re.match(r"(?i)^initial\s+qualification\b", _val) or re.match(
+                    r"(?i)^periodic\s+requalification\b", _val
+                ):
+                    _f["locked"] = True
+                    _f["widget"] = "text"
+                    _f["draft_editable"] = False
+                    _f["user_filled"] = False
+                    _f["prefilled"] = True
+                    continue
+                # Initial 2nd sub-row + Periodic details: fillable (text / date).
+                if (
+                    (
+                        (_row in _qual_initial_rows and _row not in _qual_subheader_rows)
+                        or _row in _qual_periodic_rows
+                    )
+                    and _col > 0
+                ):
+                    if re.match(r"(?i)^(report\s*no\.?|approval\s*date)$", _val):
+                        _f["value"] = ""
+                    _f["locked"] = False
+                    _f["widget"] = "date" if _col == 2 else "text"
+                    _f["label"] = "Approval Date" if _col == 2 else ""
+                    _f["draft_editable"] = True
+                    _f["user_filled"] = True
+                    _f["prefilled"] = False
+
+            # Ensure Qualification History locations from Laravel exist in the
+            # field list even when the fresh parse omitted template-static cells.
+            _have_locs = {
+                str(f.get("location") or "")
+                for f in fields
+                if isinstance(f, dict)
+            }
+            for _sv in stored_by_loc.values():
+                if not isinstance(_sv, dict):
+                    continue
+                _sloc = str(_sv.get("location") or "")
+                if not re.match(r"^table_\d+_row_\d+_col_\d+$", _sloc):
+                    continue
+                _sval = str(_sv.get("value") or "").strip()
+                _is_qual_seed = bool(
+                    re.match(r"(?i)^initial\s+qualification\b", _sval)
+                    or re.match(r"(?i)^periodic\s+requalification\b", _sval)
+                    or re.match(r"(?i)^report\s*no\.?$", _sval)
+                    or re.match(r"(?i)^approval\s*date$", _sval)
+                    or (
+                        _sv.get("draft_editable") is False
+                        and _sv.get("locked") in (True, 1, "1", "true", "yes")
+                        and re.search(r"_col_[12]$", _sloc)
+                    )
+                )
+                if not _is_qual_seed or _sloc in _have_locs:
+                    continue
+                _seed = dict(_sv)
+                _seed.setdefault("type", "table_multicol")
+                _seed.setdefault("widget", "text")
+                fields.append(_seed)
+                _have_locs.add(_sloc)
+
+            # Re-run lock rules after seeding any missing Qual History cells.
+            _qual_initial_rows = set()
+            _qual_periodic_rows = set()
+            _qual_subheader_rows = set()
+            _qual_by_row = {}
+            for _f in fields:
+                if not isinstance(_f, dict):
+                    continue
+                _loc = str(_f.get("location") or "")
+                _m = re.match(r"^(table_\d+_row_\d+)_col_(\d+)$", _loc)
+                if not _m:
+                    continue
+                _row, _col = _m.group(1), int(_m.group(2))
+                _qual_by_row.setdefault(_row, {})[_col] = _f
+                _val = str(_f.get("value") or "").strip()
+                if re.match(r"(?i)^initial\s+qualification\b", _val):
+                    _qual_initial_rows.add(_row)
+                if re.match(r"(?i)^periodic\s+requalification\b", _val):
+                    _qual_periodic_rows.add(_row)
+            for _row, _cols in _qual_by_row.items():
+                _c1 = str((_cols.get(1) or {}).get("value") or "").strip()
+                _c2 = str((_cols.get(2) or {}).get("value") or "").strip()
+                if re.match(r"(?i)^report\s*no\.?$", _c1) and re.match(
+                    r"(?i)^approval\s*date$", _c2
+                ):
+                    _qual_subheader_rows.add(_row)
+            for _f in fields:
+                if not isinstance(_f, dict):
+                    continue
+                _loc = str(_f.get("location") or "")
+                _m = re.match(r"^(table_\d+_row_\d+)_col_(\d+)$", _loc)
+                if not _m:
+                    continue
+                _row, _col = _m.group(1), int(_m.group(2))
+                _val = str(_f.get("value") or "").strip()
+                if _row in _qual_subheader_rows:
+                    _f["locked"] = True
+                    _f["widget"] = "text"
+                    _f["draft_editable"] = False
+                    _f["user_filled"] = False
+                    _f["prefilled"] = True
+                    continue
+                if re.match(r"(?i)^initial\s+qualification\b", _val) or re.match(
+                    r"(?i)^periodic\s+requalification\b", _val
+                ):
+                    _f["locked"] = True
+                    _f["widget"] = "text"
+                    _f["draft_editable"] = False
+                    _f["user_filled"] = False
+                    _f["prefilled"] = True
+                    continue
+                # Initial 2nd sub-row + Periodic details: fillable (text / date).
+                if (
+                    (
+                        (_row in _qual_initial_rows and _row not in _qual_subheader_rows)
+                        or _row in _qual_periodic_rows
+                    )
+                    and _col > 0
+                ):
+                    if re.match(r"(?i)^(report\s*no\.?|approval\s*date)$", _val):
+                        _f["value"] = ""
+                    _f["locked"] = False
+                    _f["widget"] = "date" if _col == 2 else "text"
+                    _f["label"] = "Approval Date" if _col == 2 else ""
+                    _f["draft_editable"] = True
+                    _f["user_filled"] = True
+                    _f["prefilled"] = False
 
         html = build_fill_html(
             template_path,
@@ -799,6 +1152,38 @@ def _inline_cell_style(cell_style: str = "", *, readonly: bool = False, value_ce
 def _is_readonly_mode(mode: str) -> bool:
     # Preview mode "readonly" shows filled values without editable inputs.
     return (mode or "edit").strip().lower() == "readonly"
+
+
+def _is_signature_date_field(field: dict | None) -> bool:
+    """True for Signature & Date / signature stamp columns in approval tables."""
+    if not field:
+        return False
+    label = str(field.get("label") or "")
+    ftype = str(field.get("type") or "")
+    if ftype.startswith("approval_stamp"):
+        return True
+    if is_signature_date_column(label):
+        return True
+    low = label.lower()
+    return "signature" in low and "date" in low
+
+
+def _clean_signature_cell_value(field: dict | None, value: str, fallback_text: str = "") -> str:
+    """
+    Drop template leftovers like a lone 'S' from Signature & Date cells.
+    Parse clears them, but render used to restore DOCX cell text via `value or text`.
+    """
+    raw = "" if value is None else str(value).strip()
+    if not raw and fallback_text:
+        raw = str(fallback_text).strip()
+    if not raw:
+        return ""
+    if _is_signature_date_field(field) and _is_junk_signature_placeholder(raw):
+        return ""
+    if not field and _is_junk_signature_placeholder(raw) and len(raw) <= 2:
+        # Bare cell text with no field metadata — still drop lone S/XX junk.
+        return ""
+    return raw
 
 
 # Convert ISO yyyy-mm-dd dates to dd-mm-yyyy for readonly preview display.
@@ -921,6 +1306,10 @@ class _WordNumberingResolver:
     """
     Resolve Word OOXML <w:numPr> section numbers and bullets (e.g. 1.0, 2.0, 8.1, 9.1)
     by interpreting word/numbering.xml (abstractNum, numStyleLink, lvlOverride) and styles.
+
+    Decimal/outline counters are keyed by abstractNumId so .doc→.docx conversions that
+    emit a fresh numId (startOverride=1) per heading still sequence 1.0, 2.0, ….
+    Frozen lvlText literals like '1.0' (no %1) are normalized before expansion.
     """
 
     def __init__(self, doc):
@@ -1096,6 +1485,35 @@ class _WordNumberingResolver:
             return None, 0
         return nid, (0 if ilvl is None else ilvl)
 
+    @staticmethod
+    def _normalize_lvl_text(lvl_text: str, ilvl: int) -> str:
+        """
+        Ensure lvlText has a %N placeholder so counters can expand.
+        Broken .doc→.docx conversions often freeze literals like '1.0' with no %1.
+        """
+        text = (lvl_text or "").strip()
+        if not text:
+            return f"%{ilvl + 1}."
+        if "%" in text:
+            return text
+        # Frozen "1.0" / "1." / "8.1" → "%1.0" / "%1." / "%1.1" (leading digits only)
+        if re.fullmatch(r"\d+(?:\.\d+)*\.?", text):
+            return re.sub(r"^\d+", f"%{ilvl + 1}", text, count=1)
+        return text
+
+    def _counter_key(self, nid: str, fmt: str) -> str:
+        """
+        Share sequence across numIds that point at the same abstractNum.
+        .doc conversion often gives each heading its own numId + startOverride=1,
+        which otherwise restarts every section at 1.0. Bullets stay per-numId.
+        """
+        if fmt == "bullet":
+            return f"n:{nid}"
+        aid = (self.nums.get(nid) or {}).get("abstract_id")
+        if aid is not None:
+            return f"a:{aid}"
+        return f"n:{nid}"
+
     def prefix_for_p(self, p_element) -> tuple[str, bool]:
         """Advance numbering state for p_element once and cache (prefix, is_bullet)."""
         if p_element is None or not self.nums:
@@ -1111,7 +1529,27 @@ class _WordNumberingResolver:
             self._p_cache[p_element] = ("", False)
             return "", False
 
-        state = self.counters.setdefault(nid, {})
+        fmt = lvl_spec.get("fmt", "decimal")
+        lvl_text = lvl_spec.get("text", "")
+        if fmt == "none":
+            self._p_cache[p_element] = ("", False)
+            return "", False
+        if fmt == "bullet":
+            # Advance/cache under per-numId key so bullet lists stay independent.
+            state = self.counters.setdefault(self._counter_key(nid, fmt), {})
+            if ilvl not in state:
+                state[ilvl] = int(lvl_spec.get("start", 1))
+            else:
+                state[ilvl] += 1
+            glyph = _BULLET_GLYPH_MAP.get(lvl_text, lvl_text or "•")
+            if glyph and ord(glyph[0]) >= 0xF000:
+                glyph = "•"
+            res = (glyph.strip(), True)
+            self._p_cache[p_element] = res
+            return res
+
+        # Decimal / outline section numbers (1.0, 2.0, …): share abstractNum counter.
+        state = self.counters.setdefault(self._counter_key(nid, fmt), {})
         for anc in range(0, ilvl):
             if anc not in state:
                 anc_spec = self._effective_level(nid, anc) or {}
@@ -1120,6 +1558,7 @@ class _WordNumberingResolver:
         if ilvl not in state:
             state[ilvl] = int(lvl_spec.get("start", 1))
         else:
+            # Continue sequence even when a new numId carries startOverride=1.
             state[ilvl] += 1
 
         for deeper in [k for k in state if k > ilvl]:
@@ -1127,22 +1566,7 @@ class _WordNumberingResolver:
             if deeper_spec.get("restart") != 0:
                 del state[deeper]
 
-        fmt = lvl_spec.get("fmt", "decimal")
-        lvl_text = lvl_spec.get("text", "")
-        if fmt == "none":
-            self._p_cache[p_element] = ("", False)
-            return "", False
-        if fmt == "bullet":
-            glyph = _BULLET_GLYPH_MAP.get(lvl_text, lvl_text or "•")
-            if glyph and ord(glyph[0]) >= 0xF000:
-                glyph = "•"
-            res = (glyph.strip(), True)
-            self._p_cache[p_element] = res
-            return res
-
-        if not lvl_text:
-            lvl_text = f"%{ilvl + 1}."
-
+        lvl_text = self._normalize_lvl_text(lvl_text, ilvl)
         is_lgl = bool(lvl_spec.get("is_lgl"))
 
         def _replace_marker(m):
@@ -1199,6 +1623,76 @@ def _para_text_from_element(p_element, exclude_textboxes: bool = False) -> str:
     return "".join(texts).strip()
 
 
+def _is_toc_title_text(text: str) -> bool:
+    """True for the lone TOC heading Word places before the TOC SDT."""
+    t = re.sub(r"\s+", " ", (text or "").strip())
+    t = re.sub(r"^[📋\s]+", "", t)
+    t = re.sub(r"[^\w\s]", "", t).strip().upper()
+    return t in {"TABLE OF CONTENTS", "TABLE OF CONTENT", "CONTENTS"}
+
+
+def _is_verification_pid_heading(text: str) -> bool:
+    """8.4 Verification with the current P & ID — Word leaves blank lines for notes."""
+    return bool(
+        re.search(
+            r"verification\s+with\s+the\s+current\s+p\s*&?\s*id",
+            text or "",
+            re.I,
+        )
+    )
+
+
+def _render_section_notes_textarea(
+    location: str,
+    field_map: dict,
+    mode: str = "edit",
+    placeholder: str = "Enter notes / observations",
+    rows: int = 3,
+) -> str:
+    """Editable body box under a locked section heading (e.g. 8.4 P&ID)."""
+    field = field_map.get(location) if field_map else None
+    val = ""
+    if field and field.get("value") is not None:
+        val = str(field.get("value") or "")
+    if _is_readonly_mode(mode):
+        display = _escape_html(val) if val.strip() else "&nbsp;"
+        return (
+            f'<div class="docx-para-edit-wrapper" data-field="{_escape_html(location)}">'
+            f'<div class="docx-para-content" style="min-height:48px;white-space:pre-wrap;">{display}</div></div>'
+        )
+    return (
+        f'<div class="docx-para-edit-wrapper" data-field="{_escape_html(location)}">'
+        f'<textarea name="fields[{_escape_html(location)}]" class="docx-input docx-para-content" '
+        f'rows="{rows}" placeholder="{_escape_html(placeholder)}" '
+        f'style="width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; '
+        f'line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #cbd5e1; '
+        f'border-radius:4px; background:#fffde7;">{_escape_html(val)}</textarea></div>'
+    )
+
+
+def _append_verification_pid_notes(
+    html_parts: list,
+    para_index: int | None,
+    para_text: str,
+    field_map: dict,
+    mode: str,
+) -> bool:
+    """Word leaves blank lines under 8.4 — expose a notes textarea there."""
+    if not _is_verification_pid_heading(para_text):
+        return False
+    loc = f"para_{para_index}_body" if para_index is not None else "para_verification_pid_body"
+    html_parts.append(
+        _render_section_notes_textarea(
+            loc,
+            field_map,
+            mode,
+            placeholder="Enter P & ID verification notes / observations",
+            rows=4,
+        )
+    )
+    return True
+
+
 def _parse_toc_entry_element(p_element) -> tuple[str, str]:
     """Extract clean title and page number from a Word TOC paragraph."""
     tokens = []
@@ -1209,7 +1703,7 @@ def _parse_toc_entry_element(p_element) -> tuple[str, str]:
         elif tag == "tab":
             tokens.append(" ")
     raw = "".join(tokens).strip()
-    if not raw or raw.lower() == "table of contents":
+    if not raw or _is_toc_title_text(raw):
         return "", ""
 
     # Match trailing page number (digits at end)
@@ -1276,6 +1770,13 @@ def _field_widget(field: dict | None) -> str:
         return "text"
     field_type = field.get("type", "")
     label = field.get("label", "")
+    # Honor explicit widget from Laravel (e.g. Qualification History blanks must
+    # stay text — never infer date from an "Approval Date" column label).
+    explicit = field.get("widget")
+    if explicit not in (None, ""):
+        if is_report_number_label(label) and str(explicit) == "date":
+            return "text"
+        return str(explicit)
     if field_type in (
         "table_multicol",
         "table_1col",
@@ -1288,9 +1789,6 @@ def _field_widget(field: dict | None) -> str:
         "header_cell",
     ):
         return infer_field_widget(label, field_type)
-    widget = field.get("widget")
-    if widget and not (is_report_number_label(label) and str(widget) == "date"):
-        return str(widget)
     return infer_field_widget(label, field_type)
 
 
@@ -1327,11 +1825,30 @@ def _count_shared_tc_rowspan(table, r_idx: int, col_idx: int, cell) -> int:
 
 # ── _is_textarea_cell() ─────────────────────────────
 # Large comment/observation cells or vertically merged cells use <textarea>.
-def _is_textarea_cell(field: dict | None, row_label: str, rowspan: int) -> bool:
+def _is_textarea_cell(
+    field: dict | None,
+    row_label: str,
+    rowspan: int,
+    cell_text: str = "",
+) -> bool:
     if rowspan > 1:
         return True
+    if cell_text and "\n" in cell_text:
+        return True
     label = f"{field.get('label', '') if field else ''} {row_label}".lower()
-    return any(k in label for k in ("comment", "remarks", "observation", "description"))
+    return any(
+        k in label
+        for k in (
+            "comment",
+            "remarks",
+            "observation",
+            "description",
+            "acceptance",
+            "methodology",
+            "corrective",
+            "preventive",
+        )
+    )
 
 
 # ── _render_paragraph_checkbox() ────────────────────
@@ -1823,21 +2340,34 @@ def _render_field_input(
 ) -> str:
     widget = _field_widget(field)
     loc = _escape_html(location)
-    ph = _escape_html(placeholder or field.get("label", ""))
-    val = _escape_html(value or field.get("value", "") or "")
+    # Signature & Date: keep the column label as placeholder when empty.
+    default_ph = field.get("label", "") if not _is_signature_date_field(field) else (
+        field.get("label") or "Signature & Date"
+    )
+    ph = _escape_html(placeholder or default_ph)
+    cleaned = _clean_signature_cell_value(field, value or field.get("value", "") or "")
+    val = _escape_html(cleaned)
     if val.strip() in ("—", "-", "–"):
         val = ""
 
     if widget == "textarea":
+        # Grow with content so multi-line Acceptance criteria is fully visible.
+        line_count = max(1, str(cleaned or "").count("\n") + 1)
+        rows = max(2, min(12, line_count))
         return (
-            f'<textarea name="fields[{loc}]" class="{css_class}" rows="4" '
-            f'style="width:100%;" placeholder="{ph}">{val}</textarea>'
+            f'<textarea name="fields[{loc}]" class="{css_class}" rows="{rows}" '
+            f'style="width:100%; white-space:pre-wrap;" placeholder="{ph}">{val}</textarea>'
         )
 
     if widget in ("datetime", "datetime-local"):
         input_type = "datetime-local"
     elif widget in ("date", "time"):
         input_type = widget
+        # Invalid leftovers like "S" break date inputs — never emit them as value.
+        if val and not re.match(r"^\d{4}-\d{2}-\d{2}", val) and widget == "date":
+            val = ""
+        if val and widget == "time" and not re.match(r"^\d{1,2}:\d{2}", val):
+            val = ""
     else:
         input_type = "text"
     style = "" if not inline else ""
@@ -1867,6 +2397,10 @@ def _value_repeats_colon_label(para_text: str, value: str) -> bool:
 # ── _render_paragraph() ─────────────────────────────
 # Renders one body paragraph for the fill preview.
 # para_index must match doc_parser.py enumerate(doc.paragraphs) — not a body-walk counter.
+# Set during build_fill_html for NEQ so body lines under 7.1 are not forced bold.
+_NEQ_HTML_MODE = False
+
+
 def _render_heading_paragraph(
     para_text: str,
     num_prefix: str = "",
@@ -1875,7 +2409,13 @@ def _render_heading_paragraph(
     """Render section headings (including numbered headings like 1.0, 8.5) with target metadata."""
     if not para_text or not para_text.strip():
         return None
+    # TOC title lives with the SDT card — never emit a free heading that can
+    # orphan onto the 1.0 OBJECTIVE sheet (Word keeps it only on the TOC page).
+    if _is_toc_title_text(para_text):
+        return None
     clean_p = dedupe_colon_label(dedupe_repeated_text(para_text)).strip()
+    if _is_toc_title_text(clean_p):
+        return None
     eff_prefix = _strip_duplicate_prefix(clean_p, num_prefix, is_bullet)
     prefixed_clean_p = f"{eff_prefix} {clean_p}".strip() if eff_prefix else clean_p
     clean_upper = prefixed_clean_p.upper()
@@ -1887,6 +2427,19 @@ def _render_heading_paragraph(
         and not has_paragraph_blank(para_text)
         and not is_paragraph_yes_no_radio(para_text)
     )
+    # NEQ: only real section / short subsection titles are bold — not body lines
+    # under 7.1 / 7.2 / 14.0 that share list numbering.
+    if _NEQ_HTML_MODE and is_num_section:
+        letters = [c for c in clean_p if c.isalpha()]
+        upper_ratio = (sum(1 for c in letters if c.isupper()) / len(letters)) if letters else 0
+        is_major = bool(re.match(r"^\d+\.0$", eff_prefix or ""))
+        is_sub_title = (
+            clean_p.endswith(":")
+            or upper_ratio >= 0.75
+            or (len(clean_p.split()) <= 10 and not clean_p.endswith("."))
+        )
+        if not (is_major or is_sub_title):
+            is_num_section = False
     if (
         is_locked_section_title(prefixed_clean_p)
         or is_section_heading_paragraph(prefixed_clean_p)
@@ -1913,30 +2466,41 @@ def _render_paragraph(
     num_prefix: str = "",
     is_bullet: bool = False,
 ) -> str:
-    if not para_text or not para_text.strip():
+    # Empty spacer paras normally skip; keep them when a fillable field is bound
+    # (e.g. Summary and Conclusion body under a locked heading).
+    if (not para_text or not para_text.strip()) and not field:
         return ""
-    heading_html = _render_heading_paragraph(para_text, num_prefix=num_prefix, is_bullet=is_bullet)
-    if heading_html:
-        return heading_html
-    para_text = dedupe_repeated_text(para_text)
+    # Standalone "TABLE OF CONTENTS" is shown via the TOC card header only.
+    if para_text and _is_toc_title_text(para_text) and not field:
+        return ""
+    if para_text and para_text.strip():
+        heading_html = _render_heading_paragraph(para_text, num_prefix=num_prefix, is_bullet=is_bullet)
+        if heading_html:
+            return heading_html
+        # Heading helper returns None for TOC titles — do not fall through to a plain <p>.
+        if _is_toc_title_text(para_text):
+            return ""
+    para_text = dedupe_repeated_text(para_text or "")
     clean_p = dedupe_colon_label(para_text).strip()
-    eff_prefix = _strip_duplicate_prefix(clean_p, num_prefix, is_bullet)
+    if clean_p and _is_toc_title_text(clean_p) and not field:
+        return ""
+    eff_prefix = _strip_duplicate_prefix(clean_p, num_prefix, is_bullet) if clean_p else ""
     prefixed_clean_p = f"{eff_prefix} {clean_p}".strip() if eff_prefix else clean_p
     prefix_html = _num_prefix_span(eff_prefix, is_bullet)
 
-    if field and field.get("type") == "paragraph_content" and PARA_BLANK_RE.search(para_text):
+    if field and field.get("type") == "paragraph_content" and para_text and PARA_BLANK_RE.search(para_text):
         field["type"] = "paragraph_blank"
 
     if field and field.get("type") == "paragraph_content":
         val = field.get("value")
         if val is None or val == "":
-            val = para_text
+            val = para_text or ""
         val = dedupe_repeated_text(val)
         val_prefix = _strip_duplicate_prefix(val, eff_prefix, is_bullet)
         val_prefixed = f"{val_prefix} {val}".strip() if val_prefix else val
         val_prefix_html = _num_prefix_span(val_prefix, is_bullet)
         if _is_readonly_mode(mode) or mode != "pre_approval" or _is_field_locked(field):
-            h_cls = " docx-heading-target" if (is_section_heading_paragraph(val_prefixed) or is_locked_section_title(val_prefixed)) else ""
+            h_cls = " docx-heading-target" if (val and (is_section_heading_paragraph(val_prefixed) or is_locked_section_title(val_prefixed))) else ""
             h_attr = f' data-heading-text="{_escape_html(val_prefixed.upper().strip())}"' if h_cls else ""
             h_style = ' style="font-weight:700;"' if h_cls else ""
             h_pref = _num_prefix_span(val_prefix, is_bullet, bold=bool(h_cls))
@@ -1944,19 +2508,20 @@ def _render_paragraph(
         else:
             loc = _escape_html(field.get("location", f"para_{para_index}"))
             val_esc = _escape_html(val)
-            calc_rows = max(2, min(8, len(val) // 70 + 1))
+            calc_rows = max(2, min(6, (len(val) // 80 + 1) if val else 2))
+            ph = _escape_html(field.get("label") or "Enter summary and conclusion...")
             if val_prefix_html:
                 return (
                     f'<div class="docx-para-edit-wrapper" style="margin: 6px 0; display:flex; align-items:flex-start; gap:6px;">'
                     f'<span class="docx-num-prefix" style="padding-top:6px; flex-shrink:0;">{val_prefix_html}</span>'
                     f'<textarea name="fields[{loc}]" class="docx-input docx-para-content" '
-                    f'rows="{calc_rows}" style="flex:1; width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #facc15; border-bottom:2px solid #4e73df; border-radius:4px; background-color:#fffde7 !important;">{val_esc}</textarea>'
+                    f'rows="{calc_rows}" placeholder="{ph}" style="flex:1; width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #facc15; border-bottom:2px solid #4e73df; border-radius:4px; background-color:#fffde7 !important;">{val_esc}</textarea>'
                     f'</div>'
                 )
             return (
                 f'<div class="docx-para-edit-wrapper" style="margin: 6px 0;">'
                 f'<textarea name="fields[{loc}]" class="docx-input docx-para-content" '
-                f'rows="{calc_rows}" style="width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #facc15; border-bottom:2px solid #4e73df; border-radius:4px; background-color:#fffde7 !important;">{val_esc}</textarea>'
+                f'rows="{calc_rows}" placeholder="{ph}" style="width:100%; box-sizing:border-box; font-family:inherit; font-size:inherit; line-height:1.5; resize:vertical; padding:6px 10px; border:1px solid #facc15; border-bottom:2px solid #4e73df; border-radius:4px; background-color:#fffde7 !important;">{val_esc}</textarea>'
                 f'</div>'
             )
 
@@ -2186,8 +2751,7 @@ def _render_paragraph(
 # ── _is_field_locked() ──────────────────────────────
 # Normalises locked flag from JSON (bool / 0|1 / "false" strings).
 def _is_field_locked(field: dict) -> bool:
-    if field.get("type") == "table_sl_no":
-        return True
+    # Honor explicit locked flag — Sr. No. may be editable (HVAC methodology).
     locked = field.get("locked", False)
     if isinstance(locked, str):
         return locked.strip().lower() in ("1", "true", "yes")
@@ -2204,11 +2768,12 @@ def _table_sl_no_col_index(table) -> int | None:
     return resolve_sl_no_column_index(col_headers, header_row)
 
 
-_SL_NO_VALUE_RE = re.compile(r"^\d+[\.\)]?$|^\d+\.\d+$")
+# Integer serials only — Word outline "10.0" must not be treated as Sl. No.
+_SL_NO_VALUE_RE = re.compile(r"^\d+[\.\)]?$")
 
 
 def _looks_like_sl_no_value(value: str) -> bool:
-    """True for 1, 1., 1.0, 2) — not random user text like 'jjghj'."""
+    """True for 1, 1., 2) — not outline numbers like 10.0 / 10.1."""
     return bool(_SL_NO_VALUE_RE.match((value or "").strip()))
 
 
@@ -2250,16 +2815,55 @@ def _render_sl_no_cell(
     location: str = "",
     readonly: bool = False,
 ) -> str:
-    """Render Sl. No. column as plain locked text — never an input."""
+    """Render Sl. No. — yellow editable input with default number (unless readonly)."""
     display = _format_sl_no_display(r_idx, field, cell_text)
-    style = _inline_cell_style(cell_style, readonly=True, value_cell=True)
+    # Drop outline junk (10.0) left over from Word list numbering.
+    if display and not _looks_like_sl_no_value(display):
+        auto_serial = (field or {}).get("auto_serial")
+        if auto_serial not in (None, ""):
+            try:
+                display = f"{int(auto_serial)}."
+            except (TypeError, ValueError):
+                display = f"{r_idx}." if r_idx > 0 else ""
+        else:
+            display = f"{r_idx}." if r_idx > 0 else ""
+    if not display and r_idx > 0:
+        display = f"{r_idx}."
+
+    # Fill / pre-approval: always editable so users can change sequence.
+    # Only readonly preview (approval show) keeps plain locked text.
+    force_locked = readonly
+    if force_locked:
+        style = _inline_cell_style(cell_style, readonly=True, value_cell=True)
+        style += "text-align:center;"
+        loc_attr = f' data-field="{_escape_html(location)}"' if location else ""
+        content = _escape_html(display)
+        extra = " locked readonly" if r_idx > 0 else ""
+        return (
+            f'<td class="docx-cell{extra}" style="{style}"{rowspan_attr}{colspan_attr}{loc_attr}>'
+            f"{content}</td>"
+        )
+
+    loc = location or (field or {}).get("location") or ""
+    inp = _render_field_input(
+        loc,
+        field
+        if isinstance(field, dict)
+        else {
+            "location": loc,
+            "label": "Sr. No.",
+            "type": "table_multicol",
+            "widget": "text",
+        },
+        css_class="docx-input",
+        placeholder="Sr. No.",
+        value=display,
+    )
+    style = _inline_cell_style(cell_style, readonly=False, value_cell=True)
     style += "text-align:center;"
-    loc_attr = f' data-field="{_escape_html(location)}"' if location else ""
-    content = _escape_html(display)
-    extra = " locked readonly" if r_idx > 0 else ""
     return (
-        f'<td class="docx-cell{extra}" style="{style}"{rowspan_attr}{colspan_attr}{loc_attr}>'
-        f"{content}</td>"
+        f'<td class="docx-cell editable" style="{style}"{rowspan_attr}{colspan_attr} '
+        f'data-field="{_escape_html(loc)}">{inp}</td>'
     )
 
 
@@ -2344,6 +2948,46 @@ def _cell_numbered_text(cell, num_resolver) -> str:
     return "\n".join(ln for ln in lines if ln).strip() or cell.text.strip()
 
 
+def _find_table_column_header_row(table):
+    """Return the first real column-header row (Checks/Methodology/Sr. No.), not a banner."""
+    if not table.rows:
+        return None
+    headers = get_table_column_headers(table, is_report_approval_block_table(table))
+    for row in table.rows[:8]:
+        if is_repeated_column_header_row(row, headers):
+            return row
+    for row in table.rows[:4]:
+        if not is_equipment_section_banner_row(row):
+            return row
+    return table.rows[0]
+
+
+def _render_table_header_row_html(table, t_idx: int, readonly: bool = False) -> str:
+    """Clone the real column-header row after a mid-table page break."""
+    if not table.rows:
+        return ""
+    row = _find_table_column_header_row(table) or table.rows[0]
+    cells = row.cells
+    parts = ['<tr data-row-index="0" data-cont-header="1">']
+    seen: set = set()
+    for cell in cells:
+        tc = cell._tc
+        if tc in seen:
+            continue
+        seen.add(tc)
+        text = dedupe_colon_label(cell.text.strip())
+        colspan = _cell_colspan(cell, cells)
+        colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
+        style = _inline_cell_style("font-weight:bold;background:#f1f5f9; color:#1e293b;", readonly=readonly)
+        parts.append(
+            f'<th class="docx-cell docx-table-header docx-heading-target" '
+            f'data-heading-text="{_escape_html(text.upper())}" style="{style}"{colspan_attr}>'
+            f"{_escape_html(text)}</th>"
+        )
+    parts.append("</tr>")
+    return "".join(parts)
+
+
 def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_tracker: list = None, header_tpl: str = "", footer_tpl: str = "", num_resolver=None, hard_page_breaks_only: bool = False) -> str:
     html = [f'<table class="docx-table" data-table-index="{t_idx}">']
     readonly = _is_readonly_mode(mode)
@@ -2353,6 +2997,58 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
     # Track vertically merged cells so Sr. No. (and other merges) render once with rowspan.
     # Hold the tc element objects themselves — id() integers are unsafe across rows (GC reuse).
     rendered_tc_els: set = set()
+    rows_since_break = 0
+    column_header_seen = False
+    total_rows = len(table.rows)
+    try:
+        ncols = len(table.columns)
+    except Exception:
+        ncols = len(table.rows[0].cells) if table.rows else 0
+    # Server-chunk only tall Functional Tests style sheets (Sr.No + Acceptance).
+    # 9.2 General Checks / Major components must stay ONE table — splitting every
+    # ~6 rows hid "Supply HEPA housing Box", orphaned the 9.2 heading, and made
+    # "Fresh air filter" look duplicated across continuation headers.
+    _hdr_blob = " ".join(col_headers or []).lower()
+    _is_functional_tests_sheet = bool(
+        ncols >= 4
+        and total_rows > 12
+        and re.search(r"acceptance\s*criteria", _hdr_blob)
+        and re.search(r"(sr\.?\s*no|identification|position\s*of\s*valve)", _hdr_blob)
+    )
+    _is_major_components_sheet = bool(
+        re.search(r"methodology", _hdr_blob)
+        or re.search(r"observation\s*/\s*result", _hdr_blob)
+        or re.search(r"major\s*components", _hdr_blob)
+    )
+    chunk_large = (
+        (not readonly)
+        and page_tracker is not None
+        and _is_functional_tests_sheet
+        and not _is_major_components_sheet
+    )
+
+    def _open_continued_table_page() -> None:
+        page_tracker[0] += 1
+        next_p = page_tracker[0]
+        html.append("</table></div>")
+        prev_f = footer_tpl.replace("{PAGE}", str(next_p - 1)) if footer_tpl else ""
+        html.append(f"{prev_f}</div>")
+        html.append(
+            f'<div class="docx-page-break-indicator no-print" data-next-page="{next_p}">\n'
+            f'  <div class="docx-page-break-line"></div>\n'
+            f'  <div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page {next_p}</div>\n'
+            f'  <div class="docx-page-break-line"></div>\n'
+            f'</div>'
+        )
+        next_h = header_tpl.replace("{PAGE}", str(next_p)) if header_tpl else ""
+        html.append(
+            f'<div class="docx-a4-page" data-page-number="{next_p}" id="docxPage{next_p}">\n'
+            f'{next_h}\n'
+            f'<div class="docx-page-body">\n'
+            f'<table class="docx-table" data-table-index="{t_idx}">'
+        )
+        # Repeat column headers on the continuation sheet.
+        html.append(_render_table_header_row_html(table, t_idx, readonly=readonly))
 
     for r_idx, row in enumerate(table.rows):
         is_row_page_break = False
@@ -2362,33 +3058,50 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 xml_b = etree.tostring(row._tr)
                 if b'type="page"' in xml_b or b"<w:pageBreakBefore" in xml_b:
                     is_row_page_break = True
-                elif (not hard_page_breaks_only) and b"lastRenderedPageBreak" in xml_b:
-                    is_row_page_break = True
             except Exception:
                 pass
 
-        if r_idx > 0 and page_tracker is not None and (is_row_page_break or is_repeated_column_header_row(row, col_headers)):
-            page_tracker[0] += 1
-            next_p = page_tracker[0]
-            html.append("</table></div>")
-            prev_f = footer_tpl.replace("{PAGE}", str(next_p - 1)) if footer_tpl else ""
-            html.append(f"{prev_f}</div>")
-            html.append(
-                f'<div class="docx-page-break-indicator no-print" data-next-page="{next_p}">\n'
-                f'  <div class="docx-page-break-line"></div>\n'
-                f'  <div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page {next_p}</div>\n'
-                f'  <div class="docx-page-break-line"></div>\n'
-                f'</div>'
+        # Duplicate Checks/Methodology rows are Word soft page-break repeats.
+        # First one is the real header; later ones mark a natural sheet break
+        # (9.2 Mechanical → coils/HEPA → Electrical) so those rows stay visible.
+        if is_repeated_column_header_row(row, col_headers):
+            if column_header_seen:
+                if (
+                    page_tracker is not None
+                    and not readonly
+                    and rows_since_break > 0
+                    and _is_major_components_sheet
+                ):
+                    _open_continued_table_page()
+                    rows_since_break = 0
+                continue
+            column_header_seen = True
+
+        row0_text = ""
+        try:
+            row0_text = (row.cells[0].text or "").strip().lower() if row.cells else ""
+        except Exception:
+            row0_text = ""
+        is_perf_banner = bool(re.search(r"machine\s+performance", row0_text))
+        # Functional Tests: break before Sr.No grows past ~5 data rows on a
+        # sheet (plus banner). Breaking later lets client re-pull clip 8–12
+        # and show a 7→13 jump under overflow:hidden.
+        force_chunk = (
+            chunk_large
+            and r_idx > 1
+            and (
+                rows_since_break >= 5
+                or (is_perf_banner and rows_since_break >= 2)
             )
-            next_h = header_tpl.replace("{PAGE}", str(next_p)) if header_tpl else ""
-            html.append(
-                f'<div class="docx-a4-page" data-page-number="{next_p}" id="docxPage{next_p}">\n'
-                f'{next_h}\n'
-                f'<div class="docx-page-body">\n'
-                f'<table class="docx-table" data-table-index="{t_idx}">'
-            )
+        )
+
+        if r_idx > 0 and page_tracker is not None and (is_row_page_break or force_chunk):
+            _open_continued_table_page()
+            rows_since_break = 0
 
         html.append(f'<tr data-row-index="{r_idx}">')
+        if r_idx > 0:
+            rows_since_break += 1
 
         cells = row.cells
         # Att07 / Att3: "Verified by sign and date :" is an e-sign line, not a section banner.
@@ -2532,6 +3245,10 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
         is_one_col = len(cells) == 1
         row_label = cells[0].text.strip() if cells else ""
         seen_tc_els: set = set()
+        # Fill/pre-approval: expand vertical merges into per-row cells (no HTML rowspan).
+        # Rowspan breaks when the client paginator moves <tr> across A4 pages, which
+        # hid 9.3 Functional Tests acceptance rows under overflow:hidden.
+        expand_vmerge = not readonly
 
         for col_idx, cell in enumerate(cells):
             tc_el = cell._tc
@@ -2539,34 +3256,62 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 continue
             seen_tc_els.add(tc_el)
 
-            # Vertical merge continuation (shared tc already rendered on an earlier row).
-            if tc_el in rendered_tc_els:
-                continue
-            rendered_tc_els.add(tc_el)
+            if expand_vmerge:
+                # Still remember the master tc, but keep rendering follow rows.
+                if tc_el not in rendered_tc_els:
+                    rendered_tc_els.add(tc_el)
+                rowspan = 1
+                rowspan_attr = ""
+            else:
+                # Readonly / print-like: keep a true rowspan and skip follow cells.
+                if tc_el in rendered_tc_els:
+                    continue
+                rendered_tc_els.add(tc_el)
+                if _cell_rowspan(cell) == 0:
+                    continue
+                rowspan = _count_shared_tc_rowspan(table, r_idx, col_idx, cell)
+                rowspan_attr = f' rowspan="{rowspan}"' if rowspan > 1 else ""
 
-            if _cell_rowspan(cell) == 0:
-                continue
-
-            rowspan = _count_shared_tc_rowspan(table, r_idx, col_idx, cell)
             colspan = _cell_colspan(cell, cells)
             colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
-            rowspan_attr = f' rowspan="{rowspan}"' if rowspan > 1 else ""
 
-            text = dedupe_colon_label(cell.text.strip())
-            display_text = (
-                dedupe_colon_label(_cell_numbered_text(cell, num_resolver))
+            raw_cell = (cell.text or "").strip()
+            numbered_cell = (
+                _cell_numbered_text(cell, num_resolver)
                 if (r_idx > 0 and num_resolver is not None)
-                else text
+                else raw_cell
             )
-            # Prefer Word auto-number text for Sl. No. detection (Att02 empty cells with numPr).
+            # dedupe_colon_label() collapses ALL whitespace — never run it on
+            # multi-line Acceptance criteria or numbered lists (1..4).
+            if "\n" in (numbered_cell or ""):
+                text = numbered_cell.strip()
+                display_text = text
+            else:
+                text = dedupe_colon_label(raw_cell)
+                display_text = (
+                    dedupe_colon_label(numbered_cell)
+                    if numbered_cell
+                    else text
+                )
+            is_sl_no_here = (
+                r_idx > 0 and sl_no_col is not None and col_idx == sl_no_col
+            )
+            # Prefer Word list number for Sl. No. only when it is an integer serial (1. / 2.).
+            # Outline prefixes like 10.0 / 10.1 must NOT become Sl. No. (scrambles HVAC tables).
             if (
-                r_idx > 0
-                and sl_no_col is not None
-                and col_idx == sl_no_col
+                is_sl_no_here
                 and display_text
                 and _looks_like_sl_no_value(display_text)
             ):
                 text = display_text
+            elif (
+                is_sl_no_here
+                and display_text
+                and not text
+                and re.match(r"^\d+\.\d+", str(display_text).strip())
+            ):
+                # Empty Sl. No. cell with outline numPr — leave blank for editable default.
+                text = ""
             is_header = r_idx == 0 and not (is_two_col and not is_two_col_grid_table(table) and not is_two_col_header_row(cells, table.rows))
             cell_style = "font-weight:bold;" if is_header else ""
 
@@ -2653,69 +3398,63 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
             field = _resolve_cell_field(
                 t_idx, r_idx, col_idx, cell, cells, is_two_col, field_map
             )
+            # Fill / pre-approval: HVAC check columns must stay editable even when
+            # parse marked them locked (Acceptance / Identification / etc.).
+            if (
+                field
+                and not readonly
+                and r_idx > 0
+                and not _is_readonly_mode(mode)
+            ):
+                _hdr = (
+                    col_headers[col_idx].strip().lower()
+                    if col_idx < len(col_headers)
+                    else ""
+                )
+                if any(
+                    k in _hdr
+                    for k in (
+                        "acceptance",
+                        "identification",
+                        "methodology",
+                        "checks",
+                        "observation",
+                        "done by",
+                    )
+                ):
+                    field = dict(field)
+                    field["locked"] = False
 
-            # Sl. No. / component serial: locked when Word already has a number (Att14).
-            # Empty Sr. No. cells are always editable inputs in fill mode (Att11).
+            # Sl. No. / Sr. No.: show default serial and stay editable unless readonly.
             word_has_serial = bool((text or "").strip() and _looks_like_sl_no_value(text))
             field_val = str((field or {}).get("value") or "").strip()
-            cell_empty = not (text or "").strip() and not field_val
-            editable_empty_sl = (
-                not readonly
-                and r_idx > 0
+            if field_val and not _looks_like_sl_no_value(field_val):
+                # Drop outline junk stored as value (e.g. "10.0").
+                field_val = ""
+            is_sl_no_col_cell = (
+                r_idx > 0
                 and sl_no_col is not None
                 and col_idx == sl_no_col
-                and cell_empty
+            ) or (
+                field is not None and str(field.get("type") or "") == "table_sl_no" and r_idx > 0
             )
-            field_is_locked_sl = bool(
-                field
-                and field.get("type") == "table_sl_no"
-                and (word_has_serial or field_val)
-            )
-            is_sl_no_cell = (
-                field_is_locked_sl
-                or (sl_no_col is not None and col_idx == sl_no_col and word_has_serial)
-            ) and not editable_empty_sl
-            if editable_empty_sl:
-                # Force fillable Sr. No. even if an older draft still marks table_sl_no/locked.
+            if is_sl_no_col_cell:
                 loc = (
                     (field or {}).get("location")
                     or f"table_{t_idx}_row_{r_idx}_col_{col_idx}"
                 )
-                inp = _render_field_input(
-                    loc,
-                    field
-                    if isinstance(field, dict)
-                    else {
-                        "location": loc,
-                        "label": "Sr. No.",
-                        "type": "table_multicol",
-                        "widget": "text",
-                    },
-                    css_class="docx-input",
-                    placeholder="Sr. No.",
-                    value=field_val,
-                )
-                style = _inline_cell_style(cell_style, readonly=False, value_cell=True)
-                html.append(
-                    f'<td class="docx-cell editable" style="{style}"{rowspan_attr}{colspan_attr} '
-                    f'data-field="{_escape_html(loc)}">{inp}</td>'
-                )
-                continue
-            if is_sl_no_cell:
-                loc = (
-                    (field or {}).get("location")
-                    or f"table_{t_idx}_row_{r_idx}_col_{col_idx}"
-                )
+                # Prefer clean integer serial text; ignore Word outline prefixes.
+                cell_for_sl = text if _looks_like_sl_no_value(text) else ""
                 html.append(
                     _render_sl_no_cell(
                         r_idx,
                         field,
-                        text,
+                        cell_for_sl or field_val,
                         cell_style=cell_style,
                         rowspan_attr=rowspan_attr,
                         colspan_attr=colspan_attr,
                         location=loc,
-                        readonly=readonly or r_idx > 0,
+                        readonly=readonly,
                     )
                 )
                 continue
@@ -2928,8 +3667,25 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                         )
             elif field and not _is_field_locked(field):
                 value = field.get("value", "") or ""
+                header_label_l = (
+                    col_headers[col_idx].strip().lower()
+                    if col_idx < len(col_headers)
+                    else ""
+                )
+                is_spec_col = any(
+                    k in header_label_l
+                    for k in ("acceptance", "identification", "methodology", "checks")
+                )
+                # Draft/import often stores Acceptance criteria as one collapsed line
+                # (newlines + list numbers stripped). Prefer live DOCX multi-line text.
+                if text and "\n" in text and "\n" not in str(value):
+                    value = text
+                elif text and "\n" in text and not str(value).strip():
+                    value = text
+                # Signature & Date: never fall back to DOCX junk like a lone "S".
+                display_value = _clean_signature_cell_value(field, value, text)
                 if readonly:
-                    display = _render_readonly_span(value or text, field, field["location"])
+                    display = _render_readonly_span(display_value, field, field["location"])
                     html.append(
                         _readonly_td(
                             display,
@@ -2940,21 +3696,33 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                         )
                     )
                 else:
-                    use_textarea = _is_textarea_cell(field, row_label, rowspan)
+                    # Keep Acceptance / Identification editable, but always use textarea
+                    # when multi-line or long so text is not clipped in a single-line input.
+                    use_textarea = (
+                        is_spec_col
+                        or _is_textarea_cell(
+                            field, row_label, rowspan, str(display_value or text)
+                        )
+                        or ("\n" in str(display_value or ""))
+                        or len(str(display_value or text or "")) > 48
+                    )
                     ph = ""
                     if is_two_col and col_idx == 1:
                         ph = "Enter details..."
                     elif is_two_col and col_idx == 0:
                         ph = "Parameter / Item..."
+                    elif _is_signature_date_field(field):
+                        ph = field.get("label") or "Signature & Date"
                     if use_textarea:
                         widget_field = dict(field)
                         widget_field["widget"] = "textarea"
+                        widget_field["locked"] = False
                         inp = _render_field_input(
                             field["location"],
                             widget_field,
                             css_class="docx-input",
                             placeholder=ph,
-                            value=value or text,
+                            value=display_value,
                         )
                     else:
                         inp = _render_field_input(
@@ -2962,17 +3730,21 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                             field,
                             css_class="docx-input",
                             placeholder=ph,
-                            value=value or text,
+                            value=display_value,
                         )
                     html.append(
-                        f'<td class="docx-cell editable" style="{cell_style}"{rowspan_attr}{colspan_attr}>'
+                        f'<td class="docx-cell editable" style="{cell_style}vertical-align:top;"{rowspan_attr}{colspan_attr}>'
                         f"{inp}</td>"
                     )
             elif field and _is_field_locked(field):
                 style = _inline_cell_style(cell_style, readonly=readonly)
                 locked_bg = f"background:#f5f5f5;" if readonly else ""
                 raw_stored = (field.get("value") or "").strip()
-                locked_val = display_text if (not raw_stored or raw_stored == text) else raw_stored
+                if display_text and "\n" in display_text and "\n" not in raw_stored:
+                    locked_val = display_text
+                else:
+                    locked_val = display_text if (not raw_stored or raw_stored == text) else raw_stored
+                locked_val = _clean_signature_cell_value(field, locked_val, "")
                 if readonly:
                     display = _render_readonly_span(locked_val, field, field.get("location", ""))
                     html.append(
@@ -3306,6 +4078,7 @@ def build_fill_html(
     cells with class 'approver-field' — Laravel JS replaces options from the users table.
     Attachment columns render as file upload inputs with class 'attachment-field'.
     """
+    global _NEQ_HTML_MODE
     from docx import Document
 
     doc = Document(template_path)
@@ -3319,6 +4092,7 @@ def build_fill_html(
     # NEQ: ignore Word lastRenderedPageBreak soft markers (they create huge approval-page gaps).
     # Requal/reval keep the previous soft+hard break behavior.
     hard_page_breaks_only = (import_source or "").strip().lower() == "new_equipment_qualification"
+    _NEQ_HTML_MODE = hard_page_breaks_only
 
     # Body walk can surface the same <p> element more than once; keep the longest text
     # per para_index so blank-field paragraphs are not lost on an empty first visit.
@@ -3355,6 +4129,83 @@ def build_fill_html(
     ]
     table_idx = 0
     has_content_on_page = False
+    # Wrap 9.0 + 9.1 + Installation table so the client cannot park headings
+    # alone under overflow:hidden on the previous sheet.
+    keep_requal_91_open = False
+
+    def _open_requal_91_keep(para_text: str, num_prefix: str = "") -> None:
+        nonlocal keep_requal_91_open
+        if keep_requal_91_open:
+            return
+        combined = f"{num_prefix} {para_text}".upper()
+        if re.search(r"\b9\.0\s+REQUALIFICATION\s+CHECKS\b", combined) or (
+            re.search(r"\bREQUALIFICATION\s+CHECKS\b", combined)
+            and re.match(r"^9\.0\b", (num_prefix or "").strip())
+        ):
+            html_parts.append(
+                '<div class="docx-keep-section" data-keep-section="requal-91">'
+            )
+            keep_requal_91_open = True
+
+    def _close_requal_91_keep_after_table(t_idx: int) -> None:
+        nonlocal keep_requal_91_open
+        if keep_requal_91_open and t_idx == 12:
+            html_parts.append("</div>")
+            keep_requal_91_open = False
+
+    def _force_new_page() -> None:
+        nonlocal has_content_on_page
+        page_tracker[0] += 1
+        next_p = page_tracker[0]
+        prev_f = footer_html_tpl.replace("{PAGE}", str(next_p - 1))
+        html_parts.append(f"</div>\n{prev_f}\n</div>")
+        html_parts.append(
+            f'<div class="docx-page-break-indicator no-print" data-next-page="{next_p}">\n'
+            f'  <div class="docx-page-break-line"></div>\n'
+            f'  <div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page {next_p}</div>\n'
+            f'  <div class="docx-page-break-line"></div>\n'
+            f'</div>\n'
+        )
+        next_h = header_html_tpl.replace("{PAGE}", str(next_p))
+        html_parts.append(
+            f'<div class="docx-a4-page" data-page-number="{next_p}" id="docxPage{next_p}">\n'
+            f'{next_h}\n'
+            f'<div class="docx-page-body">'
+        )
+        has_content_on_page = False
+
+    def _is_major_tail_section(para_text: str, num_prefix: str = "") -> bool:
+        """
+        Break before major tail anchors so packed sheets do not clip
+        REFERENCES / History / Summary under overflow:hidden. Extra pages
+        are OK; hidden content is not. Client may still merge a following
+        short section when it fully fits.
+        """
+        combined = f"{num_prefix} {para_text}".upper()
+        return bool(
+            re.search(
+                r"\b(DEVIATIONS?\s*\(IF ANY\)|SUMMARY\s*&\s*CONCLUSION|"
+                r"REFERENCES|ABBREVIATIONS|REVISION\s+HISTORY|POST-APPROVAL)\b",
+                combined,
+            )
+        )
+
+    def _is_requal_checks_heading(para_text: str, num_prefix: str = "") -> bool:
+        """
+        Start 9.0 / 9.2 / 9.3 on clean sheets so Installation, General Checks,
+        and Functional Tests intro never sit under a clipped previous table.
+        """
+        combined = f"{num_prefix} {para_text}".upper()
+        return bool(
+            re.search(
+                r"\b(9\.0\s+REQUALIFICATION\s+CHECKS|"
+                r"9\.2\s+GENERAL\s+CHECKS|"
+                r"GENERAL\s+CHECKS\s*:\s*VERIFICATION\s+OF\s+MAJOR\s+COMPONENTS|"
+                r"9\.3\s+OPERATIONAL\s+QUALIFICATION|"
+                r"OPERATIONAL\s+QUALIFICATION\s+CHECKS\s*:\s*FUNCTIONAL)\b",
+                combined,
+            )
+        )
 
     # Walk doc.element.body in document order — render tables and paragraphs as they appear.
     for child in doc.element.body:
@@ -3375,7 +4226,14 @@ def build_fill_html(
                         hard_page_breaks_only=hard_page_breaks_only,
                     )
                 )
+                _close_requal_91_keep_after_table(table_idx)
                 has_content_on_page = True
+                # End Functional Tests on its own sheet before 10.0 Deviations.
+                if (
+                    not _is_readonly_mode(mode)
+                    and len(doc.tables[table_idx].rows) >= 20
+                ):
+                    _force_new_page()
             table_idx += 1
 
         elif tag == "p":
@@ -3383,33 +4241,29 @@ def build_fill_html(
             if para_index is None:
                 para_text = _para_text_from_element(child)
                 if para_text:
+                    # Skip orphan TOC title (card header covers it).
+                    if _is_toc_title_text(para_text):
+                        continue
                     num_prefix, is_bullet = num_resolver.prefix_for_p(child)
-                    if _element_has_page_break(child, hard_only=hard_page_breaks_only) and has_content_on_page:
-                        page_tracker[0] += 1
-                        next_p = page_tracker[0]
-                        prev_f = footer_html_tpl.replace("{PAGE}", str(next_p - 1))
-                        html_parts.append(f"</div>\n{prev_f}\n</div>")
-                        html_parts.append(
-                            f'<div class="docx-page-break-indicator no-print" data-next-page="{next_p}">\n'
-                            f'  <div class="docx-page-break-line"></div>\n'
-                            f'  <div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page {next_p}</div>\n'
-                            f'  <div class="docx-page-break-line"></div>\n'
-                            f'</div>\n'
-                        )
-                        next_h = header_html_tpl.replace("{PAGE}", str(next_p))
-                        html_parts.append(
-                            f'<div class="docx-a4-page" data-page-number="{next_p}" id="docxPage{next_p}">\n'
-                            f'{next_h}\n'
-                            f'<div class="docx-page-body">'
-                        )
+                    if has_content_on_page and (
+                        _element_has_page_break(child, hard_only=hard_page_breaks_only)
+                        or _is_major_tail_section(para_text, num_prefix)
+                        or _is_requal_checks_heading(para_text, num_prefix)
+                    ):
+                        _force_new_page()
+                    _open_requal_91_keep(para_text, num_prefix)
                     heading_html = _render_heading_paragraph(para_text, num_prefix=num_prefix, is_bullet=is_bullet)
                     if heading_html:
                         html_parts.append(heading_html)
                     else:
                         clean_p = dedupe_colon_label(para_text).strip()
+                        if _is_toc_title_text(clean_p):
+                            continue
                         eff_pref = _strip_duplicate_prefix(clean_p, num_prefix, is_bullet)
                         pref_span = _num_prefix_span(eff_pref, is_bullet)
                         html_parts.append(f'<p class="docx-para">{pref_span}{_escape_html(clean_p)}</p>')
+                    if _append_verification_pid_notes(html_parts, None, para_text, field_map, mode):
+                        has_content_on_page = True
                     has_content_on_page = True
                 continue
 
@@ -3417,33 +4271,26 @@ def build_fill_html(
                 continue
             seen_para_indices.add(para_index)
 
-            if _element_has_page_break(child, hard_only=hard_page_breaks_only) and has_content_on_page:
-                page_tracker[0] += 1
-                next_p = page_tracker[0]
-                prev_f = footer_html_tpl.replace("{PAGE}", str(next_p - 1))
-                html_parts.append(f"</div>\n{prev_f}\n</div>")
-                html_parts.append(
-                    f'<div class="docx-page-break-indicator no-print" data-next-page="{next_p}">\n'
-                    f'  <div class="docx-page-break-line"></div>\n'
-                    f'  <div class="docx-page-break-badge"><i class="fas fa-file-alt mr-1"></i> Page {next_p}</div>\n'
-                    f'  <div class="docx-page-break-line"></div>\n'
-                    f'</div>\n'
-                )
-                next_h = header_html_tpl.replace("{PAGE}", str(next_p))
-                html_parts.append(
-                    f'<div class="docx-a4-page" data-page-number="{next_p}" id="docxPage{next_p}">\n'
-                    f'{next_h}\n'
-                    f'<div class="docx-page-body">'
-                )
+            _peek_text = para_text_by_index.get(
+                para_index, _para_text_from_element(child, exclude_textboxes=True)
+            )
+            # Advance/cache numbering once so major-tail detection sees "10.0 DEVIATIONS".
+            _peek_prefix, _ = num_resolver.prefix_for_p(child)
+            if has_content_on_page and (
+                _element_has_page_break(child, hard_only=hard_page_breaks_only)
+                or _is_major_tail_section(_peek_text, _peek_prefix)
+                or _is_requal_checks_heading(_peek_text, _peek_prefix)
+            ):
+                _force_new_page()
+            _open_requal_91_keep(_peek_text, _peek_prefix)
 
             if para_index in textbox_by_parent_para:
                 heading = (
                     paragraphs[para_index].text.strip()
                     or para_text_by_index.get(para_index, "")
                 )
-                num_prefix, is_bullet = (
-                    num_resolver.prefix_for_p(child) if heading.strip() else ("", False)
-                )
+                # Always advance list counters (empty numPr paras still consume a number).
+                num_prefix, is_bullet = num_resolver.prefix_for_p(child)
                 txbx_index, txbx_element = textbox_by_parent_para[para_index]
                 if heading and has_paragraph_blank(heading):
                     field = field_map.get(f"para_{para_index}")
@@ -3482,9 +4329,8 @@ def build_fill_html(
             para_text = para_text_by_index.get(
                 para_index, _para_text_from_element(child, exclude_textboxes=True)
             )
-            num_prefix, is_bullet = (
-                num_resolver.prefix_for_p(child) if (para_text or "").strip() else ("", False)
-            )
+            # Always advance list counters even when run text is empty (ghost numPr rows).
+            num_prefix, is_bullet = num_resolver.prefix_for_p(child)
             field = field_map.get(f"para_{para_index}")
             if field is None:
                 blank_key = f"para_{para_index}_blank_0"
@@ -3494,6 +4340,10 @@ def build_fill_html(
             )
             if rendered:
                 html_parts.append(rendered)
+                has_content_on_page = True
+            if para_text and _append_verification_pid_notes(
+                html_parts, para_index, para_text, field_map, mode
+            ):
                 has_content_on_page = True
 
         elif tag == "sdt":
@@ -3530,16 +4380,18 @@ def build_fill_html(
                         '<div class="docx-toc-card" style="margin: 16px 0; padding: 16px 20px; '
                         'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-family: inherit;">'
                     )
+                    # Title stays inside the TOC card (Word: TOC page only — never
+                    # above 1.0 OBJECTIVE on the following sheet).
                     if _is_readonly_mode(mode):
                         html_parts.append(
-                            '<div style="font-weight: 700; font-size: 14px; color: #334155; '
+                            '<div class="docx-toc-heading" style="font-weight: 700; font-size: 14px; color: #334155; '
                             'margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">'
-                            '📋 Table of Contents</div>'
+                            'TABLE OF CONTENTS</div>'
                         )
                     else:
                         html_parts.append(
-                            '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">'
-                            '<span style="font-weight: 700; font-size: 14px; color: #334155; text-transform: uppercase; letter-spacing: 0.5px;">📋 Table of Contents</span>'
+                            '<div class="docx-toc-heading" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">'
+                            '<span style="font-weight: 700; font-size: 14px; color: #334155; text-transform: uppercase; letter-spacing: 0.5px;">TABLE OF CONTENTS</span>'
                             '<button type="button" class="btn btn-sm btn-outline-primary btn-sync-toc" id="btnAutoSyncToc" style="font-size: 11px; padding: 2px 10px; border-radius: 12px; cursor: pointer; background: #fff; border: 1px solid #007bff; color: #007bff;" title="Auto-calculate page numbers based on document content length">'
                             '<i class="fas fa-sync-alt mr-1"></i> Auto-Calculate Page Numbers'
                             '</button>'
@@ -3603,12 +4455,16 @@ def build_fill_html(
                             )
                     html_parts.append('</div>')
                     has_content_on_page = True
+                    # Match Word: body (1.0 OBJECTIVE) starts on the next sheet.
+                    if not _is_readonly_mode(mode):
+                        _force_new_page()
 
     last_f = footer_html_tpl.replace("{PAGE}", str(page_tracker[0]))
     html_parts.append(f"</div>\n{last_f}\n</div>")  # close .docx-page-body and .docx-a4-page
     html_parts.append("</div>")  # close .docx-preview
     full_html = "\n".join(html_parts)
     full_html = full_html.replace("{TOTAL}", str(page_tracker[0]))
+    _NEQ_HTML_MODE = False
     return full_html
 
 
