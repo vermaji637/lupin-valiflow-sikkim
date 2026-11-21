@@ -357,14 +357,58 @@ body.premium-app #docxFillForm .docx-preview-wrapper .docx-summary-header-card t
     outline: none;
 }
 
-/* Table of Contents: titles locked; only page number inputs are editable */
+/* Table of Contents: Word-like leaders; titles locked; page # editable + auto-calc */
+.docx-toc-line {
+    display: flex !important;
+    align-items: baseline !important;
+    justify-content: flex-start !important;
+    gap: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 4px 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    line-height: 1.55 !important;
+    font-size: 13px !important;
+    color: #1e293b !important;
+}
 .docx-toc-line .toc-title {
-    flex-shrink: 0 !important;
+    flex: 0 1 auto !important;
+    flex-shrink: 1 !important;
+    max-width: 72% !important;
     font-weight: 500 !important;
     font-size: 13px !important;
     color: #1e293b !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: clip !important;
     user-select: none;
     pointer-events: none;
+}
+.docx-toc-line .toc-dots {
+    flex: 1 1 auto !important;
+    min-width: 28px !important;
+    margin: 0 8px !important;
+    border: none !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    letter-spacing: 1px !important;
+    color: #475569 !important;
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+    align-self: center !important;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-para-bold-title,
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-para-bold-title .docx-input-inline {
+    font-weight: 700 !important;
+}
+.docx-toc-line .toc-page {
+    flex: 0 0 auto !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    color: #1e293b !important;
+    text-align: right !important;
+    min-width: 1.5em;
 }
 input.docx-toc-title-input[type="hidden"] {
     display: none !important;
@@ -401,9 +445,9 @@ input.docx-toc-title-input:not([type="hidden"]) {
 }
 body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-line {
     display: flex !important;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
+    align-items: baseline !important;
+    gap: 0 !important;
+    width: 100% !important;
 }
 body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-line .toc-title {
     display: inline-block !important;
@@ -412,9 +456,9 @@ body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-line .toc-title {
 body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-line input.docx-toc-title-input:not([type="hidden"]) {
     display: inline-block !important;
     width: auto !important;
-    flex: 1 1 auto !important;
+    flex: 0 1 auto !important;
     min-width: 0 !important;
-    max-width: none !important;
+    max-width: 72% !important;
     height: auto !important;
 }
 body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-line input.docx-toc-page-input {
@@ -519,6 +563,20 @@ body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.heade
     table-layout: fixed;
     width: 100%;
     max-width: 100%;
+}
+/* Prepared/Checked/Approved By: department labels stay in col_0 like the Word template. */
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table.docx-dept-signature-table td,
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table.docx-dept-signature-table th {
+    overflow: hidden !important;
+    text-overflow: clip !important;
+    vertical-align: middle !important;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table.docx-dept-signature-table td .docx-readonly-value,
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table.docx-dept-signature-table .approver-field,
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table.docx-dept-signature-table input,
+body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table.docx-dept-signature-table select {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
 }
 body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) td,
 body.premium-app #docxFillForm .docx-preview-wrapper table.docx-table:not(.header-table) th {
@@ -739,12 +797,20 @@ body.premium-app #docxFillForm .docx-preview-wrapper textarea.docx-para-content:
 }
 
 body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-card {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin: 16px 0;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    background: #ffffff;
+    border: 1px solid #94a3b8;
+    border-radius: 0;
+    padding: 12px 16px 14px;
+    margin: 12px 0 18px;
+    box-shadow: none;
+}
+body.premium-app #docxFillForm .docx-preview-wrapper .docx-toc-card .docx-toc-heading {
+    font-weight: 700;
+    font-size: 14px;
+    text-align: center;
+    letter-spacing: 0.04em;
+    margin: 0 0 10px;
+    color: #0f172a;
 }
 
 body.premium-app #docxFillForm .docx-preview-wrapper th.docx-table-header {
@@ -877,7 +943,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
         </div>
     <?php endif; ?>
 
-    <?php if(empty($requalFillLocked) && in_array(($importSource ?? ''), ['requalification', 'new_equipment_qualification'], true)): ?>
+    <?php if(empty($requalFillLocked) && in_array(($importSource ?? ''), ['requalification', 'revalidation', 'new_equipment_qualification'], true)): ?>
         <div id="docxEsignDock" aria-label="E-Sign">
             <button type="button" class="btn btn-light" id="btnEsignStamp"
                     title="Click a cell, then stamp your name and today's date">
@@ -1390,7 +1456,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                                             <?php endif; ?>
                                                         </td>
                                                         <td>
-                                                            <?php echo e($step->approved_at ? \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y h:i A') : '-'); ?>
+                                                            <?php echo e($step->approved_at ? \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y H:i') : '-'); ?>
 
                                                         </td>
                                                     </tr>
@@ -1404,8 +1470,19 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
 
                     </div>
 
-                    <div class="card-footer bg-light px-4 py-3 d-flex justify-content-end align-items-center">
+                    <div class="card-footer bg-light px-4 py-3 d-flex justify-content-end align-items-center flex-wrap" style="gap:0.5rem;">
                         
+                        
+                        <?php if(($importSource ?? '') === 'new_equipment_qualification'
+                            && empty($requalFillLocked)
+                            && count($fields) > 0
+                            && (int)($report->created_by ?? 0) === (int)auth()->id()): ?>
+                            <button type="button" class="btn btn-outline-primary shadow-sm" id="btnWordPreview"
+                                    title="Open Word draft preview in a new tab (real TOC page numbers)">
+                                <i class="fas fa-file-word mr-1"></i>
+                                <span id="btnWordPreviewText">Word Preview</span>
+                            </button>
+                        <?php endif; ?>
                         <?php if(!empty($requalFillLocked) && !empty($requalPreEditable) && (int)($report->created_by ?? 0) === (int)auth()->id()): ?>
                             <button type="submit" class="btn btn-primary shadow-sm" id="btnSubmit">
                                 <i class="fas fa-user-check mr-1"></i>
@@ -7173,13 +7250,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // ── Autosave / resume draft (no e-sign, no approval start) ──
     const draftSaveUrl = <?php echo json_encode(route('reports.docx-import.draft', $report), 512) ?>;
+    const wordPreviewUrl = <?php echo json_encode(route('reports.docx-import.preview-word', $report), 512) ?>;
     const draftStatusEl = document.getElementById('docxDraftStatus');
     const btnSaveDraft = document.getElementById('btnSaveDraft');
+    const btnWordPreview = document.getElementById('btnWordPreview');
+    const btnWordPreviewText = document.getElementById('btnWordPreviewText');
     let draftTimer = null;
     let draftSaving = false;
     let draftPending = false;
     let draftDirty = false;
     let finalSubmitting = false;
+    let wordPreviewBusy = false;
 
     const setDraftStatus = function (message, tone) {
         if (!draftStatusEl) return;
@@ -7472,6 +7553,136 @@ document.addEventListener('DOMContentLoaded', function () {
                 clearTimeout(draftTimer);
             }
             saveDraftNow({ silent: false });
+        });
+    }
+
+    // NEQ-only: generate Word draft with real TOC pages (does not submit for approval).
+    const applyWordPreviewToc = function (tocMap) {
+        if (!tocMap || typeof tocMap !== 'object') return;
+        Object.keys(tocMap).forEach(function (loc) {
+            const page = String(tocMap[loc] || '').trim();
+            if (!page || !/^\d+$/.test(page)) return;
+            const name = 'fields[' + loc + ']';
+            form.querySelectorAll('input[name="' + name + '"], textarea[name="' + name + '"]').forEach(function (el) {
+                if (!el || el.disabled) return;
+                // Prefer visible TOC page inputs over title/hidden clones.
+                if (el.classList && el.classList.contains('docx-toc-title-input')) return;
+                el.value = page;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+        });
+        try {
+            if (typeof window.prepareDocxTocForSave === 'function') {
+                window.docxWithPreservedScroll
+                    ? window.docxWithPreservedScroll(window.prepareDocxTocForSave)
+                    : window.prepareDocxTocForSave();
+            }
+        } catch (e) {}
+    };
+
+    if (btnWordPreview && form && form.classList.contains('docx-import-neq')) {
+        btnWordPreview.addEventListener('click', function () {
+            if (wordPreviewBusy || finalSubmitting) return;
+            wordPreviewBusy = true;
+            btnWordPreview.disabled = true;
+            if (btnWordPreviewText) {
+                btnWordPreviewText.textContent = 'Generating Word…';
+            }
+            setDraftStatus('<i class="fas fa-spinner fa-spin mr-1"></i> Building Word preview…', 'saving');
+
+            // Open tab immediately (same click) so popup blockers do not block after async fetch.
+            const previewTab = window.open('about:blank', '_blank');
+            if (previewTab) {
+                try {
+                    previewTab.document.title = 'Word Preview…';
+                    previewTab.document.body.innerHTML = '<p style="font-family:sans-serif;padding:24px;">Generating Word preview…</p>';
+                } catch (e) {}
+            }
+
+            try {
+                if (typeof window.prepareDocxTocForSave === 'function') {
+                    window.docxWithPreservedScroll
+                        ? window.docxWithPreservedScroll(window.prepareDocxTocForSave)
+                        : window.prepareDocxTocForSave();
+                }
+            } catch (tocErr) {}
+
+            let body;
+            try {
+                body = collectDraftFormData();
+            } catch (collectErr) {
+                if (previewTab) {
+                    try { previewTab.close(); } catch (e) {}
+                }
+                wordPreviewBusy = false;
+                btnWordPreview.disabled = false;
+                if (btnWordPreviewText) btnWordPreviewText.textContent = 'Word Preview';
+                setDraftStatus('<i class="fas fa-exclamation-triangle mr-1"></i> Could not collect form for Word preview.', 'danger');
+                return;
+            }
+
+            fetch(wordPreviewUrl, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': (form.querySelector('input[name="_token"]') || {}).value || '',
+                },
+                credentials: 'same-origin',
+                body: body,
+            })
+                .then(function (response) {
+                    return response.json().then(function (data) {
+                        return { ok: response.ok, data: data || {} };
+                    }).catch(function () {
+                        return { ok: response.ok, data: {} };
+                    });
+                })
+                .then(function (result) {
+                    const previewUrl = (result.data && (result.data.preview_url || result.data.download_url)) || '';
+                    if (!result.ok || !result.data.success || !previewUrl) {
+                        const msg = (result.data && result.data.message)
+                            ? result.data.message
+                            : 'Word preview failed.';
+                        if (previewTab) {
+                            try {
+                                previewTab.document.body.innerHTML = '<p style="font-family:sans-serif;padding:24px;color:#b00020;">'
+                                    + msg + '</p>';
+                            } catch (e) {
+                                try { previewTab.close(); } catch (e2) {}
+                            }
+                        }
+                        setDraftStatus('<i class="fas fa-exclamation-triangle mr-1"></i> ' + msg, 'danger');
+                        return;
+                    }
+                    applyWordPreviewToc(result.data.toc_field_values || {});
+                    if (previewTab) {
+                        previewTab.location.href = previewUrl;
+                    } else {
+                        // Fallback if popup was blocked.
+                        window.open(previewUrl, '_blank', 'noopener');
+                    }
+                    setDraftStatus(
+                        '<i class="fas fa-file-word mr-1"></i> Word preview opened in a new tab — TOC pages synced.',
+                        'ok'
+                    );
+                })
+                .catch(function () {
+                    if (previewTab) {
+                        try {
+                            previewTab.document.body.innerHTML = '<p style="font-family:sans-serif;padding:24px;color:#b00020;">Word preview failed (network).</p>';
+                        } catch (e) {
+                            try { previewTab.close(); } catch (e2) {}
+                        }
+                    }
+                    setDraftStatus('<i class="fas fa-exclamation-triangle mr-1"></i> Word preview failed (network).', 'danger');
+                })
+                .finally(function () {
+                    wordPreviewBusy = false;
+                    btnWordPreview.disabled = false;
+                    if (btnWordPreviewText) btnWordPreviewText.textContent = 'Word Preview';
+                });
         });
     }
 
@@ -8025,7 +8236,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     })();
 
-    <?php if(empty($requalFillLocked) && in_array(($importSource ?? ''), ['requalification', 'new_equipment_qualification'], true)): ?>
+    <?php if(empty($requalFillLocked) && in_array(($importSource ?? ''), ['requalification', 'revalidation', 'new_equipment_qualification'], true)): ?>
     (function () {
         const btnEsignStamp = document.getElementById('btnEsignStamp');
         const esignStatusEl = document.getElementById('docxEsignStatus');

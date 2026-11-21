@@ -985,12 +985,12 @@
                                     <td class="js-neq-code">{{ $upload->displayCode() }}</td>
                                     <td class="js-neq-ref-doc">{{ $refDocNo !== '' ? $refDocNo : '—' }}</td>
                                     <td>{{ $displayName }}</td>
-                                    <td class="js-neq-uploaded-on">{{ optional($upload->created_at)->format('d-m-Y h:i A') }}</td>
+                                    <td class="js-neq-uploaded-on">{{ optional($upload->created_at)->timezone('Asia/Kolkata')->format('d-m-Y H:i') }}</td>
                                     <td>
                                         <span class="badge {{ $statusClass }} js-neq-status">{{ $statusLabel }}</span>
                                         <div class="small text-muted js-neq-last-saved {{ $latestEdit ? '' : 'd-none' }}">
                                             @if($latestEdit)
-                                                Last saved {{ optional($latestEdit->updated_at)->format('d-m-Y h:i A') }}
+                                                Last saved {{ optional($latestEdit->updated_at)->timezone('Asia/Kolkata')->format('d-m-Y H:i') }}
                                             @endif
                                         </div>
                                     </td>

@@ -455,7 +455,7 @@ class NewEquipmentQualificationController extends Controller
                 return response()->json([
                     'success' => true,
                     'message' => 'Draft saved.',
-                    'saved_at' => now()->format('d-m-Y h:i A'),
+                    'saved_at' => now()->timezone('Asia/Kolkata')->format('d-m-Y H:i'),
                     'stats' => $applyStats,
                 ]);
             }
@@ -1418,7 +1418,7 @@ class NewEquipmentQualificationController extends Controller
             'send_back_url' => route('protocol.new-equipment-qualification.send-back', $root),
             'reject_url' => route('protocol.new-equipment-qualification.reject', $root),
             'filename' => $root->displayName(),
-            'saved_at' => optional($target->updated_at)->format('d-m-Y h:i A'),
+            'saved_at' => optional($target->updated_at)->timezone('Asia/Kolkata')->format('d-m-Y H:i'),
             'applied_count' => (int) ($applyStats['applied'] ?? 0),
             'stats' => $applyStats,
             'approvals' => $this->serializeApprovals($root->approvals),

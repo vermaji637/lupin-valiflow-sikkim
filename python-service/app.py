@@ -7,6 +7,7 @@ from doc_parser import (
     dedupe_colon_label,
     dedupe_repeated_text,
     has_paragraph_blank,
+    find_paragraph_blanks,
     is_locked_section_title,
     is_section_heading_paragraph,
     collect_paragraph_texts,
@@ -20,6 +21,7 @@ from doc_parser import (
     normalize_attachment_list_paragraphs_to_table,
     is_attachment_upload_column,
     is_report_approval_block_table,
+    is_signature_table,
     get_table_column_headers,
     resolve_sl_no_column_index,
     infer_field_widget,
@@ -1801,6 +1803,173 @@ def _append_verification_pid_notes(
     return True
 
 
+def _split_toc_entry_lines(text: str) -> list[str]:
+    """
+    Split TOC cell/paragraph text into one entry per section.
+    Handles Word cells that pack '7.0 … 5\\n8.0 … 6' (or a lost newline) into one cell.
+    """
+    if not text or not str(text).strip():
+        return []
+    raw = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    out: list[str] = []
+    for ln in raw.split("\n"):
+        ln = ln.strip()
+        if not ln:
+            continue
+        # Split merged entries when a second 'N.N TITLE' starts mid-line.
+        parts = re.split(r"(?=(?<!\d)\d+\.\d+\s+[A-Za-z(])", ln)
+        parts = [p.strip() for p in parts if p.strip()]
+        if len(parts) > 1:
+            out.extend(parts)
+        else:
+            out.append(ln)
+    return out
+
+
+def _parse_toc_line_title_page(line: str) -> tuple[str, str]:
+    """Return (title, page) from a TOC entry line; page may be empty."""
+    line = (line or "").strip()
+    if not line:
+        return "", ""
+    # Word TOC1: "1.0\\tOBJECTIVE\\t2"
+    if "\t" in line:
+        parts = [p.strip() for p in line.split("\t") if p.strip()]
+        if len(parts) >= 2 and re.fullmatch(r"\d+", parts[-1]):
+            return re.sub(r"\s+", " ", " ".join(parts[:-1])), parts[-1]
+    m = re.search(r"^(.*?)[ \t\.\u2026\u22ef]{3,}\s*(\d+)\s*$", line)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    m2 = re.search(r"^(.*?)[ \t\.\u2026\u22ef]+\s*(\d+)\s*$", line)
+    if m2:
+        return m2.group(1).strip(), m2.group(2).strip()
+    # Stuck page: "1.0 OBJECTIVE2" / "OBJECTIVE2" (tab lost in HTML/plain extract)
+    m3 = re.match(r"^(\d+(?:\.\d+)*\s+.+?)(\d+)\s*$", line)
+    if m3 and not re.search(r"\d$", m3.group(1).rstrip()):
+        return m3.group(1).strip(), m3.group(2).strip()
+    return line, ""
+
+
+def _render_toc_line_html(
+    title_val: str,
+    page_val: str,
+    loc: str,
+    title_loc: str,
+    readonly: bool,
+) -> str:
+    """One Word-style TOC row: title + dotted leaders + page number."""
+    m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title_val or "")
+    sec_num = m_sec.group(1) if m_sec else ""
+    clean_title = m_sec.group(2) if m_sec else (title_val or "")
+    # Character leaders so PDF / print still show dots (border-bottom alone often vanishes).
+    dots = (
+        '<span class="toc-dots" aria-hidden="true">'
+        ".................................................."
+        "</span>"
+    )
+    if readonly:
+        page_html = (
+            f'<span class="toc-page" data-field="{_escape_html(loc)}" '
+            f'data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}">'
+            f"{_escape_html(page_val)}</span>"
+        )
+        title_html = f'<span class="toc-title">{_escape_html(title_val)}</span>'
+    else:
+        title_html = (
+            f'<span class="toc-title">{_escape_html(title_val)}</span>'
+            f'<input type="hidden" name="fields[{title_loc}]" '
+            f'class="docx-toc-title-input" value="{_escape_html(title_val)}">'
+        )
+        page_html = (
+            f'<input type="number" min="1" max="999" name="fields[{loc}]" '
+            f'class="docx-input docx-toc-page-input" '
+            f'data-toc-sec="{_escape_html(sec_num)}" '
+            f'data-toc-title="{_escape_html(clean_title)}" '
+            f'value="{_escape_html(page_val)}">'
+        )
+    return (
+        f'<div class="docx-toc-line" data-toc-sec="{_escape_html(sec_num)}" '
+        f'data-toc-title="{_escape_html(clean_title)}">'
+        f"{title_html}{dots}{page_html}</div>"
+    )
+
+
+def _render_toc_list_table_as_card(table, t_idx: int, field_map: dict, mode: str = "edit") -> str:
+    """
+    Att14-style single-column TOC tables → Word-like TOC card (one line per section).
+    Keeps 7.0 / 8.0 on separate rows even when Word packed them in one cell.
+    """
+    readonly = _is_readonly_mode(mode)
+    lines_html: list[str] = []
+    for r_idx, row in enumerate(table.rows):
+        cell = row.cells[0] if row.cells else None
+        text = (cell.text or "").strip() if cell is not None else ""
+        # Per-row l_idx keeps locations stable (table_0_row_8_toc_0 / _toc_1 for 7.0/8.0).
+        for l_idx, line in enumerate(_split_toc_entry_lines(text)):
+            title_part, page_part = _parse_toc_line_title_page(line)
+            if not title_part:
+                continue
+            loc = f"table_{t_idx}_row_{r_idx}_toc_{l_idx}"
+            title_loc = f"{loc}_title"
+            page_val = page_part
+            title_val = title_part
+            if field_map and loc in field_map:
+                stored = field_map[loc].get("value")
+                if stored is not None and str(stored).strip() != "":
+                    page_val = str(stored).strip()
+            if field_map and title_loc in field_map:
+                stored_title = field_map[title_loc].get("value")
+                if stored_title is not None and str(stored_title).strip() != "":
+                    title_val = str(stored_title).strip()
+            lines_html.append(
+                _render_toc_line_html(title_val, page_val, loc, title_loc, readonly)
+            )
+    if not lines_html:
+        return ""
+    return (
+        '<div class="docx-toc-card" data-toc-table="'
+        + str(t_idx)
+        + '">'
+        + '<div class="docx-toc-heading">TABLE OF CONTENTS</div>'
+        + "".join(lines_html)
+        + "</div>"
+    )
+
+
+def _paragraph_style_val(p_element) -> str:
+    """Return Word paragraph style id (e.g. TOC1 / toc 1) from a p element."""
+    try:
+        from docx.oxml.ns import qn as _qn
+
+        p_pr = p_element.find(_qn("w:pPr"))
+        if p_pr is None:
+            return ""
+        ps = p_pr.find(_qn("w:pStyle"))
+        if ps is None:
+            return ""
+        return (ps.get(_qn("w:val")) or "").strip()
+    except Exception:
+        return ""
+
+
+def _is_word_toc_body_line(p_element, para_text: str = "") -> bool:
+    """
+    True for IOQ body TOC rows (style toc 1 / TOC1) like '1.0\\tOBJECTIVE\\t2'.
+    These must render as dotted toc-lines — never plain 'OBJECTIVE2' text.
+    """
+    style = _paragraph_style_val(p_element).lower().replace(" ", "")
+    title, page = _parse_toc_entry_element(p_element)
+    if not title or not page:
+        # Fall back to visible text (tabs may already be spaces).
+        title2, page2 = _parse_toc_line_title_page(para_text or "")
+        title, page = title2, page2
+    if not title or not page:
+        return False
+    if style.startswith("toc"):
+        return True
+    raw = para_text or ""
+    return ("\t" in raw) or bool(re.search(r"[\.\u2026]{3,}", raw)) or is_toc_entry_text(raw)
+
+
 def _parse_toc_entry_element(p_element) -> tuple[str, str]:
     """Extract clean title and page number from a Word TOC paragraph."""
     tokens = []
@@ -1809,10 +1978,19 @@ def _parse_toc_entry_element(p_element) -> tuple[str, str]:
         if tag == "t" and elem.text:
             tokens.append(elem.text)
         elif tag == "tab":
-            tokens.append(" ")
+            tokens.append("\t")
     raw = "".join(tokens).strip()
     if not raw or _is_toc_title_text(raw):
         return "", ""
+
+    # Word TOC1 often uses tabs: "1.0\\tOBJECTIVE\\t2"
+    if "\t" in raw:
+        parts = [p.strip() for p in raw.split("\t") if p.strip()]
+        if len(parts) >= 2 and re.fullmatch(r"\d+", parts[-1]):
+            page_num = parts[-1]
+            title_part = " ".join(parts[:-1]).strip()
+            title_part = re.sub(r"[\.\u2026\u22ef_:]+$", "", title_part).strip()
+            return re.sub(r"\s+", " ", title_part), page_num
 
     # Match trailing page number (digits at end)
     m = re.search(r"^(.*?)[ \t\.\u2026\u22ef]+(\d+)\s*$", raw)
@@ -2692,7 +2870,8 @@ def _render_paragraph(
         pseudo = {"type": "paragraph_radio", "label": paragraph_yes_no_label(para_text), "value": ""}
         return _render_paragraph_yes_no_radio(para_index, para_text, pseudo, mode)
 
-    # Body-walk text may expose a colon-blank label while para.text was empty at parse time.
+    # Body-walk text may expose a blank while para was skipped at parse time
+    # (e.g. ALL-CAPS "(IOQ) REPORT FOR OF ……….. MACHINE" mis-classified as heading).
     if (
         (field is None or field.get("type") == "paragraph_checkbox")
         and not _is_readonly_mode(mode)
@@ -2700,7 +2879,11 @@ def _render_paragraph(
     ):
         normalized = dedupe_colon_label(para_text)
         display_label = re.sub(r":\s*$", "", normalized).strip() or normalized
-        if is_date_field_label(display_label) or PARA_COLON_BLANK_RE.search(normalized):
+        if (
+            is_date_field_label(display_label)
+            or PARA_COLON_BLANK_RE.search(normalized)
+            or find_paragraph_blanks(normalized)
+        ):
             field = {
                 "label": display_label,
                 "value": "",
@@ -2715,6 +2898,15 @@ def _render_paragraph(
         # second/third approval readonly preview (Remarks dotted lines, Reviewed By, …).
         display = _render_readonly_span(field.get("value", ""), field, loc)
         label_text = field.get("label") or para_text
+        bold_title = bool(
+            re.search(
+                r"\(IOQ\)\s*REPORT\s+FOR|Identification\s*No\.?\s*:",
+                para_text or label_text or "",
+                re.I,
+            )
+        )
+        bold_cls = " docx-para-bold-title" if bold_title else ""
+        bold_style = ' style="font-weight:700;"' if bold_title else ""
         blank_source = (
             para_text
             if "{{BLANK}}" in para_text
@@ -2726,17 +2918,17 @@ def _render_paragraph(
             for segment in parts[1:]:
                 html_parts.append(display)
                 html_parts.append(_escape_html(segment))
-            return f'<p class="docx-para">{"".join(html_parts)}</p>'
+            return f'<p class="docx-para{bold_cls}"{bold_style}>{"".join(html_parts)}</p>'
         if PARA_COLON_BLANK_RE.search(dedupe_colon_label(para_text).strip()):
             if _value_repeats_colon_label(para_text, field.get("value", "")):
-                return f'<p class="docx-para">{_escape_html(dedupe_colon_label(para_text))}</p>'
+                return f'<p class="docx-para{bold_cls}"{bold_style}>{_escape_html(dedupe_colon_label(para_text))}</p>'
             label_part = re.sub(r":\s*$", ": ", dedupe_colon_label(para_text))
-            return f'<p class="docx-para">{_escape_html(label_part)}{display}</p>'
+            return f'<p class="docx-para{bold_cls}"{bold_style}>{_escape_html(label_part)}{display}</p>'
         match = PARA_BLANK_RE.search(para_text)
         if match:
             before = _escape_html(para_text[: match.start()])
             after = _escape_html(para_text[match.end() :])
-            return f'<p class="docx-para">{before}{display}{after}</p>'
+            return f'<p class="docx-para{bold_cls}"{bold_style}>{before}{display}{after}</p>'
         # Leader-dot / ellipsis-only lines: show value instead of empty template dots.
         if PARA_BLANK_RE.fullmatch(para_text.strip() or "") or re.fullmatch(
             r"[\s\.\u2026…]+", para_text or ""
@@ -2792,16 +2984,30 @@ def _render_paragraph(
 
         # Underscore / dot leader blank — inline input at first placeholder
         match = PARA_BLANK_RE.search(para_text)
+        # Att14: "(IOQ) REPORT FOR … MACHINE" / Identification titles are bold in Word.
+        bold_title = bool(
+            re.search(
+                r"\(IOQ\)\s*REPORT\s+FOR|Identification\s*No\.?\s*:",
+                para_text or "",
+                re.I,
+            )
+        )
+        bold_cls = " docx-para-bold-title" if bold_title else ""
+        bold_style = ' style="font-weight:700;"' if bold_title else ""
         if match:
             before = _escape_html(para_text[: match.start()])
             after = _escape_html(para_text[match.end() :])
-            return f'<p class="docx-para docx-para-editable">{before}{inp}{after}</p>'
+            return (
+                f'<p class="docx-para docx-para-editable{bold_cls}"{bold_style}>'
+                f"{before}{inp}{after}</p>"
+            )
 
         if para_text:
             return (
-                f'<p class="docx-para docx-para-editable">{prefix_html}{_escape_html(para_text)} {inp}</p>'
+                f'<p class="docx-para docx-para-editable{bold_cls}"{bold_style}>'
+                f"{prefix_html}{_escape_html(para_text)} {inp}</p>"
             )
-        return f'<p class="docx-para docx-para-editable">{inp}</p>'
+        return f'<p class="docx-para docx-para-editable{bold_cls}"{bold_style}>{inp}</p>'
 
     # Locked in edit mode: show stored value (or template text) without an input.
     if field and _is_field_locked(field):
@@ -3112,8 +3318,69 @@ def _render_table_header_row_html(table, t_idx: int, readonly: bool = False) -> 
     return "".join(parts)
 
 
+def _table_grid_col_widths_dxa(table) -> list[int]:
+    """Return Word tblGrid column widths in twips (dxa), or [] when unavailable."""
+    try:
+        grid = table._tbl.find(qn("w:tblGrid"))
+        if grid is None:
+            return []
+        widths: list[int] = []
+        for col in grid.findall(qn("w:gridCol")):
+            raw = col.get(qn("w:w"))
+            if raw and str(raw).isdigit() and int(raw) > 0:
+                widths.append(int(raw))
+        return widths
+    except Exception:
+        return []
+
+
+def _is_dept_signature_layout_table(table) -> bool:
+    """
+    Prepared/Checked/Approved By tables: Department | Name & Designation | Signature & Date.
+    Long department labels (e.g. Head - Quality Assurance) must stay clipped in col_0.
+    """
+    if not table.rows:
+        return False
+    try:
+        header = [c.text.strip() for c in table.rows[0].cells]
+    except Exception:
+        return False
+    if not is_signature_table(header):
+        return False
+    blob = " ".join(header).lower()
+    return (
+        "name" in blob
+        and ("designation" in blob or "signature" in blob or "date" in blob)
+        and any(k in blob for k in ("prepared by", "checked by", "approved by"))
+    )
+
+
+def _render_table_colgroup(table) -> str:
+    """Emit <colgroup> from Word grid so signature columns match the original DOCX."""
+    widths = _table_grid_col_widths_dxa(table)
+    if len(widths) < 2:
+        return ""
+    total = sum(widths) or 1
+    parts = ["<colgroup>"]
+    for w in widths:
+        pct = max(8.0, round((w / total) * 1000) / 10.0)
+        parts.append(f'<col style="width:{pct}%;">')
+    parts.append("</colgroup>")
+    return "".join(parts)
+
+
 def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_tracker: list = None, header_tpl: str = "", footer_tpl: str = "", num_resolver=None, hard_page_breaks_only: bool = False) -> str:
-    html = [f'<table class="docx-table" data-table-index="{t_idx}">']
+    # Att14 Discussion Report: 1-col TOC list → card with one line per section
+    # (Word packs 7.0 + 8.0 in one cell; card split keeps them separate).
+    if is_toc_list_table(table):
+        return _render_toc_list_table_as_card(table, t_idx, field_map, mode)
+
+    dept_sig = _is_dept_signature_layout_table(table)
+    extra_cls = " docx-dept-signature-table" if dept_sig else ""
+    html = [f'<table class="docx-table{extra_cls}" data-table-index="{t_idx}">']
+    colgroup = _render_table_colgroup(table)
+    if colgroup:
+        html.append(colgroup)
     readonly = _is_readonly_mode(mode)
     sl_no_col = _table_sl_no_col_index(table)
     toc_table = is_toc_table(table) or is_toc_list_table(table)
@@ -3444,15 +3711,13 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
 
             if toc_table or is_toc_entry_text(text):
                 style = _inline_cell_style(cell_style, readonly=readonly)
-                lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+                lines = _split_toc_entry_lines(text)
                 rendered_lines = []
                 for l_idx, line in enumerate(lines):
-                    m_toc = re.search(r"^(.*?)[ \t\.\u2026\u22ef]{3,}\s*(\d+)\s*$", line)
-                    if m_toc and not readonly:
-                        title_part = m_toc.group(1).strip()
-                        page_part = m_toc.group(2).strip()
+                    title_part, page_part = _parse_toc_line_title_page(line)
+                    if title_part and page_part:
                         loc = f"table_{t_idx}_row_{r_idx}_toc_{l_idx}"
-                        title_loc = f"table_{t_idx}_row_{r_idx}_toc_{l_idx}_title"
+                        title_loc = f"{loc}_title"
                         val = page_part
                         title_val = title_part
                         if field_map and loc in field_map:
@@ -3463,32 +3728,8 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                             stored_title = field_map[title_loc].get("value")
                             if stored_title is not None and str(stored_title).strip() != "":
                                 title_val = str(stored_title).strip()
-                        m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title_val)
-                        sec_num = m_sec.group(1) if m_sec else ""
-                        clean_title = m_sec.group(2) if m_sec else title_val
-                        # Titles are locked (Word TOC text); only page digits are editable.
                         rendered_lines.append(
-                            f'<div class="docx-toc-line" style="display: flex; align-items: center; justify-content: space-between; padding: 2px 0; gap: 8px;" data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}">'
-                            f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500; font-size: 13px; color: #1e293b;">{_escape_html(title_val)}</span>'
-                            f'<input type="hidden" name="fields[{title_loc}]" class="docx-toc-title-input" value="{_escape_html(title_val)}">'
-                            f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 4px; min-width: 16px; height: 1em;"></span>'
-                            f'<input type="number" min="1" max="999" name="fields[{loc}]" '
-                            f'class="docx-input docx-toc-page-input" '
-                            f'data-toc-sec="{_escape_html(sec_num)}" '
-                            f'data-toc-title="{_escape_html(clean_title)}" '
-                            f'value="{_escape_html(val)}" '
-                            f'style="width: 52px; height: 26px; text-align: center; font-weight: 600; font-size: 12px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7;">'
-                            f'</div>'
-                        )
-                    elif m_toc and readonly:
-                        title_part = m_toc.group(1).strip()
-                        page_part = m_toc.group(2).strip()
-                        rendered_lines.append(
-                            f'<div class="docx-toc-line" style="display: flex; align-items: baseline; justify-content: space-between; padding: 2px 0;">'
-                            f'<span class="toc-title">{_escape_html(title_part)}</span>'
-                            f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 8px; min-width: 16px; height: 1em;"></span>'
-                            f'<span class="toc-page" style="font-weight: 600; font-size: 13px;">{_escape_html(page_part)}</span>'
-                            f'</div>'
+                            _render_toc_line_html(title_val, val, loc, title_loc, readonly)
                         )
                     else:
                         if toc_table and not readonly:
@@ -3500,13 +3741,16 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                                 stored = field_map[loc].get("value")
                                 if stored is not None and str(stored).strip() != "":
                                     cell_val = str(stored).strip()
-                            # Lock TOC title text; page digits use the dotted-line branch above.
                             rendered_lines.append(
-                                f'<span class="toc-title" style="font-weight:500;font-size:13px;color:#1e293b;">{_escape_html(cell_val)}</span>'
+                                f'<div class="docx-toc-line">'
+                                f'<span class="toc-title">{_escape_html(cell_val)}</span>'
                                 f'<input type="hidden" name="fields[{loc}]" class="docx-toc-title-input" value="{_escape_html(cell_val)}">'
+                                f"</div>"
                             )
                         else:
-                            rendered_lines.append(f'<div>{_escape_html(line)}</div>')
+                            rendered_lines.append(
+                                f'<div class="docx-toc-line">{_escape_html(line)}</div>'
+                            )
                 cell_content = "".join(rendered_lines) if rendered_lines else _escape_html(text)
                 html.append(
                     f'<td class="docx-cell" style="{style}"{rowspan_attr}{colspan_attr}>'
@@ -4366,11 +4610,83 @@ def build_fill_html(
             )
         )
 
+    # Body TOC1 paragraphs (IOQ PR-WBL-046): group into one dotted TOC card.
+    toc_card_open = False
+    toc_body_idx = 0
+
+    def _close_body_toc_card(*, force_page: bool = False) -> None:
+        nonlocal toc_card_open
+        if not toc_card_open:
+            return
+        html_parts.append("</div>")
+        toc_card_open = False
+        if force_page and not _is_readonly_mode(mode):
+            _force_new_page()
+
+    def _open_body_toc_card() -> None:
+        nonlocal toc_card_open
+        if toc_card_open:
+            return
+        html_parts.append('<div class="docx-toc-card">')
+        if _is_readonly_mode(mode):
+            html_parts.append('<div class="docx-toc-heading">TABLE OF CONTENTS</div>')
+        else:
+            html_parts.append(
+                '<div class="docx-toc-heading" style="display: flex; justify-content: space-between; '
+                'align-items: center; margin-bottom: 12px;">'
+                '<span style="font-weight: 700; font-size: 14px; color: #334155; text-transform: uppercase; '
+                'letter-spacing: 0.5px;">TABLE OF CONTENTS</span>'
+                '<button type="button" class="btn btn-sm btn-outline-primary btn-sync-toc" id="btnAutoSyncToc" '
+                'style="font-size: 11px; padding: 2px 10px; border-radius: 12px; cursor: pointer; '
+                'background: #fff; border: 1px solid #007bff; color: #007bff;" '
+                'title="Auto-calculate page numbers based on document content length">'
+                '<i class="fas fa-sync-alt mr-1"></i> Auto-Calculate Page Numbers'
+                "</button>"
+                "</div>"
+            )
+        toc_card_open = True
+
+    def _emit_body_toc_line(p_el, para_text: str = "") -> bool:
+        """Render one Word TOC1 body line with dotted leaders. Returns True if emitted."""
+        nonlocal toc_body_idx
+        title, page = _parse_toc_entry_element(p_el)
+        if not title or not page:
+            title2, page2 = _parse_toc_line_title_page(para_text or "")
+            if title2 and page2:
+                title, page = title2, page2
+        if not title:
+            return False
+        _open_body_toc_card()
+        loc = f"toc_sdt_{toc_body_idx}"
+        title_loc = f"{loc}_title"
+        page_val = page or ""
+        title_val = title
+        if field_map and loc in field_map:
+            stored = field_map[loc].get("value")
+            if stored is not None and str(stored).strip() != "":
+                page_val = str(stored).strip()
+        if field_map and title_loc in field_map:
+            stored_title = field_map[title_loc].get("value")
+            if stored_title is not None and str(stored_title).strip() != "":
+                title_val = str(stored_title).strip()
+        html_parts.append(
+            _render_toc_line_html(
+                title_val,
+                page_val,
+                loc,
+                title_loc,
+                _is_readonly_mode(mode),
+            )
+        )
+        toc_body_idx += 1
+        return True
+
     # Walk doc.element.body in document order — render tables and paragraphs as they appear.
     for child in doc.element.body:
         tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
 
         if tag == "tbl":
+            _close_body_toc_card(force_page=True)
             if table_idx < len(doc.tables):
                 html_parts.append(
                     _render_table(
@@ -4399,10 +4715,14 @@ def build_fill_html(
             para_index = _para_index_for_element(child, paragraphs)
             if para_index is None:
                 para_text = _para_text_from_element(child)
-                if para_text:
-                    # Skip orphan TOC title (card header covers it).
-                    if _is_toc_title_text(para_text):
+                if para_text and _is_toc_title_text(para_text):
+                    continue
+                if _is_word_toc_body_line(child, para_text or ""):
+                    if _emit_body_toc_line(child, para_text or ""):
+                        has_content_on_page = True
                         continue
+                _close_body_toc_card(force_page=True)
+                if para_text:
                     num_prefix, is_bullet = num_resolver.prefix_for_p(child)
                     if has_content_on_page and (
                         _element_has_page_break(child, hard_only=hard_page_breaks_only)
@@ -4433,6 +4753,15 @@ def build_fill_html(
             _peek_text = para_text_by_index.get(
                 para_index, _para_text_from_element(child, exclude_textboxes=True)
             )
+            if _peek_text and _is_toc_title_text(_peek_text):
+                continue
+            if _is_word_toc_body_line(child, _peek_text or ""):
+                # Still advance list counters for ghost numPr on TOC rows.
+                num_resolver.prefix_for_p(child)
+                if _emit_body_toc_line(child, _peek_text or ""):
+                    has_content_on_page = True
+                    continue
+            _close_body_toc_card(force_page=True)
             # Advance/cache numbering once so major-tail detection sees "10.0 DEVIATIONS".
             _peek_prefix, _ = num_resolver.prefix_for_p(child)
             if has_content_on_page and (
@@ -4506,6 +4835,7 @@ def build_fill_html(
                 has_content_on_page = True
 
         elif tag == "sdt":
+            _close_body_toc_card(force_page=True)
             if _element_has_page_break(child, hard_only=hard_page_breaks_only) and has_content_on_page:
                 page_tracker[0] += 1
                 next_p = page_tracker[0]
@@ -4535,17 +4865,12 @@ def build_fill_html(
                     if title:
                         toc_entries.append((title, page))
                 if toc_entries:
-                    html_parts.append(
-                        '<div class="docx-toc-card" style="margin: 16px 0; padding: 16px 20px; '
-                        'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-family: inherit;">'
-                    )
+                    html_parts.append('<div class="docx-toc-card">')
                     # Title stays inside the TOC card (Word: TOC page only — never
                     # above 1.0 OBJECTIVE on the following sheet).
                     if _is_readonly_mode(mode):
                         html_parts.append(
-                            '<div class="docx-toc-heading" style="font-weight: 700; font-size: 14px; color: #334155; '
-                            'margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px;">'
-                            'TABLE OF CONTENTS</div>'
+                            '<div class="docx-toc-heading">TABLE OF CONTENTS</div>'
                         )
                     else:
                         html_parts.append(
@@ -4559,7 +4884,7 @@ def build_fill_html(
                     for toc_idx, (title, page) in enumerate(toc_entries):
                         loc = f"toc_sdt_{toc_idx}"
                         title_loc = f"toc_sdt_{toc_idx}_title"
-                        val = page
+                        val = page or ""
                         title_val = title
                         if field_map and loc in field_map:
                             stored = field_map[loc].get("value")
@@ -4569,48 +4894,20 @@ def build_fill_html(
                             stored_title = field_map[title_loc].get("value")
                             if stored_title is not None and str(stored_title).strip() != "":
                                 title_val = str(stored_title).strip()
-                        m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title_val)
-                        sec_num = m_sec.group(1) if m_sec else ""
-                        clean_title = m_sec.group(2) if m_sec else title_val
-                        if page:
-                            if _is_readonly_mode(mode):
-                                page_html = (
-                                    f'<span class="toc-page" data-field="{_escape_html(loc)}" '
-                                    f'data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}" '
-                                    f'style="flex-shrink: 0; font-weight: 600; color: #1e293b;">{_escape_html(val)}</span>'
-                                )
-                                title_html = f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500;">{_escape_html(title_val)}</span>'
-                            else:
-                                # Lock section titles (1.0 OBJECTIVE…); only page number is editable.
-                                title_html = (
-                                    f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500; font-size: 13px; color: #1e293b;">'
-                                    f'{_escape_html(title_val)}</span>'
-                                    f'<input type="hidden" name="fields[{title_loc}]" '
-                                    f'class="docx-toc-title-input" value="{_escape_html(title_val)}">'
-                                )
-                                page_html = (
-                                    f'<span class="toc-page-wrap" style="flex-shrink: 0; display: inline-flex; align-items: center;">'
-                                    f'<input type="number" min="1" max="999" name="fields[{loc}]" '
-                                    f'class="docx-input docx-toc-page-input" '
-                                    f'data-toc-sec="{_escape_html(sec_num)}" '
-                                    f'data-toc-title="{_escape_html(clean_title)}" '
-                                    f'value="{_escape_html(val)}" '
-                                    f'style="width: 52px; height: 26px; text-align: center; font-weight: 600; font-size: 13px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7; margin-left: 6px;">'
-                                    f'</span>'
-                                )
+                        if page or val:
                             html_parts.append(
-                                f'<div class="docx-toc-line" style="display: flex; align-items: center; justify-content: space-between; '
-                                f'padding: 3px 0; font-size: 13px; color: #334155; line-height: 1.6; gap: 8px;" '
-                                f'data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}">'
-                                f'{title_html}'
-                                f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 4px; min-width: 20px; height: 1em;"></span>'
-                                f'{page_html}'
-                                f'</div>'
+                                _render_toc_line_html(
+                                    title_val,
+                                    val,
+                                    loc,
+                                    title_loc,
+                                    _is_readonly_mode(mode),
+                                )
                             )
                         else:
                             html_parts.append(
-                                f'<div class="docx-toc-line" style="padding: 4px 0; font-size: 13px; color: #334155; line-height: 1.6;">'
-                                f'<span class="toc-title" style="font-weight: 500;">{_escape_html(title_val)}</span>'
+                                f'<div class="docx-toc-line">'
+                                f'<span class="toc-title">{_escape_html(title_val)}</span>'
                                 f'</div>'
                             )
                     html_parts.append('</div>')
@@ -4619,6 +4916,7 @@ def build_fill_html(
                     if not _is_readonly_mode(mode):
                         _force_new_page()
 
+    _close_body_toc_card()
     last_f = footer_html_tpl.replace("{PAGE}", str(page_tracker[0]))
     html_parts.append(f"</div>\n{last_f}\n</div>")  # close .docx-page-body and .docx-a4-page
     html_parts.append("</div>")  # close .docx-preview

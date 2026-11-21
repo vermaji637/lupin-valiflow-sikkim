@@ -148,7 +148,7 @@
                             <td><?php echo e($protocolTitle !== '' ? $protocolTitle : '-'); ?></td>
                             <td><?php echo e($equipmentName !== '' ? $equipmentName : '-'); ?></td>
                             <td><?php echo e($equipmentId !== '' ? $equipmentId : '-'); ?></td>
-                            <td><?php echo e(optional($r->created_at)->format('d-m-Y h:i A')); ?></td>
+                            <td><?php echo e(optional($r->created_at)->timezone('Asia/Kolkata')->format('d-m-Y H:i')); ?></td>
 
                             <td>
                                 <?php if($docxNeedsFill && $r->docx_import_status === 'pending'): ?>

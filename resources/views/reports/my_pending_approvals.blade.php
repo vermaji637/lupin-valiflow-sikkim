@@ -51,7 +51,7 @@
                   <td>{{ $protocolTitle !== '' ? $protocolTitle : '-' }}</td>
                   <td>{{ $equipmentName !== '' ? $equipmentName : '-' }}</td>
                   <td>{{ $equipmentId !== '' ? $equipmentId : '-' }}</td>
-                  <td>{{ optional($r->created_at)->format('d-m-Y h:i A') }}</td>
+                  <td>{{ optional($r->created_at)->timezone('Asia/Kolkata')->format('d-m-Y H:i') }}</td>
                   <td>
                     <span class="badge {{ $badgeClass }}">{{ $status }}</span>
                   </td>

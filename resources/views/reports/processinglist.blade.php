@@ -109,7 +109,7 @@
                                 <td>{{ $protocolTitle !== '' ? $protocolTitle : '-' }}</td>
                                 <td>{{ $equipmentName !== '' ? $equipmentName : '-' }}</td>
                                 <td>{{ $equipmentId !== '' ? $equipmentId : '-' }}</td>
-                                <td>{{ optional($r->created_at)->format('d-m-Y h:i A') }}</td>
+                                <td>{{ optional($r->created_at)->timezone('Asia/Kolkata')->format('d-m-Y H:i') }}</td>
                                 <td><span class="chip user-role-chip">{{ strtoupper($r->status) }}</span></td>
                                 <td><a href="{{ route('reports.show', $r) }}" class="btn btn-primary btn-compact">Open</a></td>
                             </tr>

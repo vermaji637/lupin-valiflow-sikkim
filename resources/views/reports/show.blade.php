@@ -522,6 +522,23 @@
         font-size: 13px;
         table-layout: fixed;
     }
+    /* Prepared/Checked/Approved By: keep department labels (Head - Quality Assurance)
+       in col_0 — never let Name & Designation overflow into that column. */
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table.docx-dept-signature-table td,
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table.docx-dept-signature-table th {
+        overflow: hidden !important;
+        text-overflow: clip !important;
+        vertical-align: middle;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table.docx-dept-signature-table td .docx-readonly-value,
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table.docx-dept-signature-table th .docx-readonly-value {
+        display: block;
+        max-width: 100%;
+        overflow: hidden;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+    }
     body.premium-app #reportReadonlyBody .docx-preview-wrapper table.docx-table.header-table {
         table-layout: fixed;
         margin-bottom: 0;
@@ -573,6 +590,61 @@
         margin: 6px 0;
         font-size: 13px;
         line-height: 1.5;
+    }
+    /* Att14 TOC: Word-like leaders, one section per line, right-aligned pages */
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-toc-card {
+        background: #ffffff;
+        border: 1px solid #94a3b8;
+        border-radius: 0;
+        padding: 12px 16px 14px;
+        margin: 12px 0 18px;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-toc-card .docx-toc-heading {
+        font-weight: 700;
+        font-size: 14px;
+        text-align: center;
+        letter-spacing: 0.04em;
+        margin: 0 0 10px;
+        color: #0f172a;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-toc-line {
+        display: flex !important;
+        align-items: baseline !important;
+        width: 100% !important;
+        padding: 4px 0 !important;
+        margin: 0 !important;
+        line-height: 1.55 !important;
+        font-size: 13px !important;
+        color: #1e293b !important;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-toc-line .toc-title {
+        flex: 0 1 auto !important;
+        max-width: 72% !important;
+        font-weight: 500 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-toc-line .toc-dots {
+        flex: 1 1 auto !important;
+        min-width: 28px !important;
+        margin: 0 8px !important;
+        border: none !important;
+        overflow: hidden !important;
+        white-space: nowrap !important;
+        letter-spacing: 1px !important;
+        color: #475569 !important;
+        font-size: 12px !important;
+        line-height: 1.2 !important;
+        align-self: center !important;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-para-bold-title {
+        font-weight: 700 !important;
+    }
+    body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-toc-line .toc-page {
+        flex: 0 0 auto !important;
+        font-weight: 600 !important;
+        text-align: right !important;
+        min-width: 1.5em;
     }
     body.premium-app #reportReadonlyBody .docx-preview-wrapper .docx-readonly-value {
         display: inline-block;

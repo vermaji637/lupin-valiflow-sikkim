@@ -14,6 +14,7 @@ from doc_parser import (
     is_sl_no_column_header,
     is_two_col_grid_table,
     is_two_col_header_row,
+    is_toc_list_table,
 )
 import regex as re
 import os
@@ -1060,11 +1061,30 @@ def _append_colon_blank_value(para, value: str) -> bool:
 def _fill_paragraph_blank(para, value: str) -> None:
     """Replace the first blank placeholder in a paragraph."""
     value = _normalize_text_value(value)
+    # Att14 titles "(IOQ) REPORT FOR … MACHINE" / Identification are bold in Word —
+    # keep that when rewriting runs after fill.
+    was_bold = any(
+        (r.bold is True) for r in para.runs if (r.text or "").strip() and not _run_has_image(r)
+    )
+    if not was_bold:
+        # Whole-paragraph bold via style / rPr on first non-empty run.
+        for r in para.runs:
+            if (r.text or "").strip() and not _run_has_image(r):
+                try:
+                    rpr = r._element.find(qn("w:rPr"))
+                    if rpr is not None and rpr.find(qn("w:b")) is not None:
+                        was_bold = True
+                except Exception:
+                    pass
+                break
+
     for run in para.runs:
         if _run_has_image(run):
             continue
         if PARA_BLANK_RE.search(run.text):
             run.text = PARA_BLANK_RE.sub(value, run.text, count=1)
+            if was_bold:
+                run.bold = True
             _fix_overhanging_list_indent(para)
             return
 
@@ -1073,7 +1093,9 @@ def _fill_paragraph_blank(para, value: str) -> None:
         new_text = PARA_BLANK_RE.sub(value, full_text, count=1)
         if para.runs:
             _clear_text_runs(para)
-            para.add_run(new_text)
+            new_run = para.add_run(new_text)
+            if was_bold:
+                new_run.bold = True
         _fix_overhanging_list_indent(para)
         return
 
@@ -1082,7 +1104,9 @@ def _fill_paragraph_blank(para, value: str) -> None:
             return
         new_text = re.sub(r":\s*$", f": {value}", full_text.strip())
         _clear_text_runs(para)
-        para.add_run(new_text)
+        new_run = para.add_run(new_text)
+        if was_bold:
+            new_run.bold = True
         _fix_overhanging_list_indent(para)
 
 
@@ -1320,12 +1344,20 @@ def _apply_single_field(
                     paras = cell.paragraphs
                     if l_i < len(paras):
                         p_el = paras[l_i]._element
-                        W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-                        for node in reversed(p_el.findall(f".//{{{W_NS}}}t")):
-                            txt = (node.text or "").strip()
-                            if re.search(r"\d+\s*$", txt):
-                                node.text = re.sub(r"\d+\s*$", str(value).strip(), node.text)
-                                break
+                        title, _old = _parse_toc_title_from_element(p_el)
+                        if title:
+                            _rewrite_toc_paragraph_element(
+                                p_el, title, str(value).strip()
+                            )
+                        else:
+                            W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                            for node in reversed(p_el.findall(f".//{{{W_NS}}}t")):
+                                txt = (node.text or "").strip()
+                                if re.search(r"\d+\s*$", txt):
+                                    node.text = re.sub(
+                                        r"\d+\s*$", str(value).strip(), node.text
+                                    )
+                                    break
             return
 
         elif location.startswith("header_"):
@@ -1821,6 +1853,14 @@ def _unbold_filled_body_lines(doc) -> None:
         ilvl = _paragraph_numbering_ilvl(child) if has_num else None
 
         if is_neq:
+            # Att14 cover titles stay bold in the original Word template.
+            if re.search(
+                r"\(IOQ\)\s*REPORT\s+FOR|Identification\s*No\.?\s*:",
+                text or "",
+                re.I,
+            ):
+                _ensure_arial_11_on_heading_runs(child)
+                continue
             if has_num:
                 if _should_keep_neq_heading_bold(text, ilvl):
                     _ensure_arial_11_on_heading_runs(child)
@@ -2287,6 +2327,13 @@ def _normalize_neq_document_fonts(doc) -> None:
                 continue
         except Exception:
             pass
+        if re.search(
+            r"\(IOQ\)\s*REPORT\s+FOR|Identification\s*No\.?\s*:",
+            text or "",
+            re.I,
+        ):
+            _ensure_arial_11_on_heading_runs(p_el)
+            continue
         ilvl = _paragraph_numbering_ilvl(p_el) if _paragraph_has_numbering(p_el) else None
         if _paragraph_has_numbering(p_el) and _should_keep_neq_heading_bold(text, ilvl):
             _ensure_arial_11_on_heading_runs(p_el)
@@ -2668,12 +2715,15 @@ def _fill_docx_inner(
     _drop_floating_tables_below_following_text(doc)
     _fill_blank_sl_no_cells(doc)
     _trim_empty_paras_before_attachment_heading(doc, keep=2)
+    # NEQ: TOC sheet must stay free — 1.0 OBJECTIVE starts on the next page.
+    _ensure_neq_body_starts_after_toc(doc)
     _repair_mashed_bullet_cells(doc)
     _repair_abbreviation_entries(doc)
     _keep_approval_names_inside_cells(doc)
     _apply_heading_font_from_paragraph_mark(doc)
     _unbold_filled_body_lines(doc)
     _normalize_neq_document_fonts(doc)
+    _ensure_att14_cover_titles_bold(doc)
     _normalize_requal_body_fonts_to_arial_11(doc)
     _normalize_requal_numbering_fonts(doc)
     _ensure_neq_header_logo_title_gap(doc)
@@ -2686,6 +2736,9 @@ def _fill_docx_inner(
     _pin_annex_footer_inside_page(doc)
     # Re-apply after approval clamp so every body cell keeps ~1-letter padding.
     _ensure_body_cell_margins(doc)
+    # Att14: undo any prior bad rewrite of body "toc 3" headings before TOC realign.
+    _restore_misstyled_att14_body_headings(doc)
+    _ensure_att14_cover_titles_bold(doc)
     # [TOC] Save filled DOCX first, then fix Table of Contents page numbers.
     # Called from API: POST /fill  (and CLI fill). Uses Word first, LibreOffice only as backup.
     doc.save(output_path)
@@ -2693,6 +2746,7 @@ def _fill_docx_inner(
     if toc_updates:
         repaired_values.update(toc_updates)
     # Guarantee every TOC page digit sits on the same right-tab column.
+    # Table TOC (Att14) uses literal ellipsis leaders — tabs do not print in LO PDF.
     _realign_toc_page_columns(doc)
     doc.save(output_path)
 
@@ -2722,12 +2776,16 @@ def normalize_existing_filled_docx(docx_path: str, import_source: str | None = N
         from neq_docx_save import _clamp_inflated_letterhead_top_margin
         _clamp_inflated_letterhead_top_margin(doc)
         _trim_empty_paras_before_attachment_heading(doc, keep=2)
+        _ensure_neq_body_starts_after_toc(doc)
         # Re-apply heading keep/Arial-11 after layout so 8.1 Calibration matches original.
         _unbold_filled_body_lines(doc)
         _normalize_neq_document_fonts(doc)
+        _ensure_att14_cover_titles_bold(doc)
         _normalize_requal_body_fonts_to_arial_11(doc)
         _normalize_requal_numbering_fonts(doc)
         _ensure_neq_header_logo_title_gap(doc)
+        _restore_misstyled_att14_body_headings(doc)
+        _ensure_att14_cover_titles_bold(doc)
         _realign_toc_page_columns(doc)
         doc.save(docx_path)
         return docx_path
@@ -2892,12 +2950,90 @@ def _is_toc_body_paragraph(para) -> bool:
         style = ((para.style.name if para.style else "") or "").lower()
     except Exception:
         style = ""
-    if style.startswith("toc"):
-        return True
     raw = (para.text or "").strip()
+    has_ellipsis = bool(re.search(r"[\.\u2026]{3,}", raw))
+    has_tab = "\t" in raw
+    # Att14 mis-styles body headings (1.0 Objective, 3.2 …) as "toc 3".
+    # Those must never be rewritten as TOC — even after a bad prior fill left a tab+page.
+    if "toc 3" in style or style.replace(" ", "") in ("toc3",):
+        return has_ellipsis
+    if style.startswith("toc"):
+        return has_tab or has_ellipsis
     if not re.match(r"^\d+\.0\b", raw):
         return False
-    return ("\t" in raw) or bool(re.search(r"[\.\u2026]{3,}", raw))
+    return has_tab or has_ellipsis
+
+
+def _ensure_att14_cover_titles_bold(doc) -> int:
+    """Force bold on Att14 '(IOQ) REPORT FOR … MACHINE' / Identification lines."""
+    fixed = 0
+    for para in doc.paragraphs:
+        text = para.text or ""
+        if not re.search(
+            r"\(IOQ\)\s*REPORT\s+FOR|Identification\s*No\.?\s*:",
+            text,
+            re.I,
+        ):
+            continue
+        touched = False
+        for run in para.runs:
+            if not (run.text or "").strip():
+                continue
+            run.bold = True
+            touched = True
+        if touched:
+            fixed += 1
+    return fixed
+
+
+def _restore_misstyled_att14_body_headings(doc) -> int:
+    """
+    Undo bad fills that turned Att14 body headings into \"1.0 Objective\\t2\"
+    because Word marked them style toc 3.
+    """
+    fixed = 0
+    for para in doc.paragraphs:
+        style = ""
+        try:
+            style = ((para.style.name if para.style else "") or "").lower()
+        except Exception:
+            style = ""
+        if "toc 3" not in style and style.replace(" ", "") not in ("toc3",):
+            continue
+        raw = (para.text or "").strip()
+        if not raw or re.search(r"[\.\u2026]{3,}", raw):
+            continue
+        m = re.match(
+            r"^(\d+(?:\.\d+)*\s+[A-Za-z][^\t]*?)(?:\t|\s+)(\d{1,3})\s*$",
+            raw,
+        )
+        if not m:
+            continue
+        title = re.sub(r"\s+", " ", m.group(1)).strip()
+        if not title:
+            continue
+        _clear_text_runs(para)
+        run = para.add_run(title)
+        run.bold = True
+        try:
+            para.style = "Normal"
+        except Exception:
+            pass
+        fixed += 1
+    return fixed
+
+
+def _para_element_in_table(p_el) -> bool:
+    """True when a paragraph OOXML element lives inside a w:tc (TOC table cells)."""
+    parent = p_el.getparent() if p_el is not None else None
+    while parent is not None:
+        tag = parent.tag.split("}")[-1] if isinstance(parent.tag, str) else ""
+        if tag == "tc":
+            return True
+        if tag in ("body", "hdr", "ftr", "document"):
+            return False
+        parent = parent.getparent()
+    return False
 
 
 def _collect_toc_entries_from_doc(doc) -> list[dict]:
@@ -3404,6 +3540,9 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
       \"1.0 OBJECTIVE\" [tab→9000 + dots] 2
     One space after the number (no left-tab column), Arial 11 bold, so long
     titles (10.0 / 13.0) stay on one line with the page digit.
+
+    Att14 TOC lives in a 1-col table — LibreOffice ignores tab leaders inside
+    table cells, so those lines use literal ellipsis leaders like the Word file.
     """
     title = re.sub(r"\s+", " ", (title or "")).strip()
     # Drop trailing leader junk if a prior bad fill left dots on the title.
@@ -3421,8 +3560,9 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
         rest_part = ""
 
     for_neq = _active_is_neq()
+    in_table = _para_element_in_table(p_el)
 
-    # Keep style id (TOC1) if present.
+    # Keep style id (TOC1 / Header) if present.
     style_id = "TOC1"
     old_pr = p_el.find(qn("w:pPr"))
     if old_pr is not None:
@@ -3439,17 +3579,18 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
     ps.set(qn("w:val"), style_id)
     p_pr.append(ps)
     # Match original TOC1 paragraph spacing (before/after 120, single line).
-    if for_neq:
+    if for_neq and not in_table:
         spacing_p = OxmlElement("w:spacing")
         spacing_p.set(qn("w:before"), "120")
         spacing_p.set(qn("w:after"), "120")
         spacing_p.set(qn("w:line"), "240")
         spacing_p.set(qn("w:lineRule"), "auto")
         p_pr.append(spacing_p)
-    # Paragraph-level stops override/merge cleanly; same two stops as style.
-    _ppr_insert_tabs(p_pr, _make_toc_tab_stops(for_neq=for_neq))
-    if for_neq:
-        _ensure_neq_toc1_indent(p_pr)
+    # Body TOC: tab leaders. Table TOC (Att14): literal dots (tabs fail in LO PDF).
+    if not in_table:
+        _ppr_insert_tabs(p_pr, _make_toc_tab_stops(for_neq=for_neq))
+        if for_neq:
+            _ensure_neq_toc1_indent(p_pr)
 
     def _append_text_run(text: str, *, bold: bool = True) -> None:
         if text is None:
@@ -3488,9 +3629,27 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
         tab_run.append(OxmlElement("w:tab"))
         p_el.append(tab_run)
 
-    if for_neq:
+    label = f"{num_part} {rest_part}".strip() if rest_part else num_part
+    if in_table:
+        # Att14 TOC: title left + right-tab (dot leader) + page.
+        # Page digits land on one fixed column (Word + LibreOffice). Literal
+        # ellipsis padding alone cannot align proportional Arial widths.
+        rest = re.sub(r"\s+", " ", (rest_part or "")).strip().upper()
+        label = f"{num_part}   {rest}".rstrip() if rest else num_part
+        page_s = str(page_value).strip()
+        tabs = OxmlElement("w:tabs")
+        right = OxmlElement("w:tab")
+        right.set(qn("w:val"), "right")
+        right.set(qn("w:leader"), "dot")
+        # Att14 TOC cell is 9513 twips — sit the page column just inside the edge.
+        right.set(qn("w:pos"), "9300")
+        tabs.append(right)
+        _ppr_insert_tabs(p_pr, tabs)
+        _append_text_run(label, bold=True)
+        _append_tab()
+        _append_text_run(page_s, bold=True)
+    elif for_neq:
         # Original look: \"1.0 OBJECTIVE\" then right-tab to page (one space only).
-        label = f"{num_part} {rest_part}".strip() if rest_part else num_part
         _append_text_run(label, bold=True)
         _append_tab()
         _append_text_run(page_value, bold=True)
@@ -3533,16 +3692,291 @@ def _iter_toc_paragraph_elements(doc):
                 yield para._element
 
 
+def _toc_run_arial_bold_11(text: str):
+    """One Arial 11 bold run (Att14 TOC look)."""
+    run = OxmlElement("w:r")
+    r_pr = OxmlElement("w:rPr")
+    fonts = OxmlElement("w:rFonts")
+    fonts.set(qn("w:ascii"), "Arial")
+    fonts.set(qn("w:hAnsi"), "Arial")
+    fonts.set(qn("w:cs"), "Arial")
+    r_pr.append(fonts)
+    r_pr.append(OxmlElement("w:b"))
+    r_pr.append(OxmlElement("w:bCs"))
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), "22")
+    r_pr.append(sz)
+    sz_cs = OxmlElement("w:szCs")
+    sz_cs.set(qn("w:val"), "22")
+    r_pr.append(sz_cs)
+    run.append(r_pr)
+    t_el = OxmlElement("w:t")
+    if text.startswith(" ") or text.endswith(" "):
+        t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    t_el.text = text
+    run.append(t_el)
+    return run
+
+
+def _make_toc_tc(width_dxa: str, paragraphs_xml: list) -> "OxmlElement":
+    """Build a table cell with fixed dxa width and the given paragraph elements."""
+    tc = OxmlElement("w:tc")
+    tc_pr = OxmlElement("w:tcPr")
+    tc_w = OxmlElement("w:tcW")
+    tc_w.set(qn("w:w"), str(width_dxa))
+    tc_w.set(qn("w:type"), "dxa")
+    tc_pr.append(tc_w)
+    # Keep Att14 TOC grid clean — no cell borders fighting the page column.
+    tc_borders = OxmlElement("w:tcBorders")
+    for edge in ("top", "left", "bottom", "right"):
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "nil")
+        tc_borders.append(el)
+    tc_pr.append(tc_borders)
+    tc.append(tc_pr)
+    if not paragraphs_xml:
+        paragraphs_xml = [OxmlElement("w:p")]
+    for p_el in paragraphs_xml:
+        tc.append(p_el)
+    return tc
+
+
+def _build_att14_toc_title_para(title: str) -> "OxmlElement":
+    """
+    Title cell: '1.0   TITLE' + leaders that fill to the page column.
+
+    Uses a right-tab with dot leader to the title-cell edge, plus a Courier
+    period run sized to remaining width so LibreOffice PDF (which often skips
+    tab leaders in cells) still draws dots all the way to page 2/4/5.
+    """
+    title = re.sub(r"\s+", " ", (title or "")).strip()
+    m = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title)
+    if m:
+        num_part = m.group(1)
+        rest = (m.group(2) or "").strip().upper()
+        label = f"{num_part}   {rest}".rstrip() if rest else num_part
+    else:
+        label = title.upper()
+
+    p_el = OxmlElement("w:p")
+    p_pr = OxmlElement("w:pPr")
+    ps = OxmlElement("w:pStyle")
+    ps.set(qn("w:val"), "Header")
+    p_pr.append(ps)
+    tabs = OxmlElement("w:tabs")
+    right = OxmlElement("w:tab")
+    right.set(qn("w:val"), "right")
+    right.set(qn("w:leader"), "dot")
+    right.set(qn("w:pos"), "8900")
+    tabs.append(right)
+    _ppr_insert_tabs(p_pr, tabs)
+    spacing = OxmlElement("w:spacing")
+    spacing.set(qn("w:before"), "60")
+    spacing.set(qn("w:after"), "60")
+    spacing.set(qn("w:line"), "240")
+    spacing.set(qn("w:lineRule"), "auto")
+    p_pr.append(spacing)
+    p_el.append(p_pr)
+
+    # Title in Arial bold.
+    p_el.append(_toc_run_arial_bold_11(label + " "))
+
+    # Courier periods on the SAME line as the title, sized to reach the page
+    # column. Too many wrap under the title and leave a white gap before 2/4/5.
+    # Empirically ~70 Courier-10 dots = full title-cell width in LO PDF.
+    full_cell_dots = 70
+    label_frac = min(0.80, (len(label) * 1.15) / 56.0)
+    n_dots = max(18, min(68, int(full_cell_dots * (1.0 - label_frac))))
+    dots_run = OxmlElement("w:r")
+    r_pr = OxmlElement("w:rPr")
+    fonts = OxmlElement("w:rFonts")
+    fonts.set(qn("w:ascii"), "Courier New")
+    fonts.set(qn("w:hAnsi"), "Courier New")
+    fonts.set(qn("w:cs"), "Courier New")
+    r_pr.append(fonts)
+    r_pr.append(OxmlElement("w:b"))
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), "20")  # 10pt — slightly denser, more dots before wrap
+    r_pr.append(sz)
+    sz_cs = OxmlElement("w:szCs")
+    sz_cs.set(qn("w:val"), "20")
+    r_pr.append(sz_cs)
+    sp = OxmlElement("w:spacing")
+    sp.set(qn("w:val"), "-20")
+    r_pr.append(sp)
+    dots_run.append(r_pr)
+    t_el = OxmlElement("w:t")
+    t_el.text = "." * n_dots
+    dots_run.append(t_el)
+    p_el.append(dots_run)
+
+    # Word-side tab leader to the cell edge (LO may ignore; Courier pads anyway).
+    tab_run = OxmlElement("w:r")
+    tab_run.append(OxmlElement("w:tab"))
+    p_el.append(tab_run)
+    return p_el
+
+
+def _build_att14_toc_page_para(page: str) -> "OxmlElement":
+    """Page cell: left-aligned digit at column start (dots meet the number)."""
+    p_el = OxmlElement("w:p")
+    p_pr = OxmlElement("w:pPr")
+    ps = OxmlElement("w:pStyle")
+    ps.set(qn("w:val"), "Header")
+    p_pr.append(ps)
+    # Left-align so the digit sits flush against the title/dots column —
+    # right-align left a white gap before 2/4/5 (see user red-line markup).
+    jc = OxmlElement("w:jc")
+    jc.set(qn("w:val"), "left")
+    p_pr.append(jc)
+    spacing = OxmlElement("w:spacing")
+    spacing.set(qn("w:before"), "60")
+    spacing.set(qn("w:after"), "60")
+    spacing.set(qn("w:line"), "240")
+    spacing.set(qn("w:lineRule"), "auto")
+    p_pr.append(spacing)
+    p_el.append(p_pr)
+    p_el.append(_toc_run_arial_bold_11(str(page).strip()))
+    return p_el
+
+
+def _is_att14_style_toc_table(table) -> bool:
+    """True for Att14 TOC: original 1-col list, or converted title|page 2-col."""
+    if is_toc_list_table(table):
+        return True
+    if not table.rows or len(table.columns) != 2:
+        return False
+    hits = 0
+    for row in table.rows:
+        if len(row.cells) < 2:
+            return False
+        t0 = re.sub(r"\s+", " ", (row.cells[0].text or "")).strip()
+        t1 = re.sub(r"\s+", " ", (row.cells[1].text or "")).strip()
+        if re.match(r"^\d+\.\d+", t0) and re.fullmatch(r"\d+", t1):
+            hits += 1
+    return hits >= 3
+
+
+def _collect_att14_toc_entries(table) -> list[tuple[str, str]]:
+    """Collect (title, page) rows from 1-col or converted 2-col Att14 TOC."""
+    entries: list[tuple[str, str]] = []
+    for row in table.rows:
+        if not row.cells:
+            continue
+        title_cell = row.cells[0]
+        page_cell = row.cells[1] if len(row.cells) > 1 else None
+        title_paras = list(title_cell.paragraphs)
+        page_paras = list(page_cell.paragraphs) if page_cell is not None else []
+
+        for idx, para in enumerate(title_paras):
+            title, page = _parse_toc_title_from_element(para._element)
+            if title and page:
+                entries.append((title, page))
+                continue
+            title_only = re.sub(r"\s+", " ", (para.text or "")).strip()
+            title_only = re.sub(r"[\.\u2026\u22ef\t_:]+$", "", title_only).strip()
+            if not title_only:
+                continue
+            page_only = ""
+            if idx < len(page_paras):
+                page_only = re.sub(r"\D", "", page_paras[idx].text or "")
+            elif page_cell is not None and len(title_paras) == 1:
+                page_only = re.sub(r"\D", "", page_cell.text or "")
+            if title_only and page_only:
+                entries.append((title_only, page_only))
+    return entries
+
+
+def _convert_att14_toc_list_table_to_page_column(table) -> int:
+    """
+    Att14 TOC → 2-col (title+dots | right-aligned page) so LibreOffice PDF
+    keeps every page digit on one vertical column (Word-original look).
+    """
+    if not _is_att14_style_toc_table(table):
+        return 0
+
+    entries = _collect_att14_toc_entries(table)
+    if len(entries) < 3:
+        return 0
+
+    # Wide title+dots column; narrow page column so digits sit where dots end.
+    title_w = "9000"
+    page_w = "513"
+    tbl = table._tbl
+
+    tbl_grid = tbl.find(qn("w:tblGrid"))
+    if tbl_grid is None:
+        tbl_grid = OxmlElement("w:tblGrid")
+        tbl.insert(0, tbl_grid)
+    for child in list(tbl_grid):
+        tbl_grid.remove(child)
+    for w in (title_w, page_w):
+        gc = OxmlElement("w:gridCol")
+        gc.set(qn("w:w"), w)
+        tbl_grid.append(gc)
+
+    for tr in list(tbl.findall(qn("w:tr"))):
+        tbl.remove(tr)
+
+    # Hide outer table borders so title|page reads as one TOC line.
+    tbl_pr = tbl.find(qn("w:tblPr"))
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        tbl.insert(0, tbl_pr)
+    old_borders = tbl_pr.find(qn("w:tblBorders"))
+    if old_borders is not None:
+        tbl_pr.remove(old_borders)
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "nil")
+        borders.append(el)
+    tbl_pr.append(borders)
+
+    for title, page in entries:
+        tr = OxmlElement("w:tr")
+        tr.append(_make_toc_tc(title_w, [_build_att14_toc_title_para(title)]))
+        tr.append(_make_toc_tc(page_w, [_build_att14_toc_page_para(page)]))
+        tbl.append(tr)
+
+    return len(entries)
+
+
 def _realign_toc_page_columns(doc) -> int:
-    """Re-apply original two-tab TOC layout so page digits share one column."""
+    """Re-apply TOC layout so page digits share one column (Word + LO PDF)."""
     _fix_toc1_style_tabs(doc)
     fixed = 0
+    # Att14 list TOC: structural title|page columns (tabs fail inside LO table cells).
+    for table in doc.tables:
+        try:
+            n = _convert_att14_toc_list_table_to_page_column(table)
+        except Exception:
+            n = 0
+        fixed += n
     seen = set()
     for p_el in _iter_toc_paragraph_elements(doc):
         el_id = id(p_el)
         if el_id in seen:
             continue
         seen.add(el_id)
+        # Skip paragraphs already living in a converted Att14 2-col TOC page cell.
+        if _para_element_in_table(p_el):
+            # Page-only cells are short digits — leave them.
+            title, page = _parse_toc_title_from_element(p_el)
+            raw = ""
+            try:
+                raw = "".join(
+                    (t.text or "")
+                    for t in p_el.iter()
+                    if isinstance(t.tag, str) and t.tag.endswith("}t")
+                )
+            except Exception:
+                raw = ""
+            if re.fullmatch(r"\d+", (raw or "").strip()):
+                continue
+            # Title cells in converted TOC already include leaders — don't glue page back on.
+            if title and not page and "…" in (raw or ""):
+                continue
         title, page = _parse_toc_title_from_element(p_el)
         if not title or not page:
             continue
@@ -4294,12 +4728,14 @@ def _normalize_filled_docx_layout(doc, profile: str = "legacy") -> None:
 
 def _keep_approval_names_inside_cells(doc) -> None:
     """
-    Approval name and signature paragraphs use a negative indent, so the
-    e-sign name starts left of the cell and runs through the right border.
-    Keep that text inside the cell, left aligned, so Word wraps it there.
+    Prepared/Checked/Approved By tables often carry negative paragraph indents
+    from the Word template (e.g. w:ind w:end="-567" on "Head - Quality Assurance").
+    That pulls department labels into the Name column and lets Name/Signature
+    spill across borders. Clamp EVERY data cell so text stays in its own column.
     """
     name_headers = ("name & designation", "name and designation", "name/designation")
     sign_headers = ("signature & date", "signature and date", "sign and date", "sign/date")
+    title_headers = ("prepared by", "checked by", "approved by")
 
     for table in doc.tables:
         if not table.rows:
@@ -4311,12 +4747,17 @@ def _keep_approval_names_inside_cells(doc) -> None:
                 continue
             seen.add(id(cell._tc))
             header.append(re.sub(r"\s+", " ", (cell.text or "")).strip().lower())
+        if not header:
+            continue
+        is_dept_sig = any(h in title_headers for h in header) and (
+            any(h in name_headers for h in header) or any(h in sign_headers for h in header)
+        )
         value_cols = {
             index
             for index, label in enumerate(header)
             if label in name_headers or label in sign_headers
         }
-        if not value_cols:
+        if not is_dept_sig and not value_cols:
             continue
         for row in table.rows[1:]:
             seen_row = set()
@@ -4328,13 +4769,18 @@ def _keep_approval_names_inside_cells(doc) -> None:
                 unique_cells.append(cell)
             label_cell = unique_cells[0] if unique_cells else None
             for this_col, cell in enumerate(unique_cells):
-                if this_col not in value_cols:
-                    continue
-                if not (cell.text or "").strip():
+                # Always clamp department/role labels (col 0) on these tables —
+                # negative end-indent is what overlays "Head - Quality Assurance"
+                # onto Name & Designation in the PDF preview.
+                if not is_dept_sig and this_col not in value_cols:
                     continue
                 for para in cell.paragraphs:
                     _clamp_paragraph_inside_cell(para)
-                if label_cell is not None:
+                if (
+                    label_cell is not None
+                    and this_col in value_cols
+                    and (cell.text or "").strip()
+                ):
                     _copy_approval_font_from_label(label_cell, cell)
 
 
@@ -4634,6 +5080,134 @@ def _ensure_para_keep_next(p_el) -> None:
         p_pr.insert(insert_at, kn)
 
 
+def _para_text_is_toc_title(text: str) -> bool:
+    t = re.sub(r"\s+", " ", (text or "").strip()).upper().rstrip(":")
+    return t in {"TABLE OF CONTENTS", "TABLE OF CONTENT", "CONTENTS"}
+
+
+def _para_text_looks_like_toc_entry(text: str) -> bool:
+    """True for TOC leader lines such as '1.0 OBJECTIVE …… 3' (not body headings)."""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if _para_text_is_toc_title(raw):
+        return True
+    if re.search(r"[\.\u2026\u22ef]{3,}", raw):
+        return bool(re.match(r"^\d+(\.\d+)*\b", raw))
+    # Tab + trailing page digit (Word TOC1).
+    if "\t" in raw and re.search(r"\t\s*\d{1,3}\s*$", raw):
+        return bool(re.match(r"^\d+(\.\d+)*\b", raw))
+    return False
+
+
+def _sdt_element_looks_like_toc(sdt_el) -> bool:
+    texts = [_para_plain_text(p) for p in sdt_el.findall(".//" + qn("w:p"))]
+    texts = [t for t in texts if t]
+    if not texts:
+        return False
+    if any(_para_text_is_toc_title(t) for t in texts):
+        return True
+    hits = sum(1 for t in texts if _para_text_looks_like_toc_entry(t))
+    return hits >= 3
+
+
+def _tbl_element_looks_like_toc(tbl_el, doc) -> bool:
+    try:
+        from docx.table import Table
+
+        table = Table(tbl_el, doc)
+    except Exception:
+        return False
+    if _is_att14_style_toc_table(table) or is_toc_list_table(table):
+        return True
+    return False
+
+
+def _body_element_is_toc_region(el, doc) -> bool:
+    """True when a body child is the TOC SDT, TOC table, TOC title, or TOC line."""
+    if el.tag == qn("w:sdt"):
+        return _sdt_element_looks_like_toc(el)
+    if el.tag == qn("w:tbl"):
+        return _tbl_element_looks_like_toc(el, doc)
+    if el.tag != qn("w:p"):
+        return False
+    text = _para_plain_text(el)
+    if _para_text_is_toc_title(text) or _para_text_looks_like_toc_entry(text):
+        return True
+    # Style-based body TOC (toc 1) without leaders still in runs.
+    try:
+        for para in doc.paragraphs:
+            if para._element is el:
+                return _is_toc_body_paragraph(para)
+    except Exception:
+        pass
+    return False
+
+
+def _is_first_body_section_after_toc(text: str) -> bool:
+    """
+    First protocol body heading after TOC — usually 1.0 OBJECTIVE.
+    Must not match TOC leader lines.
+    """
+    raw = (text or "").strip()
+    if not raw or _para_text_looks_like_toc_entry(raw):
+        return False
+    t = re.sub(r"\s+", " ", raw).upper().rstrip(":")
+    if t in {"OBJECTIVE", "1.0 OBJECTIVE", "1 OBJECTIVE"}:
+        return True
+    if re.match(r"^1\.0\s+OBJECTIVE\b", t):
+        return True
+    # Some templates put SCOPE first after TOC; still start body on a new page.
+    if t in {"SCOPE", "1.0 SCOPE", "2.0 SCOPE"} or re.match(
+        r"^[12]\.0\s+SCOPE\b", t
+    ):
+        return True
+    return False
+
+
+def _ensure_neq_body_starts_after_toc(doc) -> bool:
+    """
+    NEQ only: keep the TOC sheet free of body text.
+
+    Word/LibreOffice were flowing 1.0 OBJECTIVE onto the TOC page after fill
+    trimmed pageBreakBefore. Force a hard page break on the first body section
+    heading after the TOC block so OBJECTIVE starts on the next page.
+    """
+    if not _active_is_neq():
+        return False
+
+    body = doc.element.body
+    children = list(body)
+    last_toc_i = -1
+    for i, el in enumerate(children):
+        if _body_element_is_toc_region(el, doc):
+            last_toc_i = i
+    if last_toc_i < 0:
+        return False
+
+    for j in range(last_toc_i + 1, len(children)):
+        el = children[j]
+        if el.tag != qn("w:p"):
+            continue
+        text = _para_plain_text(el)
+        if not text:
+            continue
+        if _body_element_is_toc_region(el, doc):
+            continue
+        if not _is_first_body_section_after_toc(text):
+            # Skip stray cover/label lines; keep scanning for OBJECTIVE.
+            if _is_tight_gap_section_heading(text):
+                # Another major heading before OBJECTIVE — still start body here.
+                _set_para_page_break_before(el, enabled=True)
+                _ensure_para_keep_next(el)
+                return True
+            continue
+        _set_para_page_break_before(el, enabled=True)
+        _ensure_para_keep_next(el)
+        return True
+    return False
+
+
 def _trim_empty_paras_before_attachment_heading(doc, *, keep: int = 2) -> int:
     """
     Keep at most ~2 blank lines above major section headings.
@@ -4671,6 +5245,7 @@ def _trim_empty_paras_before_attachment_heading(doc, *, keep: int = 2) -> int:
     # Pass 2: normalize spacers; clear forced page breaks from older fills.
     # Original has no pageBreakBefore on PRE-REQUISITES / EQUIPMENT / 8.0 —
     # Word flows naturally; keepNext avoids orphan headings at page bottoms.
+    # NEQ: OBJECTIVE after TOC is re-applied by _ensure_neq_body_starts_after_toc.
     children = list(body)
     for el in list(children):
         if el.tag != qn("w:p"):

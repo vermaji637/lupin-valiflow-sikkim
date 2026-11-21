@@ -1719,6 +1719,10 @@ def is_section_heading_paragraph(text: str) -> bool:
     t = text.strip()
     if not t:
         return True
+    # Fill blanks first — e.g. "(IOQ) REPORT FOR OF ……….. MACHINE" is ALL-CAPS
+    # but must stay editable (dot/ellipsis placeholder), not a locked heading.
+    if has_paragraph_blank(t):
+        return False
     if is_locked_section_title(t):
         return True
     if is_toc_entry_text(t):
@@ -1745,8 +1749,6 @@ def is_section_heading_paragraph(text: str) -> bool:
         and is_locked_section_title(bare)
     ):
         return True
-    if has_paragraph_blank(t):
-        return False
     return False
 
 
