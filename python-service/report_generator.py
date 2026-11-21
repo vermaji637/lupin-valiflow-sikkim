@@ -455,6 +455,21 @@ def _extract_para_run_font(para):
     return font_bold, font_italic, font_size, font_name
 
 
+def _default_fill_font_size():
+    """
+    Body fill default when the template run has no explicit size.
+    Requal/reval AHU originals are Arial 11 (sz=22). Never default to 12pt —
+    that inflated the final PDF from ~25 pages to ~41.
+    NEQ keeps 12 only when the active import source is NEQ.
+    """
+    try:
+        if _active_is_neq():
+            return Pt(12)
+    except Exception:
+        pass
+    return Pt(11)
+
+
 def _write_run_with_font(para, value: str, font_bold, font_italic, font_size, font_name) -> None:
     """Write text with explicit rPr so list bullets keep the same size as the label."""
     new_run = para.add_run(value)
@@ -473,13 +488,13 @@ def _write_run_with_font(para, value: str, font_bold, font_italic, font_size, fo
             fonts.set(qn("w:ascii"), font_name)
             fonts.set(qn("w:hAnsi"), font_name)
             fonts.set(qn("w:cs"), font_name)
-        # Default 12pt when missing — matches HVAC Acceptance Criteria label.
-        size = font_size if font_size is not None else Pt(12)
+        # Prefer template size; fall back to Arial 11 for requal/reval (not 12).
+        size = font_size if font_size is not None else _default_fill_font_size()
         new_run.font.size = size
         try:
             half = str(int(round(float(size.pt) * 2)))
         except (AttributeError, TypeError, ValueError):
-            half = "24"
+            half = "22"
         for tag in ("w:sz", "w:szCs"):
             node = r_pr.find(qn(tag))
             if node is None:
@@ -543,7 +558,7 @@ def _sync_list_cell_fonts_to_label(cell) -> bool:
     label = next((p for p in paras if not _para_has_numbering(p) and (p.text or "").strip()), paras[0])
     font_bold, font_italic, font_size, font_name = _extract_para_run_font(label)
     if font_size is None:
-        font_size = Pt(12)
+        font_size = _default_fill_font_size()
     if not font_name:
         font_name = "Arial"
 
@@ -656,8 +671,14 @@ def _set_cell_text(cell, value: str) -> None:
     if is_header or any(_para_has_numbering(p) for p in text_paras):
         if not font_name:
             font_name = "Arial"
-        if font_size is None or int(getattr(font_size, "pt", 0) or 0) < 12:
-            font_size = Pt(12)
+        # Fill missing size only — never bump Arial 11 up to 12.
+        if font_size is None:
+            font_size = _default_fill_font_size()
+    elif font_size is None:
+        # Body description cells often inherit 11pt from the style with no run sz.
+        font_size = _default_fill_font_size()
+        if not font_name:
+            font_name = "Arial"
 
     if not text_paras:
         text_paras = [cell.add_paragraph()]
@@ -812,6 +833,78 @@ def _body_paragraph(doc, para_index: int):
     if para_index < 0 or para_index >= len(paragraphs):
         return None
     return paragraphs[para_index]
+
+
+def _is_verification_pid_heading_text(text: str) -> bool:
+    return bool(
+        re.search(
+            r"verification\s+with\s+the\s+current\s+p\s*&?\s*id",
+            text or "",
+            re.I,
+        )
+    )
+
+
+def _write_arial_11_run(para, text: str, *, bold: bool) -> None:
+    """Add an Arial 11 run with explicit bold/regular for LibreOffice PDF."""
+    run = para.add_run(text)
+    try:
+        run.bold = bold
+        run.font.name = "Arial"
+        run.font.size = Pt(11)
+        r_pr = run._element.get_or_add_rPr()
+        for tag in ("w:b", "w:bCs"):
+            for node in list(r_pr.findall(qn(tag))):
+                r_pr.remove(node)
+        if bold:
+            r_pr.append(OxmlElement("w:b"))
+            r_pr.append(OxmlElement("w:bCs"))
+        for tag in ("w:sz", "w:szCs"):
+            node = r_pr.find(qn(tag))
+            if node is None:
+                node = OxmlElement(tag)
+                r_pr.append(node)
+            node.set(qn("w:val"), "22")
+        fonts = r_pr.find(qn("w:rFonts"))
+        if fonts is None:
+            fonts = OxmlElement("w:rFonts")
+            r_pr.insert(0, fonts)
+        fonts.set(qn("w:ascii"), "Arial")
+        fonts.set(qn("w:hAnsi"), "Arial")
+    except Exception:
+        pass
+
+
+def _fill_section_heading_body_notes(doc, heading_para_index: int, value: str) -> None:
+    """
+    Write para_N_body notes without wiping the section label.
+
+    8.4 becomes: "Verification with the current P & ID: <notes>"
+    (label bold, notes regular) — matches original key+value layout.
+    """
+    value = _normalize_text_value(value).strip()
+    if not value:
+        return
+    # Notes field sometimes already includes the label — keep notes only once.
+    value = re.sub(
+        r"^(?:verification\s+with\s+the\s+current\s+p\s*&?\s*id\s*:?\s*)+",
+        "",
+        value,
+        flags=re.I,
+    ).strip()
+    if not value:
+        return
+    heading = _body_paragraph(doc, heading_para_index)
+    if heading is None:
+        return
+
+    # Always use the canonical label — templates can be polluted with a doubled
+    # "Verification…: Verification…:" from an earlier append-colon bug.
+    label = "Verification with the current P & ID:"
+
+    _clear_text_runs(heading)
+    _write_arial_11_run(heading, label + " ", bold=True)
+    _write_arial_11_run(heading, value, bold=False)
 
 
 _YES_NO_BOX_RE = re.compile(
@@ -1332,6 +1425,10 @@ def _apply_single_field(
                 _fill_paragraph_blank_by_index(para, blank_index, value)
 
         elif location.startswith("para"):
+            # para_N_body = notes under a locked heading (8.4 P&ID) — never wipe the label.
+            if re.match(r"^para_\d+_body$", location):
+                _fill_section_heading_body_notes(doc, int(parts[1]), value)
+                return
             p = int(parts[1])
             para = _body_paragraph(doc, p)
             if para is not None:
@@ -1650,46 +1747,108 @@ def _should_keep_neq_heading_bold(text: str, ilvl: int | None) -> bool:
     return False
 
 
+# Signature-table department labels + short check names: regular in original AHU DOCX.
+_REQUAL_NEVER_BOLD_LABELS = {
+    "engineering",
+    "production",
+    "validation",
+    "quality assurance",
+    "quality",
+    "user department(engineering)",
+    "user department(production)",
+    "user department",
+    "vfd",
+    "vfd panel",
+    "vfd / electrical panel",
+}
+
+
+def _should_keep_requal_heading_bold(text: str, ilvl: int | None, has_numbering: bool) -> bool:
+    """
+    Requal/reval original AHU: section titles stay bold; responsibility bullets,
+    8.3 test list items, VFD check labels, and department names stay regular.
+    """
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned:
+        return False
+    key = cleaned.lower().rstrip(":")
+    if key in _REQUAL_NEVER_BOLD_LABELS or key.startswith("user department"):
+        return False
+    # SUMMARY & CONCLUSION: / REFERENCES: / ABBREVIATIONS: / REVISION HISTORY:
+    if cleaned.endswith(":") and len(cleaned) <= 80:
+        return True
+    # 1.0 OBJECTIVE / 3.0 RESPONSIBILITY / 8.1 Calibration
+    if re.match(r"^\d+\.\d+\s+\S", cleaned) and len(cleaned) <= 100:
+        return True
+    # Long prose bullets (responsibility / scope) — never bold.
+    if len(cleaned) > 70 or cleaned.count(" ") >= 10:
+        return False
+    # Numbered list body items ("Airflow volume measurement / ACPH") — regular.
+    if has_numbering:
+        return False
+    # Abbreviation lines ("DQ - Design Qualification") — regular.
+    if re.match(r"^[A-Za-z0-9]{1,12}\s*[-–—:]\s+\S", cleaned):
+        return False
+    # Short ALL-CAPS tokens (VFD) — regular. Multi-word banners
+    # (PRE-APPROVAL SIGNATURE, CHECKED BY) stay bold like the template.
+    letters = [c for c in cleaned if c.isalpha()]
+    if letters:
+        upper = sum(1 for c in letters if c.isupper()) / len(letters)
+        if upper >= 0.75:
+            if " " not in cleaned and len(cleaned) <= 16:
+                return False
+            if len(cleaned.split()) >= 2 and len(cleaned) <= 90:
+                return True
+    return False
+
+
 def _unbold_filled_body_lines(doc) -> None:
     """
     Dotted remark lines and the blank lines under SUMMARY & CONCLUSION
     carry bold in the template. Typed text must stay regular weight.
     The label before the colon stays bold.
 
-    NEQ: do not force Arial-11-bold on every numbered paragraph — that made
-    body lines under 7.1 / 7.2 / 14.0–16.0 bold unlike the original IOQ.
+    Requal/reval: never force-bold every numbered paragraph — that made
+    3.0 responsibility bullets and 8.3 test lists bold unlike the original.
+    Walk body + table cells so abbreviation lines are corrected too.
     """
     is_neq = _active_is_neq()
-    body = doc.element.body
-    for child in list(body):
-        if child.tag != qn("w:p"):
-            continue
+    for child in _iter_all_paragraph_elements(doc):
         if _split_bold_label(child):
             continue
         text = _paragraph_plain_text(child)
-        # Keep bold on auto-numbered subsection titles (8.1 Calibration, etc.).
-        if _paragraph_has_numbering(child):
-            if is_neq:
-                ilvl = _paragraph_numbering_ilvl(child)
+        has_num = _paragraph_has_numbering(child)
+        ilvl = _paragraph_numbering_ilvl(child) if has_num else None
+
+        if is_neq:
+            if has_num:
                 if _should_keep_neq_heading_bold(text, ilvl):
                     _ensure_arial_11_on_heading_runs(child)
                 else:
                     _strip_paragraph_bold(child)
+                    _ensure_arial_11_regular_runs(child)
                 continue
-            _ensure_arial_11_on_heading_runs(child)
+            if _looks_like_kept_heading(text) and _should_keep_neq_heading_bold(text, 0):
+                _ensure_arial_11_on_heading_runs(child)
+                continue
+            _strip_paragraph_bold(child)
+            _ensure_arial_11_regular_runs(child)
             continue
-        if _looks_like_kept_heading(text):
-            if is_neq and not _should_keep_neq_heading_bold(text, 0):
-                # Title-case body sentences must stay regular on NEQ.
-                _strip_paragraph_bold(child)
-                continue
+
+        # Requal / reval / legacy
+        if _should_keep_requal_heading_bold(text, ilvl, has_num):
             _ensure_arial_11_on_heading_runs(child)
             continue
         _strip_paragraph_bold(child)
+        _ensure_arial_11_regular_runs(child)
 
 
-def _force_arial_11_bold_on_rpr(r_pr) -> None:
-    """Force Arial 11 bold onto a run/paragraph-mark rPr (LibreOffice needs explicit sz)."""
+def _force_arial_11_on_rpr(r_pr, *, bold: bool = False, force_size: bool = True) -> None:
+    """
+    Put Arial (+ optional bold) on a run/mark/numbering rPr.
+    LibreOffice PDF drops inherited sizes, so sz=22 (11pt) is written explicitly
+    when force_size is True or when the rPr has no size yet.
+    """
     fonts = r_pr.find(qn("w:rFonts"))
     if fonts is None:
         fonts = OxmlElement("w:rFonts")
@@ -1697,19 +1856,28 @@ def _force_arial_11_bold_on_rpr(r_pr) -> None:
     fonts.set(qn("w:ascii"), "Arial")
     fonts.set(qn("w:hAnsi"), "Arial")
     fonts.set(qn("w:cs"), "Arial")
-    for tag in ("w:sz", "w:szCs"):
+    has_sz = r_pr.find(qn("w:sz")) is not None
+    if force_size or not has_sz:
+        for tag in ("w:sz", "w:szCs"):
+            for node in list(r_pr.findall(qn(tag))):
+                r_pr.remove(node)
+        sz = OxmlElement("w:sz")
+        sz.set(qn("w:val"), "22")  # 11pt
+        r_pr.append(sz)
+        sz_cs = OxmlElement("w:szCs")
+        sz_cs.set(qn("w:val"), "22")
+        r_pr.append(sz_cs)
+    for tag in ("w:b", "w:bCs"):
         for node in list(r_pr.findall(qn(tag))):
             r_pr.remove(node)
-    sz = OxmlElement("w:sz")
-    sz.set(qn("w:val"), "22")  # 11pt
-    r_pr.append(sz)
-    sz_cs = OxmlElement("w:szCs")
-    sz_cs.set(qn("w:val"), "22")
-    r_pr.append(sz_cs)
-    if r_pr.find(qn("w:b")) is None:
+    if bold:
         r_pr.append(OxmlElement("w:b"))
-    if r_pr.find(qn("w:bCs")) is None:
         r_pr.append(OxmlElement("w:bCs"))
+
+
+def _force_arial_11_bold_on_rpr(r_pr) -> None:
+    """Force Arial 11 bold onto a run/paragraph-mark rPr (LibreOffice needs explicit sz)."""
+    _force_arial_11_on_rpr(r_pr, bold=True, force_size=True)
 
 
 def _ensure_arial_11_on_heading_runs(p_element) -> None:
@@ -1730,6 +1898,403 @@ def _ensure_arial_11_on_heading_runs(p_element) -> None:
             r_pr = OxmlElement("w:rPr")
             run.insert(0, r_pr)
         _force_arial_11_bold_on_rpr(r_pr)
+
+
+def _ensure_arial_11_regular_runs(p_element) -> None:
+    """
+    Body lines: keep existing explicit sizes (attachment titles may be 14/18pt),
+    but never leave font/size missing — default to Arial 11 like Normal on IOQ.
+    """
+    p_pr = p_element.find(qn("w:pPr"))
+    if p_pr is not None:
+        mark = p_pr.find(qn("w:rPr"))
+        if mark is not None:
+            _force_arial_11_on_rpr(mark, bold=False, force_size=False)
+    for run in p_element.findall(qn("w:r")):
+        text = "".join(node.text or "" for node in run.iter(qn("w:t"))).strip()
+        if not text:
+            continue
+        r_pr = run.find(qn("w:rPr"))
+        if r_pr is None:
+            r_pr = OxmlElement("w:rPr")
+            run.insert(0, r_pr)
+        _force_arial_11_on_rpr(r_pr, bold=False, force_size=False)
+
+
+def _iter_all_paragraph_elements(doc):
+    """Yield every body paragraph element, including those inside tables."""
+    body = doc.element.body
+    for child in list(body):
+        if child.tag == qn("w:p"):
+            yield child
+        elif child.tag == qn("w:tbl"):
+            for p_el in child.iter(qn("w:p")):
+                yield p_el
+
+
+def _neq_heading_abstract_ids(doc) -> set[str]:
+    """
+    Abstract numbering ids used by major NEQ section titles (OBJECTIVE / 5.0 …).
+    Their auto-number glyphs must be Arial 11 bold like the heading text.
+    """
+    heading_num_ids: set[str] = set()
+    for p_el in _iter_all_paragraph_elements(doc):
+        if not _paragraph_has_numbering(p_el):
+            continue
+        text = _paragraph_plain_text(p_el)
+        ilvl = _paragraph_numbering_ilvl(p_el)
+        if not _should_keep_neq_heading_bold(text, ilvl):
+            continue
+        p_pr = p_el.find(qn("w:pPr"))
+        num_pr = p_pr.find(qn("w:numPr")) if p_pr is not None else None
+        if num_pr is None:
+            continue
+        num_id_el = num_pr.find(qn("w:numId"))
+        if num_id_el is None:
+            continue
+        num_id = (num_id_el.get(qn("w:val")) or "").strip()
+        if num_id:
+            heading_num_ids.add(num_id)
+    abstract_ids: set[str] = set()
+    try:
+        numbering = doc.part.numbering_part._element
+    except Exception:
+        return abstract_ids
+    for num in numbering.findall(qn("w:num")):
+        num_id = (num.get(qn("w:numId")) or "").strip()
+        if num_id not in heading_num_ids:
+            continue
+        abs_el = num.find(qn("w:abstractNumId"))
+        if abs_el is not None and (abs_el.get(qn("w:val")) or "").strip():
+            abstract_ids.add(abs_el.get(qn("w:val")))
+    return abstract_ids
+
+
+# Word stores list bullets as private-use glyphs that only render in the
+# matching symbol font. Forcing Arial here turns arrows/dots into empty boxes.
+_NEQ_BULLET_FONT_BY_GLYPH = {
+    "\uf0b7": "Symbol",       # •
+    "\uf0d8": "Wingdings",    # ➢
+    "\uf0a7": "Wingdings",    # ▪
+    "\uf0fc": "Wingdings",    # ✓
+    "\uf0b2": "Wingdings",
+    "o": "Courier New",
+}
+
+
+def _lvl_num_format(lvl) -> str:
+    nf = lvl.find(qn("w:numFmt"))
+    return ((nf.get(qn("w:val")) if nf is not None else "") or "").strip().lower()
+
+
+def _restore_neq_bullet_level_font(lvl) -> None:
+    """Keep Wingdings/Symbol/Courier bullet fonts; repair if Arial overwrote them."""
+    lt = lvl.find(qn("w:lvlText"))
+    glyph = (lt.get(qn("w:val")) if lt is not None else "") or ""
+    r_pr = lvl.find(qn("w:rPr"))
+    if r_pr is None:
+        r_pr = OxmlElement("w:rPr")
+        lvl.append(r_pr)
+    fonts = r_pr.find(qn("w:rFonts"))
+    ascii_font = (fonts.get(qn("w:ascii")) if fonts is not None else "") or ""
+    symbol_fonts = {"Wingdings", "Wingdings 2", "Wingdings 3", "Symbol", "Courier New"}
+    if ascii_font in symbol_fonts:
+        return
+    restore = _NEQ_BULLET_FONT_BY_GLYPH.get(glyph)
+    if not restore:
+        # Unknown bullet glyph — do not force Arial; leave template fonts alone.
+        return
+    if fonts is None:
+        fonts = OxmlElement("w:rFonts")
+        r_pr.insert(0, fonts)
+    fonts.set(qn("w:ascii"), restore)
+    fonts.set(qn("w:hAnsi"), restore)
+    fonts.set(qn("w:hint"), "default")
+    # cs Arial breaks some Symbol bullets in LibreOffice — drop it for bullets.
+    if fonts.get(qn("w:cs")) is not None:
+        del fonts.attrib[qn("w:cs")]
+    # Size on symbol fonts is optional; strip forced 11pt if we added it earlier.
+    for tag in ("w:sz", "w:szCs", "w:b", "w:bCs"):
+        for node in list(r_pr.findall(qn(tag))):
+            r_pr.remove(node)
+
+
+def _normalize_neq_numbering_fonts(doc) -> None:
+    """
+    Heading auto-numbers (5.0 / 7.1): Arial 11 bold + space suffix.
+    Bullet lists: preserve Wingdings/Symbol arrow/dot fonts — never Arial.
+    """
+    try:
+        numbering = doc.part.numbering_part._element
+    except Exception:
+        return
+    heading_abstracts = _neq_heading_abstract_ids(doc)
+    for absn in numbering.findall(qn("w:abstractNum")):
+        abs_id = (absn.get(qn("w:abstractNumId")) or "").strip()
+        is_heading = abs_id in heading_abstracts
+        for lvl in absn.findall(qn("w:lvl")):
+            fmt = _lvl_num_format(lvl)
+            if fmt == "bullet":
+                _restore_neq_bullet_level_font(lvl)
+                continue
+            if not is_heading:
+                # Non-heading decimal/letter lists: ensure Arial 11, not bold.
+                r_pr = lvl.find(qn("w:rPr"))
+                if r_pr is None:
+                    r_pr = OxmlElement("w:rPr")
+                    lvl.append(r_pr)
+                _force_arial_11_on_rpr(r_pr, bold=False, force_size=True)
+                continue
+            r_pr = lvl.find(qn("w:rPr"))
+            if r_pr is None:
+                r_pr = OxmlElement("w:rPr")
+                lvl.append(r_pr)
+            _force_arial_11_on_rpr(r_pr, bold=True, force_size=True)
+            # Original looks like \"5.0 EQUIPMENT\" (one space). Default
+            # num-tab leaves a wide gap in LibreOffice PDF.
+            suff = lvl.find(qn("w:suff"))
+            if suff is None:
+                suff = OxmlElement("w:suff")
+                # Schema order: after lvlText / lvlJc, before pPr.
+                lvl_jc = lvl.find(qn("w:lvlJc"))
+                if lvl_jc is not None:
+                    lvl_jc_index = list(lvl).index(lvl_jc)
+                    lvl.insert(lvl_jc_index + 1, suff)
+                else:
+                    lvl.insert(0, suff)
+            suff.set(qn("w:val"), "space")
+
+
+def _normalize_requal_numbering_fonts(doc) -> None:
+    """
+    Requal/reval: keep section-number glyphs Arial 11 bold; strip bold from
+    bullet / body list levels so responsibility and 8.3 items match original.
+    """
+    if _active_is_neq():
+        return
+    try:
+        numbering = doc.part.numbering_part._element
+    except Exception:
+        return
+
+    heading_num_ids: set[str] = set()
+    for p_el in _iter_all_paragraph_elements(doc):
+        if not _paragraph_has_numbering(p_el):
+            continue
+        text = _paragraph_plain_text(p_el)
+        ilvl = _paragraph_numbering_ilvl(p_el)
+        if not _should_keep_requal_heading_bold(text, ilvl, True):
+            continue
+        p_pr = p_el.find(qn("w:pPr"))
+        num_pr = p_pr.find(qn("w:numPr")) if p_pr is not None else None
+        if num_pr is None:
+            continue
+        num_id_el = num_pr.find(qn("w:numId"))
+        if num_id_el is None:
+            continue
+        num_id = (num_id_el.get(qn("w:val")) or "").strip()
+        if num_id:
+            heading_num_ids.add(num_id)
+
+    heading_abstracts: set[str] = set()
+    for num in numbering.findall(qn("w:num")):
+        num_id = (num.get(qn("w:numId")) or "").strip()
+        if num_id not in heading_num_ids:
+            continue
+        abs_el = num.find(qn("w:abstractNumId"))
+        if abs_el is not None and (abs_el.get(qn("w:val")) or "").strip():
+            heading_abstracts.add(abs_el.get(qn("w:val")))
+
+    for absn in numbering.findall(qn("w:abstractNum")):
+        abs_id = (absn.get(qn("w:abstractNumId")) or "").strip()
+        is_heading = abs_id in heading_abstracts
+        for lvl in absn.findall(qn("w:lvl")):
+            fmt = _lvl_num_format(lvl)
+            if fmt == "bullet":
+                _restore_neq_bullet_level_font(lvl)
+                # Bullets must not render bold in LibreOffice PDF.
+                r_pr = lvl.find(qn("w:rPr"))
+                if r_pr is not None:
+                    for tag in ("w:b", "w:bCs"):
+                        for node in list(r_pr.findall(qn(tag))):
+                            r_pr.remove(node)
+                continue
+            r_pr = lvl.find(qn("w:rPr"))
+            if r_pr is None:
+                r_pr = OxmlElement("w:rPr")
+                lvl.append(r_pr)
+            _force_arial_11_on_rpr(r_pr, bold=is_heading, force_size=True)
+
+
+_AMPM_DATETIME_RE = re.compile(
+    r"\b(\d{2}-\d{2}-\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)\b",
+    re.IGNORECASE,
+)
+_EFFECTIVE_DATE_ONLY_RE = re.compile(
+    r"^(\d{2}-\d{2}-\d{4})(?:\s+\d{1,2}:\d{2}(?:\s*(?:AM|PM))?)?$",
+    re.IGNORECASE,
+)
+
+
+def _to_24h_datetime_stamp(match: re.Match) -> str:
+    day = match.group(1)
+    hour = int(match.group(2))
+    minute = match.group(3)
+    ampm = match.group(4).upper()
+    if ampm == "PM" and hour < 12:
+        hour += 12
+    if ampm == "AM" and hour == 12:
+        hour = 0
+    return f"{day} {hour:02d}:{minute}"
+
+
+def _replace_text_in_paragraph_element(p_el, new_text: str) -> bool:
+    """Replace visible text of a paragraph while keeping the first run's rPr."""
+    runs = p_el.findall(qn("w:r"))
+    if not runs:
+        return False
+    first = True
+    for run in runs:
+        for t_el in run.findall(qn("w:t")):
+            if first:
+                t_el.text = new_text
+                first = False
+            else:
+                t_el.text = ""
+        # Drop leftover text in drawings/tabs-only runs.
+    if first:
+        return False
+    return True
+
+
+def _iter_doc_tables(doc):
+    """Body tables plus every section header/footer table (cover Effective Date lives here)."""
+    for table in doc.tables:
+        yield table
+    for section in doc.sections:
+        try:
+            for table in section.header.tables:
+                yield table
+        except Exception:
+            pass
+        try:
+            for table in section.footer.tables:
+                yield table
+        except Exception:
+            pass
+
+
+def _strip_effective_date_time_in_tables(tables) -> int:
+    """Force Effective Date value cells to d-m-Y only (drop time / AM/PM)."""
+    fixed = 0
+    for table in tables:
+        for row in table.rows:
+            cells = list(row.cells)
+            for i, cell in enumerate(cells):
+                label = re.sub(r"\s+", " ", (cell.text or "")).strip().lower()
+                if "effective date" not in label:
+                    continue
+                candidates = [cell]
+                if i + 1 < len(cells):
+                    candidates.append(cells[i + 1])
+                for target in candidates:
+                    for para in target.paragraphs:
+                        raw = (para.text or "").strip()
+                        if not raw:
+                            continue
+                        m_only = _EFFECTIVE_DATE_ONLY_RE.match(raw)
+                        if m_only and raw != m_only.group(1):
+                            if _replace_text_in_paragraph_element(para._element, m_only.group(1)):
+                                fixed += 1
+                            continue
+                        if _AMPM_DATETIME_RE.search(raw) or re.search(
+                            r"\d{2}-\d{2}-\d{4}\s+\d{1,2}:\d{2}", raw
+                        ):
+                            # Keep label text if present; strip time from any stamp.
+                            new_text = _AMPM_DATETIME_RE.sub(lambda m: m.group(1), raw)
+                            new_text = re.sub(
+                                r"(\d{2}-\d{2}-\d{4})\s+\d{1,2}:\d{2}(?:\s*(?:AM|PM))?",
+                                r"\1",
+                                new_text,
+                                flags=re.IGNORECASE,
+                            )
+                            if new_text != raw and _replace_text_in_paragraph_element(
+                                para._element, new_text
+                            ):
+                                fixed += 1
+    return fixed
+
+
+def _normalize_neq_date_time_display(doc) -> int:
+    """
+    Effective Date cells (body + header letterhead): date only (d-m-Y).
+    Signature / other stamps: convert AM/PM to 24-hour (d-m-Y H:i).
+    """
+    if not _active_is_neq():
+        return 0
+    fixed = _strip_effective_date_time_in_tables(_iter_doc_tables(doc))
+
+    # Signature stamps and any remaining AM/PM datetimes → 24-hour.
+    # Do not touch Effective Date value cells again (already date-only).
+    for p_el in _iter_all_paragraph_elements(doc):
+        raw = _paragraph_plain_text(p_el)
+        if not raw or not _AMPM_DATETIME_RE.search(raw):
+            continue
+        new_text = _AMPM_DATETIME_RE.sub(_to_24h_datetime_stamp, raw)
+        if new_text != raw and _replace_text_in_paragraph_element(p_el, new_text):
+            fixed += 1
+
+    # Header/footer paragraphs outside body iterator.
+    for section in doc.sections:
+        for part in (section.header, section.footer):
+            try:
+                paras = part.paragraphs
+            except Exception:
+                continue
+            for para in paras:
+                raw = (para.text or "").strip()
+                if not raw or not _AMPM_DATETIME_RE.search(raw):
+                    continue
+                new_text = _AMPM_DATETIME_RE.sub(_to_24h_datetime_stamp, raw)
+                if new_text != raw and _replace_text_in_paragraph_element(para._element, new_text):
+                    fixed += 1
+    return fixed
+
+
+def _normalize_neq_document_fonts(doc) -> None:
+    """
+    NEQ final view/download: headings Arial 11 bold; every other run keeps its
+    template size when set, otherwise Arial 11 — no missing font size for LO PDF.
+    Applies to all New-equipment templates (protocol + attachments).
+    """
+    if not _active_is_neq():
+        return
+    _normalize_neq_numbering_fonts(doc)
+    _normalize_neq_date_time_display(doc)
+    for p_el in _iter_all_paragraph_elements(doc):
+        text = _paragraph_plain_text(p_el)
+        if not text:
+            continue
+        # Skip TOC lines — handled by _rewrite_toc_paragraph_element.
+        try:
+            style_id = ""
+            p_pr = p_el.find(qn("w:pPr"))
+            if p_pr is not None:
+                ps = p_pr.find(qn("w:pStyle"))
+                if ps is not None:
+                    style_id = (ps.get(qn("w:val")) or "").upper()
+            if style_id.startswith("TOC"):
+                continue
+        except Exception:
+            pass
+        ilvl = _paragraph_numbering_ilvl(p_el) if _paragraph_has_numbering(p_el) else None
+        if _paragraph_has_numbering(p_el) and _should_keep_neq_heading_bold(text, ilvl):
+            _ensure_arial_11_on_heading_runs(p_el)
+            continue
+        if _looks_like_kept_heading(text) and _should_keep_neq_heading_bold(text, 0):
+            _ensure_arial_11_on_heading_runs(p_el)
+            continue
+        _ensure_arial_11_regular_runs(p_el)
 
 
 def _floating_row_growth_twips(tr, grid_widths: list[int]) -> int:
@@ -2108,9 +2673,15 @@ def _fill_docx_inner(
     _keep_approval_names_inside_cells(doc)
     _apply_heading_font_from_paragraph_mark(doc)
     _unbold_filled_body_lines(doc)
+    _normalize_neq_document_fonts(doc)
+    _normalize_requal_body_fonts_to_arial_11(doc)
+    _normalize_requal_numbering_fonts(doc)
     _ensure_neq_header_logo_title_gap(doc)
     _inject_page_number_fields(doc)
-    _normalize_header_table_fonts(doc, font_name="Arial", font_size_pt=12.0)
+    # NEQ letterhead uses Arial 12. Requal/reval keep original header sizes
+    # (often 10/11/14pt) — forcing 12pt changed density vs the Word original.
+    if _is_neq_import_source(import_source):
+        _normalize_header_table_fonts(doc, font_name="Arial", font_size_pt=12.0)
     # Font unify runs after the footer is written and can leave footer distance at 0.
     _pin_annex_footer_inside_page(doc)
     # Re-apply after approval clamp so every body cell keeps ~1-letter padding.
@@ -2153,6 +2724,9 @@ def normalize_existing_filled_docx(docx_path: str, import_source: str | None = N
         _trim_empty_paras_before_attachment_heading(doc, keep=2)
         # Re-apply heading keep/Arial-11 after layout so 8.1 Calibration matches original.
         _unbold_filled_body_lines(doc)
+        _normalize_neq_document_fonts(doc)
+        _normalize_requal_body_fonts_to_arial_11(doc)
+        _normalize_requal_numbering_fonts(doc)
         _ensure_neq_header_logo_title_gap(doc)
         _realign_toc_page_columns(doc)
         doc.save(docx_path)
@@ -2733,20 +3307,42 @@ def _make_toc_tab_stops(*, for_neq: bool = False):
     Extra style stops (left 0 / right 9656) make LibreOffice land the first
     content tab too early, so page digits no longer share one vertical line.
 
-    NEQ IOQ titles are longer (10.0 / 13.0); use a tighter left stop so the
-    title + page digit still fit on one line like the original template.
+    NEQ original visual is \"1.0 OBJECTIVE\" (one space, not a left-tab column).
+    Only a right stop at 9000 with dot leaders is needed for the page digit.
     """
     tabs = OxmlElement("w:tabs")
-    left = OxmlElement("w:tab")
-    left.set(qn("w:val"), "left")
-    left.set(qn("w:pos"), "900" if for_neq else "1495")
-    tabs.append(left)
+    if not for_neq:
+        left = OxmlElement("w:tab")
+        left.set(qn("w:val"), "left")
+        left.set(qn("w:pos"), "1495")
+        tabs.append(left)
     right = OxmlElement("w:tab")
     right.set(qn("w:val"), "right")
     right.set(qn("w:leader"), "dot")
     right.set(qn("w:pos"), "9000")
     tabs.append(right)
     return tabs
+
+
+def _ensure_neq_toc1_indent(p_pr) -> None:
+    """Original NEQ TOC1 uses w:ind w:left=\"-450\" so numbers hang slightly left."""
+    if p_pr is None:
+        return
+    ind = p_pr.find(qn("w:ind"))
+    if ind is None:
+        ind = OxmlElement("w:ind")
+        # Keep tabs/spacing order stable: insert indent after tabs when present.
+        tabs = p_pr.find(qn("w:tabs"))
+        if tabs is not None:
+            tabs_index = list(p_pr).index(tabs)
+            p_pr.insert(tabs_index + 1, ind)
+        else:
+            p_pr.append(ind)
+    ind.set(qn("w:left"), "-450")
+    if ind.get(qn("w:firstLine")) is not None:
+        del ind.attrib[qn("w:firstLine")]
+    if ind.get(qn("w:hanging")) is not None:
+        del ind.attrib[qn("w:hanging")]
 
 
 def _fix_toc1_style_tabs(doc) -> None:
@@ -2767,14 +3363,32 @@ def _fix_toc1_style_tabs(doc) -> None:
             p_pr = OxmlElement("w:pPr")
             style.insert(0, p_pr)
         _ppr_insert_tabs(p_pr, _make_toc_tab_stops(for_neq=for_neq))
-        # NEQ original TOC1 is not run-bold at line level (smallCaps, regular).
         if for_neq:
+            # Original TOC1: Arial + bold at style; content is \"1.0 TITLE\" + right tab.
+            _ensure_neq_toc1_indent(p_pr)
+            spacing = p_pr.find(qn("w:spacing"))
+            if spacing is None:
+                spacing = OxmlElement("w:spacing")
+                p_pr.append(spacing)
+            spacing.set(qn("w:before"), "120")
+            spacing.set(qn("w:after"), "120")
+            spacing.set(qn("w:line"), "240")
+            spacing.set(qn("w:lineRule"), "auto")
             r_pr = style.find(qn("w:rPr"))
-            if r_pr is not None:
-                for tag in ("w:b", "w:bCs"):
-                    node = r_pr.find(qn(tag))
-                    if node is not None:
-                        r_pr.remove(node)
+            if r_pr is None:
+                r_pr = OxmlElement("w:rPr")
+                style.append(r_pr)
+            fonts = r_pr.find(qn("w:rFonts"))
+            if fonts is None:
+                fonts = OxmlElement("w:rFonts")
+                r_pr.insert(0, fonts)
+            fonts.set(qn("w:ascii"), "Arial")
+            fonts.set(qn("w:hAnsi"), "Arial")
+            fonts.set(qn("w:cs"), "Arial")
+            if r_pr.find(qn("w:b")) is None:
+                r_pr.append(OxmlElement("w:b"))
+            if r_pr.find(qn("w:bCs")) is None:
+                r_pr.append(OxmlElement("w:bCs"))
 
 
 def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
@@ -2786,8 +3400,10 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
     Two content tabs + the two style/paragraph stops keep every page digit on
     one right column in both Word and LibreOffice PDF (final view).
 
-    NEQ: regular weight (not bold), tighter left stop, slight condensed spacing
-    so long titles like 10.0 / 13.0 stay on one line like the original IOQ.
+    NEQ matches original IOQ visual:
+      \"1.0 OBJECTIVE\" [tab→9000 + dots] 2
+    One space after the number (no left-tab column), Arial 11 bold, so long
+    titles (10.0 / 13.0) stay on one line with the page digit.
     """
     title = re.sub(r"\s+", " ", (title or "")).strip()
     # Drop trailing leader junk if a prior bad fill left dots on the title.
@@ -2822,8 +3438,18 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
     ps = OxmlElement("w:pStyle")
     ps.set(qn("w:val"), style_id)
     p_pr.append(ps)
+    # Match original TOC1 paragraph spacing (before/after 120, single line).
+    if for_neq:
+        spacing_p = OxmlElement("w:spacing")
+        spacing_p.set(qn("w:before"), "120")
+        spacing_p.set(qn("w:after"), "120")
+        spacing_p.set(qn("w:line"), "240")
+        spacing_p.set(qn("w:lineRule"), "auto")
+        p_pr.append(spacing_p)
     # Paragraph-level stops override/merge cleanly; same two stops as style.
     _ppr_insert_tabs(p_pr, _make_toc_tab_stops(for_neq=for_neq))
+    if for_neq:
+        _ensure_neq_toc1_indent(p_pr)
 
     def _append_text_run(text: str, *, bold: bool = True) -> None:
         if text is None:
@@ -2833,22 +3459,21 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
         fonts = OxmlElement("w:rFonts")
         fonts.set(qn("w:ascii"), "Arial")
         fonts.set(qn("w:hAnsi"), "Arial")
+        fonts.set(qn("w:cs"), "Arial")
         r_pr.append(fonts)
-        if for_neq:
-            # Match original IOQ TOC glyph density (small caps, not bold).
-            r_pr.append(OxmlElement("w:smallCaps"))
-        elif bold:
+        if bold:
             r_pr.append(OxmlElement("w:b"))
+            r_pr.append(OxmlElement("w:bCs"))
         sz = OxmlElement("w:sz")
-        # NEQ: 10pt fits long 10.0 / 13.0 titles on one line; requal stays 11pt.
-        sz.set(qn("w:val"), "20" if for_neq else "22")
+        sz.set(qn("w:val"), "22")  # 11pt
         r_pr.append(sz)
         sz_cs = OxmlElement("w:szCs")
-        sz_cs.set(qn("w:val"), "20" if for_neq else "22")
+        sz_cs.set(qn("w:val"), "22")
         r_pr.append(sz_cs)
-        # Slight negative spacing matches original requal TOC glyph density.
+        # Slight negative spacing; NEQ bold + single-space layout needs a bit
+        # more condensation so 10.0 / 13.0 stay on one line in LibreOffice PDF.
         spacing = OxmlElement("w:spacing")
-        spacing.set(qn("w:val"), "-1")
+        spacing.set(qn("w:val"), "-6" if for_neq else "-1")
         r_pr.append(spacing)
         run.append(r_pr)
         t_el = OxmlElement("w:t")
@@ -2863,12 +3488,19 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
         tab_run.append(OxmlElement("w:tab"))
         p_el.append(tab_run)
 
-    _append_text_run(num_part, bold=not for_neq)
-    _append_tab()
-    if rest_part:
-        _append_text_run(rest_part, bold=not for_neq)
-    _append_tab()
-    _append_text_run(page_value, bold=not for_neq)
+    if for_neq:
+        # Original look: \"1.0 OBJECTIVE\" then right-tab to page (one space only).
+        label = f"{num_part} {rest_part}".strip() if rest_part else num_part
+        _append_text_run(label, bold=True)
+        _append_tab()
+        _append_text_run(page_value, bold=True)
+    else:
+        _append_text_run(num_part, bold=True)
+        _append_tab()
+        if rest_part:
+            _append_text_run(rest_part, bold=True)
+        _append_tab()
+        _append_text_run(page_value, bold=True)
     return True
 
 
@@ -3423,13 +4055,9 @@ def _normalize_table_page_breaks(doc) -> int:
     """
     Mark the leading header row block with tblHeader (Att08 may need 2 rows).
 
-    For single-row headers: strip cantSplit from data rows so LO can soft-split
-    under section banners without a blank band.
-
-    For multi-row headers (Att08 Calibration details / Done On / Due On): KEEP
-    or ADD cantSplit on every data row. Otherwise LO splits tall Sign/Date cells
-    mid-row and page 2+ starts with orphan "Admin … AM" fragments — rows look
-    missing / out of sequence in the approval PDF.
+    Always KEEP / ADD cantSplit on every data row. LibreOffice mid-row splits
+    leave an empty Details/Description band at the top of the next page in the
+    final post-approval PDF (requal AHU tables). Header rows may still split.
     """
     changed = 0
     for table in doc.tables:
@@ -3437,7 +4065,6 @@ def _normalize_table_page_breaks(doc) -> int:
         if not rows:
             continue
         header_n = _leading_header_row_count(table)
-        keep_row_intact = header_n >= 2
         for index, row in enumerate(rows):
             tr_pr = row._tr.get_or_add_trPr()
             headers = tr_pr.findall(qn("w:tblHeader"))
@@ -3459,14 +4086,75 @@ def _normalize_table_page_breaks(doc) -> int:
                 tr_pr.remove(node)
                 changed += 1
             cant = tr_pr.find(qn("w:cantSplit"))
-            if keep_row_intact:
-                if cant is None:
-                    tr_pr.append(OxmlElement("w:cantSplit"))
-                    changed += 1
-            elif cant is not None:
-                tr_pr.remove(cant)
+            if cant is None:
+                tr_pr.append(OxmlElement("w:cantSplit"))
                 changed += 1
     return changed
+
+
+def _strip_stale_soft_page_breaks(doc) -> int:
+    """
+    Remove Word lastRenderedPageBreak markers left from the template layout.
+    After fill, content height changes; stale soft breaks make LibreOffice paint
+    blank table bands at the top of continuation pages.
+    """
+    removed = 0
+    soft_tag = qn("w:lastRenderedPageBreak")
+    for parent in list(doc.element.body.iter()):
+        for child in list(parent):
+            tag = child.tag if isinstance(child.tag, str) else ""
+            if tag == soft_tag or tag.endswith("lastRenderedPageBreak"):
+                parent.remove(child)
+                removed += 1
+    return removed
+
+
+def _normalize_requal_body_fonts_to_arial_11(doc) -> int:
+    """
+    Requal/reval body was often rewritten at 12pt (sz=24). Original AHU protocol
+    body is Arial 11 (sz=22). Cap inflated body runs back to 11 without touching
+    larger title/header sizes (14/18pt).
+    """
+    if _active_is_neq():
+        return 0
+    fixed = 0
+    for run in doc.element.body.iter(qn("w:r")):
+        text = "".join(node.text or "" for node in run.iter(qn("w:t"))).strip()
+        if not text:
+            continue
+        r_pr = run.find(qn("w:rPr"))
+        if r_pr is None:
+            continue
+        sz = r_pr.find(qn("w:sz"))
+        if sz is None:
+            # Missing size → explicit 11 so LibreOffice PDF matches Word.
+            _force_arial_11_on_rpr(r_pr, bold=False, force_size=True)
+            fixed += 1
+            continue
+        try:
+            half = int(sz.get(qn("w:val")) or 0)
+        except (TypeError, ValueError):
+            continue
+        # Only undo the fill default bump 11→12 (22→24). Leave 10/14/18 alone.
+        if half == 24:
+            for tag in ("w:sz", "w:szCs"):
+                for node in list(r_pr.findall(qn(tag))):
+                    r_pr.remove(node)
+            sz_n = OxmlElement("w:sz")
+            sz_n.set(qn("w:val"), "22")
+            r_pr.append(sz_n)
+            sz_cs = OxmlElement("w:szCs")
+            sz_cs.set(qn("w:val"), "22")
+            r_pr.append(sz_cs)
+            fonts = r_pr.find(qn("w:rFonts"))
+            if fonts is None:
+                fonts = OxmlElement("w:rFonts")
+                r_pr.insert(0, fonts)
+            if not (fonts.get(qn("w:ascii")) or "").strip():
+                fonts.set(qn("w:ascii"), "Arial")
+                fonts.set(qn("w:hAnsi"), "Arial")
+            fixed += 1
+    return fixed
 
 
 def _expand_clipping_textboxes(doc) -> int:
@@ -3598,6 +4286,7 @@ def _normalize_filled_docx_layout(doc, profile: str = "legacy") -> None:
         _clamp_body_tables_inside_page_border(doc)
     except Exception:
         pass
+    _strip_stale_soft_page_breaks(doc)
     _normalize_table_page_breaks(doc)
     _ensure_body_cell_margins(doc)
     _expand_clipping_textboxes(doc)
@@ -4016,7 +4705,74 @@ def _trim_empty_paras_before_attachment_heading(doc, *, keep: int = 2) -> int:
         _set_para_page_break_before(el, enabled=False)
         _ensure_para_keep_next(el)
 
+    removed += _tighten_spacing_after_section_headings(doc)
     return removed
+
+
+def _clamp_para_spacing_twips(p_el, *, before_max: int | None = None, after_max: int | None = None) -> bool:
+    """Reduce paragraph before/after spacing so LO PDF matches Word's tighter look."""
+    p_pr = p_el.find(qn("w:pPr"))
+    if p_pr is None:
+        return False
+    spacing = p_pr.find(qn("w:spacing"))
+    if spacing is None:
+        return False
+    changed = False
+    if before_max is not None:
+        raw = spacing.get(qn("w:before"))
+        try:
+            before = int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            before = None
+        if before is not None and before > before_max:
+            spacing.set(qn("w:before"), str(before_max))
+            changed = True
+        if spacing.get(qn("w:beforeAutospacing")) is not None:
+            del spacing.attrib[qn("w:beforeAutospacing")]
+            changed = True
+    if after_max is not None:
+        raw = spacing.get(qn("w:after"))
+        try:
+            after = int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            after = None
+        if after is not None and after > after_max:
+            spacing.set(qn("w:after"), str(after_max))
+            changed = True
+        if spacing.get(qn("w:afterAutospacing")) is not None:
+            del spacing.attrib[qn("w:afterAutospacing")]
+            changed = True
+    return changed
+
+
+def _tighten_spacing_after_section_headings(doc) -> int:
+    """
+    Word collapses heading afterAutospacing + next before; LibreOffice stacks both
+    and leaves a large white gap (e.g. after EQUIPMENT/SYSTEM DESCRIPTION).
+    Clamp heading after + following body before to ~one tight line.
+    """
+    fixed = 0
+    body = doc.element.body
+    children = list(body)
+    for idx, el in enumerate(children):
+        if el.tag != qn("w:p"):
+            continue
+        if not _is_tight_gap_section_heading(_para_plain_text(el)):
+            continue
+        if _clamp_para_spacing_twips(el, after_max=60):
+            fixed += 1
+        for j in range(idx + 1, min(idx + 5, len(children))):
+            nxt = children[j]
+            if nxt.tag != qn("w:p"):
+                break
+            text = _para_plain_text(nxt)
+            if not text:
+                _normalize_section_spacer_para(nxt)
+                continue
+            if _clamp_para_spacing_twips(nxt, before_max=60):
+                fixed += 1
+            break
+    return fixed
 
 
 def _repair_mashed_bullet_cells(doc) -> int:
@@ -4054,7 +4810,7 @@ def _repair_mashed_bullet_cells(doc) -> int:
                             paras[0]
                         )
                         if font_size is None:
-                            font_size = Pt(12)
+                            font_size = _default_fill_font_size()
                         if not font_name:
                             font_name = "Arial"
                         _clear_text_runs(paras[1])
@@ -4106,7 +4862,7 @@ def _repair_mashed_bullet_cells(doc) -> int:
                     continue
                 font_bold, font_italic, font_size, font_name = _extract_para_run_font(paras[0])
                 if font_size is None:
-                    font_size = Pt(12)
+                    font_size = _default_fill_font_size()
                 if not font_name:
                     font_name = "Arial"
                 for para, line in zip(paras, lines):

@@ -1563,19 +1563,11 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
             seen_insert_fp.add(content_fp)
         unique_inserts.append(op)
     inserts = unique_inserts
-    # Keep client submit order within each table. Highest-after_row-first + addnext
-    # on the same anchor reversed multiple Add Rows (…,10, B, A instead of …,10, A, B).
-    # chain_after keeps successive inserts after the same after_row in typed order.
-    inserts.sort(
-        key=lambda op: (
-            int(op.get("table", -1)),
-            int(op.get("after_row", -1)) if op.get("after_row") not in (None, "") else 10**9,
-        )
-    )
-    # Keyed by (table index, original after_row) → last inserted <w:tr> for that anchor.
+    # Keep client submit order. The fill UI's after_row already includes prior
+    # in-session shifts (select row N → add → next after_row is N+1). Re-sorting
+    # by after_row and adding shift_by_table pushed later inserts toward the
+    # table end. chain_after still stacks multiple inserts on the same anchor.
     chain_after: dict[tuple[int, int], object] = {}
-    # How many inserts already applied at/before each original after_row (per table).
-    shift_by_table: dict[int, int] = {}
 
     for op in inserts:
         tables = collect_docx_tables(doc)
@@ -1595,9 +1587,6 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
         except (TypeError, ValueError):
             after_index = -1
         original_after = after_index
-        # Account for rows already inserted above this anchor in this pass.
-        if after_index >= 0:
-            after_index = after_index + int(shift_by_table.get(table_key, 0))
 
         tr_list = list(table._tbl.tr_lst)
         safety_at = None
@@ -1605,9 +1594,12 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
             if _row_is_safety_by_signoff(row):
                 safety_at = i
                 break
-        if after_index < 0 or after_index >= len(tr_list):
-            # A row added on the next preview page has no row above it in that
-            # fragment. Keep it above Safety By, not after the whole table.
+        if after_index < 0:
+            # Missing anchor → keep above Safety By when present, else last data row.
+            after_index = (safety_at - 1) if safety_at else (len(tr_list) - 1)
+        elif after_index >= len(tr_list):
+            # Preview index past Word length (continued page fragment): clamp,
+            # never silently jump to absolute last if Safety By exists.
             after_index = (safety_at - 1) if safety_at else (len(tr_list) - 1)
         elif safety_at is not None and after_index >= safety_at:
             after_index = safety_at - 1
@@ -1634,7 +1626,13 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
             else:
                 continue
 
-        base_anchor = tr_list[insert_after] if 0 <= insert_after < len(tr_list) else tr_list[-1]
+        # Prefer the live row at after_index (grows as prior inserts apply).
+        tr_list = list(table._tbl.tr_lst)
+        if 0 <= after_index < len(tr_list):
+            base_anchor = tr_list[after_index]
+            insert_after = after_index
+        else:
+            base_anchor = tr_list[insert_after] if 0 <= insert_after < len(tr_list) else tr_list[-1]
         chain_key = (table_key, original_after if original_after >= 0 else after_index)
         anchor = chain_after.get(chain_key, base_anchor)
         new_tr = deepcopy(template_tr)
@@ -1647,7 +1645,6 @@ def _apply_table_ops(doc: Document, table_ops: list[dict]) -> tuple[int, int]:
                     new_tr_pr.remove(node)
         anchor.addnext(new_tr)
         chain_after[chain_key] = new_tr
-        shift_by_table[table_key] = int(shift_by_table.get(table_key, 0)) + 1
         tr_list = list(table._tbl.tr_lst)
         try:
             insert_at = tr_list.index(new_tr)

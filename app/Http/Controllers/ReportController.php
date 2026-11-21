@@ -160,7 +160,7 @@ public function store(Request $request, Template $template)
 
     $data = $request->except(['_token']);
     $data['prepared_by_signature'] = $data['prepared_by_signature'] ?? 'Prepared';
-    $data['prepared_by_date']      = $data['prepared_by_date'] ?? now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+    $data['prepared_by_date']      = $data['prepared_by_date'] ?? now()->timezone('Asia/Kolkata')->format('d-m-Y H:i');
 
     $preparedName = trim((auth()->user()->first_name ?? '') . ' ' . (auth()->user()->last_name ?? ''));
     if ($preparedName === '') $preparedName = auth()->user()->name ?? '';
@@ -332,11 +332,14 @@ public function store(Request $request, Template $template)
     $docxPdfPreviewUrl = null;
     if ($report->docx_import_path) {
         $docxImport = app(DocxImportController::class);
-        // If fill completed but filled DOCX is missing, regenerate so view matches download.
-        if (
-            ($report->docx_import_status ?? '') === 'completed'
-            && ! $docxImport->hasFilledDocxOnDisk($report)
-        ) {
+        // Regenerate when filled DOCX is missing, or once when POST-stage requal/reval
+        // still has blank PRE-APPROVAL Signature & Date (wiped by earlier send-to-post).
+        $needsFilledRefresh = ($report->docx_import_status ?? '') === 'completed'
+            && (
+                ! $docxImport->hasFilledDocxOnDisk($report)
+                || $docxImport->requalPreApprovalSignaturesNeedRestore($report)
+            );
+        if ($needsFilledRefresh) {
             try {
                 $docxImport->ensureLatestFilledDocxForDownload($report);
                 $report->refresh();
@@ -689,7 +692,7 @@ private function lockAllFields(string $html): string
         } else {
             if ($report->stage === 'pre') {
                 // Last pre-approval timestamp becomes the Effective Date (date + time).
-                $lastPreDate = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+                $lastPreDate = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y H:i');
                 $data['effective_date'] = $lastPreDate;
                 $report->update([
                     'status'             => 'pre_approved',
@@ -712,7 +715,7 @@ private function lockAllFields(string $html): string
                 }
             } else {
                 // Final POST approval: always stamp last approver date+time as Effective Date.
-                $lastApprovalAt = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+                $lastApprovalAt = \Carbon\Carbon::parse($step->approved_at)->timezone('Asia/Kolkata')->format('d-m-Y H:i');
                 $data['effective_date'] = $lastApprovalAt;
                 $report->update([
                     'status'             => 'approved',
@@ -1759,7 +1762,7 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
 
         $data = $request->except(['_token']);
         $data['prepared_by_signature'] = $data['prepared_by_signature'] ?? 'Prepared';
-        $data['prepared_by_date'] = $data['prepared_by_date'] ?? now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+        $data['prepared_by_date'] = $data['prepared_by_date'] ?? now()->timezone('Asia/Kolkata')->format('d-m-Y H:i');
 
         $preparedName = trim((auth()->user()->first_name ?? '') . ' ' . (auth()->user()->last_name ?? ''));
         if ($preparedName === '') {
@@ -2343,7 +2346,7 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
             $dateInput = $xpath->query('//input[@name="' . $prefix . '_date"]')->item(0);
 
             if ($step->approved_at) {
-                $approvedDate = $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+                $approvedDate = $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y H:i');
 
                 if ($sigInput) {
                     $span = $doc->createElement('span', 'Approved');
@@ -2355,7 +2358,7 @@ $option->setAttribute('data-approver-id', (string) $equipmentApproverId);
                     $dateInput->parentNode->replaceChild($span, $dateInput);
                 }
             } elseif ($step->rejected_at) {
-                $rejectedDate = $step->rejected_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+                $rejectedDate = $step->rejected_at->timezone('Asia/Kolkata')->format('d-m-Y H:i');
 
                 if ($sigInput) {
                     $span = $doc->createElement('span', 'Send Back');
@@ -2429,7 +2432,7 @@ if ($preparedDateInputs->length > 0) {
         $name = $this->formatUserOptionLabel(auth()->user());
         $data[$prefix . '_name_text'] = $this->safeUtf8($name);
         $data[$prefix . '_signature'] = $this->safeUtf8($decision);
-        $data[$prefix . '_date']      = now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+        $data[$prefix . '_date']      = now()->timezone('Asia/Kolkata')->format('d-m-Y H:i');
     }
 
     private function renderPreSectionReadOnly(string $html, array $data, Report $report): string

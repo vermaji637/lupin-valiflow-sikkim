@@ -526,13 +526,16 @@ async def preview_document(
         is_requal_col0_lock = mode in ("pre_approval", "requalification")
 
         def _is_sr_no_field(field: dict) -> bool:
-            """True for Sl./Sr. No. data cells — editable in pre-approval."""
+            """True for Sl./Sr. No. / Revision No. data cells — editable in pre-approval."""
             ftype = str(field.get("type") or "").lower()
             flabel = str(field.get("label") or "").lower().strip()
             floc = str(field.get("location") or "")
             if ftype == "table_sl_no":
                 return True
             if re.match(r"^(sr\.?\s*no\.?|s\.?\s*no\.?|sl\.?\s*no\.?|#)\b", flabel):
+                return True
+            # 15.0 REVISION HISTORY — Revision No. is a number (1/2/3), never a PQ label.
+            if re.match(r"^(revision\s*no\.?|rev\.?\s*no\.?)\b", flabel):
                 return True
             if re.search(r"_row_[1-9]\d*_col_0$", floc) and field.get("auto_serial") not in (
                 None,
@@ -541,13 +544,24 @@ async def preview_document(
                 return True
             return False
 
+        def _is_revision_history_field(field: dict) -> bool:
+            flabel = str(field.get("label") or "").lower().strip()
+            return bool(
+                re.search(r"\brevision\s*no\.?\b", flabel)
+                or re.search(r"\breason\s+for\s+revision\b", flabel)
+                or re.search(r"\beffective\s+date\b", flabel)
+            )
+
         def _is_qualification_history_template_lock(field: dict, stored: dict | None = None) -> bool:
             """
             Word Qualification History:
             - Lock Initial Qualification (PQ) / Periodic labels (col_0)
             - Lock true sub-header cells whose value is Report No. / Approval Date
             - Initial 2nd sub-row + Periodic detail blanks stay fillable
+            Never apply to 15.0 REVISION HISTORY (Reason may say Initial Qualification).
             """
+            if _is_revision_history_field(field) or _is_sr_no_field(field):
+                return False
             stored = stored or {}
             val = str(stored.get("value") or field.get("value") or "").strip()
             loc = str(field.get("location") or stored.get("location") or "")
@@ -561,6 +575,17 @@ async def preview_document(
             return False
 
         # Seed Initial Qualification row markers from stored + fresh so sibling cells lock.
+        # Only for Qualification History — NEVER copy into REVISION HISTORY Revision No.
+        _revision_row_keys: set[str] = set()
+        for _src in (stored_by_loc.values(), fresh):
+            for _f in _src:
+                if not isinstance(_f, dict):
+                    continue
+                if _is_revision_history_field(_f) or _is_sr_no_field(_f):
+                    _loc = str(_f.get("location") or "")
+                    _m = re.match(r"^(table_\d+_row_\d+)_col_", _loc)
+                    if _m:
+                        _revision_row_keys.add(_m.group(1))
         for _src in (stored_by_loc.values(), fresh):
             for _f in _src:
                 if not isinstance(_f, dict):
@@ -569,8 +594,16 @@ async def preview_document(
                 _val = str(_f.get("value") or "").strip()
                 if re.match(r"(?i)^initial\s+qualification\b", _val):
                     _m = re.match(r"^(table_\d+_row_\d+)_col_", _loc)
-                    if _m and f"{_m.group(1)}_col_0" not in stored_by_loc:
-                        stored_by_loc[f"{_m.group(1)}_col_0"] = {"value": _val, "location": f"{_m.group(1)}_col_0"}
+                    if not _m:
+                        continue
+                    _row_key = _m.group(1)
+                    if _row_key in _revision_row_keys:
+                        continue
+                    if f"{_row_key}_col_0" not in stored_by_loc:
+                        stored_by_loc[f"{_row_key}_col_0"] = {
+                            "value": _val,
+                            "location": f"{_row_key}_col_0",
+                        }
 
         fields = []
         for ff in fresh:
@@ -604,6 +637,13 @@ async def preview_document(
                         ff["value"] = ""
                         ff["stamp_eligible"] = True
                         ff["prefilled"] = False
+                    elif (
+                        _is_sr_no_field(ff)
+                        and re.match(r"(?i)^initial\s+qualification\b", str(stored_val or "").strip())
+                    ):
+                        # Bad draft: Qualification History PQ text landed in Revision No.
+                        # Keep Word number from fresh parse (e.g. "1").
+                        pass
                     else:
                         ff["value"] = stored_val
                 if is_heading_or_fixed or is_col_0_label:
@@ -633,10 +673,10 @@ async def preview_document(
                     elif loc and loc.endswith("_row_0_col_1") and ff.get("type") == "table_2col":
                         ff["locked"] = False
                     elif _is_sr_no_field(ff):
-                        # Sr. No. always editable + show default during pre-approval.
-                        ff["locked"] = False
+                        # Pre-approval: Sr. No. stays editable with default serial.
                         ff["type"] = "table_multicol"
                         ff["widget"] = "text"
+                        ff["locked"] = False
                         ff["draft_editable"] = True
                         ff["user_filled"] = True
                         ff["prefilled"] = False
@@ -652,15 +692,24 @@ async def preview_document(
                         sv.get("locked") in (True, 1, "1", "true", "yes")
                         and sv.get("draft_editable") is False
                         and sv.get("user_filled") is not True
+                        and (
+                            is_heading_or_fixed
+                            or is_col_0_label
+                            or (loc and re.search(r"_row_0(_col_\d+)?$", str(loc)))
+                        )
                     ):
-                        # Honor explicit Laravel template locks during pre-approval.
+                        # Only keep true template locks (headings / col_0 labels / row 0).
                         ff["locked"] = True
                         if sv.get("widget"):
                             ff["widget"] = sv.get("widget")
                     elif ff.get("type") not in ("approval_stamp",) and not (
                         loc and loc.endswith("_row_0")
                     ):
+                        # Pre-approval fill: unlock content cells (Checks / Acceptance / etc.).
                         ff["locked"] = False
+                        ff["draft_editable"] = True
+                        ff["user_filled"] = True
+                        ff["prefilled"] = False
                         # Qualification History Periodic row: blank text cells, not date pickers.
                         m_per = re.match(r"^(table_\d+_row_\d+)_col_([12])$", str(loc or ""))
                         if m_per:
@@ -685,7 +734,7 @@ async def preview_document(
                             ):
                                 _pcol = int(m_per.group(2))
                                 ff["widget"] = "date" if _pcol == 2 else "text"
-                                ff["label"] = "Approval Date" if _pcol == 2 else ""
+                                ff["label"] = "Approval Date" if _pcol == 2 else "Report No."
                                 if re.match(
                                     r"(?i)^(report\s*no\.?|approval\s*date)$",
                                     str(ff.get("value") or "").strip(),
@@ -828,8 +877,7 @@ async def preview_document(
                     ff["locked"] = True
                     if parse_role:
                         ff["approver_role"] = parse_role
-                # Sr. No. / auto_serial: show default number; editable in pre-approval / edit.
-                # Only keep locked display in readonly mode (approval show / PDF-style preview).
+                # Sr. No. / auto_serial: editable on fill; locked only in readonly.
                 if (
                     parse_type == "table_sl_no"
                     or ff.get("auto_serial") not in (None, "")
@@ -907,9 +955,9 @@ async def preview_document(
                     elif loc and loc.endswith("_row_0_col_1") and ff.get("type") == "table_2col":
                         ff["locked"] = False
                     elif _is_sr_no_field(ff):
-                        ff["locked"] = False
                         ff["type"] = "table_multicol"
                         ff["widget"] = "text"
+                        ff["locked"] = False
                         ff["draft_editable"] = True
                         if not str(ff.get("value") or "").strip() and ff.get("auto_serial") not in (
                             None,
@@ -922,19 +970,67 @@ async def preview_document(
                     elif ff.get("type") not in ("approval_stamp",) and not (
                         loc and loc.endswith("_row_0")
                     ):
+                        # Pre-approval: keep Checks / Acceptance / DESCRIPTION editable.
                         ff["locked"] = False
+                        ff["draft_editable"] = True
+                        ff["user_filled"] = True
+                        ff["prefilled"] = False
                 else:
                     if _is_sr_no_field(ff) and mode != "readonly":
-                        ff["locked"] = False
+                        if not str(ff.get("value") or "").strip() and ff.get("auto_serial") not in (None, ""):
+                            try:
+                                ff["value"] = f"{int(ff['auto_serial'])}."
+                            except (TypeError, ValueError):
+                                pass
                         ff["type"] = "table_multicol"
                         ff["widget"] = "text"
+                        ff["locked"] = False
+                        ff["draft_editable"] = True
                     elif ff.get("type") in ("paragraph_content", "table_2col_label") or (
                         is_requal_col0_lock and loc and loc.endswith("_col_0") and not _is_sr_no_field(ff)
                     ):
                         ff["locked"] = True
                     elif ff.get("type") == "table_2col" or (loc and (loc.endswith("_col_1") or re.match(r"^table_\d+_row_\d+$", loc))):
+                        # Fill modes: DESCRIPTION / details stay editable until post-approval.
                         ff["locked"] = False
             fields.append(ff)
+
+        # Draft-only synthetic locations (not in Word parse) must still reach
+        # field_map — e.g. 8.4 Verification P&ID notes (para_N_body).
+        _have_locs = {
+            str(f.get("location") or "")
+            for f in fields
+            if isinstance(f, dict)
+        }
+        for _sloc, _sv in list(stored_by_loc.items()):
+            if not isinstance(_sv, dict) or not _sloc or _sloc in _have_locs:
+                continue
+            _sval = str(_sv.get("value") or "").strip()
+            _keep = (
+                _sloc.endswith("_body")
+                or "verification_pid" in _sloc
+                or bool(_sv.get("user_filled"))
+                or bool(_sv.get("draft_editable"))
+                or _sval != ""
+            )
+            if not _keep:
+                continue
+            # Skip pure template table cells that fresh parse intentionally dropped.
+            if re.match(r"^table_\d+_row_\d+_col_\d+$", _sloc) and not (
+                _sv.get("user_filled") or _sv.get("draft_editable") or _sval
+            ):
+                continue
+            _seed = dict(_sv)
+            _seed.setdefault("location", _sloc)
+            if _sloc.endswith("_body") or "verification_pid" in _sloc:
+                _seed.setdefault("type", "paragraph_content")
+                _seed.setdefault("widget", "textarea")
+                _seed["locked"] = False
+                _seed["draft_editable"] = True
+                if _sval:
+                    _seed["user_filled"] = True
+            fields.append(_seed)
+            _have_locs.add(_sloc)
 
         # Final pass: Qualification History must match Word even if earlier
         # auto_serial / prefilled / meta-merge re-unlocked cells.
@@ -1001,7 +1097,7 @@ async def preview_document(
                         _f["value"] = ""
                     _f["locked"] = False
                     _f["widget"] = "date" if _col == 2 else "text"
-                    _f["label"] = "Approval Date" if _col == 2 else ""
+                    _f["label"] = "Approval Date" if _col == 2 else "Report No."
                     _f["draft_editable"] = True
                     _f["user_filled"] = True
                     _f["prefilled"] = False
@@ -1102,7 +1198,7 @@ async def preview_document(
                         _f["value"] = ""
                     _f["locked"] = False
                     _f["widget"] = "date" if _col == 2 else "text"
-                    _f["label"] = "Approval Date" if _col == 2 else ""
+                    _f["label"] = "Approval Date" if _col == 2 else "Report No."
                     _f["draft_editable"] = True
                     _f["user_filled"] = True
                     _f["prefilled"] = False
@@ -1650,7 +1746,19 @@ def _render_section_notes_textarea(
     rows: int = 3,
 ) -> str:
     """Editable body box under a locked section heading (e.g. 8.4 P&ID)."""
-    field = field_map.get(location) if field_map else None
+    field = None
+    if field_map:
+        field = field_map.get(location)
+        # Alias: draft may be stored under para_verification_pid_body or para_N_body.
+        if field is None and location != "para_verification_pid_body":
+            field = field_map.get("para_verification_pid_body")
+        if field is None:
+            for _k, _f in field_map.items():
+                if not isinstance(_f, dict):
+                    continue
+                if str(_k).endswith("_body") and str(_f.get("value") or "").strip():
+                    field = _f
+                    break
     val = ""
     if field and field.get("value") is not None:
         val = str(field.get("value") or "")
@@ -1847,6 +1955,11 @@ def _is_textarea_cell(
             "methodology",
             "corrective",
             "preventive",
+            # 8.1: Instrument ID + Checked By are multi-line; calibration dates use calendar.
+            "instrument identification",
+            "identification number",
+            "checked. by",
+            "checked by",
         )
     )
 
@@ -2046,7 +2159,7 @@ def _render_textbox_html(
                 lines.append(
                     f'<p class="docx-para docx-textbox-line docx-para-editable">'
                     f"{_escape_html(label_part)}{inp}</p>"
-                )
+            )
             continue
 
         field = field_map.get(location_base)
@@ -2092,6 +2205,9 @@ def _render_textbox_html(
                 f'<p class="docx-para docx-textbox-line">{_escape_html(inner_text)}</p>'
             )
 
+    # Never emit an empty bordered shell (looked like a stray fill box under Remarks).
+    if not "".join(lines).strip():
+        return ""
     return (
         f'<div class="docx-textbox" data-txbx="{txbx_index}">{"".join(lines)}</div>'
     )
@@ -2488,6 +2604,15 @@ def _render_paragraph(
     prefixed_clean_p = f"{eff_prefix} {clean_p}".strip() if eff_prefix else clean_p
     prefix_html = _num_prefix_span(eff_prefix, is_bullet)
 
+    # Word: "Remarks / Recommendation (if any):" is a label only — dotted lines below
+    # are the fill targets. Never render a bordered textarea on this heading.
+    if re.search(r"(?i)^remarks\s*/\s*recommendation\b", clean_p or ""):
+        return (
+            f'<p class="docx-para docx-heading-target" style="font-weight:700;" '
+            f'data-heading-text="{_escape_html((clean_p or "").upper())}">'
+            f"{prefix_html}{_escape_html(clean_p)}</p>"
+        )
+
     if field and field.get("type") == "paragraph_content" and para_text and PARA_BLANK_RE.search(para_text):
         field["type"] = "paragraph_blank"
 
@@ -2815,7 +2940,7 @@ def _render_sl_no_cell(
     location: str = "",
     readonly: bool = False,
 ) -> str:
-    """Render Sl. No. — yellow editable input with default number (unless readonly)."""
+    """Render Sl. No. — editable on fill; locked only in readonly preview."""
     display = _format_sl_no_display(r_idx, field, cell_text)
     # Drop outline junk (10.0) left over from Word list numbering.
     if display and not _looks_like_sl_no_value(display):
@@ -2830,8 +2955,7 @@ def _render_sl_no_cell(
     if not display and r_idx > 0:
         display = f"{r_idx}."
 
-    # Fill / pre-approval: always editable so users can change sequence.
-    # Only readonly preview (approval show) keeps plain locked text.
+    # Fill / pre-approval: keep Sr. No. editable. Readonly preview stays plain text.
     force_locked = readonly
     if force_locked:
         style = _inline_cell_style(cell_style, readonly=True, value_cell=True)
@@ -3225,30 +3349,23 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 )
             html.append("</tr>")
             continue
-        if r_idx > 0 and is_repeated_column_header_row(row, col_headers):
-            seen_header: set = set()
-            for cell in cells:
-                tc_el = cell._tc
-                if tc_el in seen_header:
-                    continue
-                seen_header.add(tc_el)
-                c_span = _cell_colspan(cell, cells)
-                c_span_attr = f' colspan="{c_span}"' if c_span > 1 else ""
-                style = _inline_cell_style("font-weight:bold;", readonly=readonly)
-                html.append(
-                    f'<td class="docx-cell"{c_span_attr} style="{style}">'
-                    f"{_escape_html(cell.text.strip())}</td>"
-                )
-            html.append("</tr>")
-            continue
+        # Mid-table Word header repeats are already skipped above when
+        # column_header_seen was already True. Do NOT skip the first
+        # Checks/Methodology row after a "Major components :" banner (9.2).
         is_two_col = len(cells) == 2
         is_one_col = len(cells) == 1
         row_label = cells[0].text.strip() if cells else ""
+        # Column headers may sit on row 1+ when row 0 is "Major components :".
+        is_col_header_row = bool(
+            is_repeated_column_header_row(row, col_headers)
+            or (r_idx == 0 and not is_equipment_section_banner_row(row))
+        )
         seen_tc_els: set = set()
-        # Fill/pre-approval: expand vertical merges into per-row cells (no HTML rowspan).
-        # Rowspan breaks when the client paginator moves <tr> across A4 pages, which
-        # hid 9.3 Functional Tests acceptance rows under overflow:hidden.
-        expand_vmerge = not readonly
+        # Always expand vertical merges into per-row cells (no HTML rowspan).
+        # Client A4 paginators (fill + 2nd-approval show) move <tr> across pages;
+        # HTML rowspan cannot span tables, so Sr.No / Identification vanish and
+        # Acceptance criteria shifts left on the next sheet (9.3 Functional Tests).
+        expand_vmerge = True
 
         for col_idx, cell in enumerate(cells):
             tc_el = cell._tc
@@ -3263,7 +3380,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 rowspan = 1
                 rowspan_attr = ""
             else:
-                # Readonly / print-like: keep a true rowspan and skip follow cells.
+                # Legacy path kept for reference; expand_vmerge is always on.
                 if tc_el in rendered_tc_els:
                     continue
                 rendered_tc_els.add(tc_el)
@@ -3312,7 +3429,9 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
             ):
                 # Empty Sl. No. cell with outline numPr — leave blank for editable default.
                 text = ""
-            is_header = r_idx == 0 and not (is_two_col and not is_two_col_grid_table(table) and not is_two_col_header_row(cells, table.rows))
+            is_header = is_col_header_row and not (
+                is_two_col and not is_two_col_grid_table(table) and not is_two_col_header_row(cells, table.rows)
+            )
             cell_style = "font-weight:bold;" if is_header else ""
 
             if is_header:
@@ -3347,10 +3466,11 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                         m_sec = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title_val)
                         sec_num = m_sec.group(1) if m_sec else ""
                         clean_title = m_sec.group(2) if m_sec else title_val
+                        # Titles are locked (Word TOC text); only page digits are editable.
                         rendered_lines.append(
                             f'<div class="docx-toc-line" style="display: flex; align-items: center; justify-content: space-between; padding: 2px 0; gap: 8px;" data-toc-sec="{_escape_html(sec_num)}" data-toc-title="{_escape_html(clean_title)}">'
-                            f'<input type="text" name="fields[{title_loc}]" class="docx-input docx-toc-title-input" value="{_escape_html(title_val)}" '
-                            f'style="flex: 1; min-width: 140px; font-weight: 500; font-size: 13px; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7;">'
+                            f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500; font-size: 13px; color: #1e293b;">{_escape_html(title_val)}</span>'
+                            f'<input type="hidden" name="fields[{title_loc}]" class="docx-toc-title-input" value="{_escape_html(title_val)}">'
                             f'<span class="toc-dots" style="flex-grow: 1; border-bottom: 2px dotted #94a3b8; margin: 0 4px; min-width: 16px; height: 1em;"></span>'
                             f'<input type="number" min="1" max="999" name="fields[{loc}]" '
                             f'class="docx-input docx-toc-page-input" '
@@ -3380,11 +3500,10 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                                 stored = field_map[loc].get("value")
                                 if stored is not None and str(stored).strip() != "":
                                     cell_val = str(stored).strip()
+                            # Lock TOC title text; page digits use the dotted-line branch above.
                             rendered_lines.append(
-                                f'<input type="text" name="fields[{loc}]" class="docx-input docx-toc-title-input" '
-                                f'value="{_escape_html(cell_val)}" '
-                                f'style="width:100%; box-sizing:border-box; font-weight:500; font-size:13px; padding:2px 6px; '
-                                f'border:1px solid #cbd5e1; border-radius:4px; background:#fffde7;">'
+                                f'<span class="toc-title" style="font-weight:500;font-size:13px;color:#1e293b;">{_escape_html(cell_val)}</span>'
+                                f'<input type="hidden" name="fields[{loc}]" class="docx-toc-title-input" value="{_escape_html(cell_val)}">'
                             )
                         else:
                             rendered_lines.append(f'<div>{_escape_html(line)}</div>')
@@ -3398,13 +3517,14 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
             field = _resolve_cell_field(
                 t_idx, r_idx, col_idx, cell, cells, is_two_col, field_map
             )
-            # Fill / pre-approval: HVAC check columns must stay editable even when
-            # parse marked them locked (Acceptance / Identification / etc.).
+            # Fill / pre-approval: keep HVAC + equipment columns editable until
+            # post-approval. Readonly / post-lock modes honor field["locked"].
             if (
                 field
                 and not readonly
                 and r_idx > 0
                 and not _is_readonly_mode(mode)
+                and mode in ("pre_approval", "edit")
             ):
                 _hdr = (
                     col_headers[col_idx].strip().lower()
@@ -3418,14 +3538,20 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                         "identification",
                         "methodology",
                         "checks",
+                        "description",
+                        "details",
+                        "position of valve",
                         "observation",
                         "done by",
+                        "remark",
+                        "comment",
+                        "deviation",
                     )
                 ):
                     field = dict(field)
                     field["locked"] = False
 
-            # Sl. No. / Sr. No.: show default serial and stay editable unless readonly.
+            # Sl. No. / Sr. No.: editable during fill / pre-approval.
             word_has_serial = bool((text or "").strip() and _looks_like_sl_no_value(text))
             field_val = str((field or {}).get("value") or "").strip()
             if field_val and not _looks_like_sl_no_value(field_val):
@@ -3600,9 +3726,24 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 col1_val = text
                 if text.strip().lower() == row.cells[0].text.strip().lower():
                     col1_val = ""
+                header_right = (
+                    table.rows[0].cells[1].text.strip().lower()
+                    if table.rows and len(table.rows[0].cells) > 1
+                    else ""
+                )
+                # DESCRIPTION stays editable during fill; locked only in readonly.
                 if readonly:
                     display = _render_readonly_span(col1_val, None, col1_loc)
-                    html.append(_readonly_td(display, cell_style=cell_style, rowspan_attr=rowspan_attr, colspan_attr=colspan_attr, location=col1_loc))
+                    html.append(
+                        _readonly_td(
+                            display,
+                            cell_style=cell_style,
+                            rowspan_attr=rowspan_attr,
+                            colspan_attr=colspan_attr,
+                            location=col1_loc,
+                            extra_class="readonly",
+                        )
+                    )
                 else:
                     inp = _render_field_input(
                         col1_loc,
@@ -3676,6 +3817,15 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                     k in header_label_l
                     for k in ("acceptance", "identification", "methodology", "checks")
                 )
+                # 8.1: Instrument ID + Checked By → textarea; Date/Due Date of Calibration → calendar.
+                is_calibration_descriptive_col = any(
+                    k in header_label_l
+                    for k in (
+                        "checked. by",
+                        "checked by",
+                        "instrument identification",
+                    )
+                )
                 # Draft/import often stores Acceptance criteria as one collapsed line
                 # (newlines + list numbers stripped). Prefer live DOCX multi-line text.
                 if text and "\n" in text and "\n" not in str(value):
@@ -3696,12 +3846,15 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                         )
                     )
                 else:
-                    # Keep Acceptance / Identification editable, but always use textarea
-                    # when multi-line or long so text is not clipped in a single-line input.
+                    # Spec columns with Word text were locked above; never force-unlock.
                     use_textarea = (
                         is_spec_col
+                        or is_calibration_descriptive_col
                         or _is_textarea_cell(
-                            field, row_label, rowspan, str(display_value or text)
+                            field,
+                            f"{row_label} {header_label_l}",
+                            rowspan,
+                            str(display_value or text),
                         )
                         or ("\n" in str(display_value or ""))
                         or len(str(display_value or text or "")) > 48
@@ -3716,7 +3869,6 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                     if use_textarea:
                         widget_field = dict(field)
                         widget_field["widget"] = "textarea"
-                        widget_field["locked"] = False
                         inp = _render_field_input(
                             field["location"],
                             widget_field,
@@ -4176,16 +4328,23 @@ def build_fill_html(
 
     def _is_major_tail_section(para_text: str, num_prefix: str = "") -> bool:
         """
-        Break before major tail anchors so packed sheets do not clip
-        REFERENCES / History / Summary under overflow:hidden. Extra pages
-        are OK; hidden content is not. Client may still merge a following
-        short section when it fully fits.
+        Break before major mid/tail anchors so packed sheets do not clip
+        8.2–8.4 / REFERENCES / History / Summary under overflow:hidden.
+        Extra pages are OK; hidden content is not.
         """
         combined = f"{num_prefix} {para_text}".upper()
         return bool(
             re.search(
-                r"\b(DEVIATIONS?\s*\(IF ANY\)|SUMMARY\s*&\s*CONCLUSION|"
-                r"REFERENCES|ABBREVIATIONS|REVISION\s+HISTORY|POST-APPROVAL)\b",
+                r"\b("
+                r"PREVENTIVE\s+MAINTENANCE\s+DETAILS|"
+                r"ANY\s+OTHER\s+SPECIFIC\s+TESTS|"
+                r"VERIFICATION\s+WITH\s+THE\s+CURRENT\s+P\s*&\s*ID|"
+                r"HISTORY\s+OF\s+EQUIPMENT|"
+                r"REVIEW\s+OF\s+CHANGE\s+CONTROLS|"
+                r"LIST\s+OF\s+ATTACHMENT|"
+                r"DEVIATIONS?\s*\(IF ANY\)|SUMMARY\s*&\s*CONCLUSION|"
+                r"REFERENCES|ABBREVIATIONS|REVISION\s+HISTORY|POST-APPROVAL"
+                r")\b",
                 combined,
             )
         )
@@ -4422,11 +4581,12 @@ def build_fill_html(
                                 )
                                 title_html = f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500;">{_escape_html(title_val)}</span>'
                             else:
+                                # Lock section titles (1.0 OBJECTIVE…); only page number is editable.
                                 title_html = (
-                                    f'<input type="text" name="fields[{title_loc}]" '
-                                    f'class="docx-input docx-toc-title-input" '
-                                    f'value="{_escape_html(title_val)}" '
-                                    f'style="flex: 1; min-width: 140px; font-weight: 500; font-size: 13px; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fffde7;">'
+                                    f'<span class="toc-title" style="flex-shrink: 0; font-weight: 500; font-size: 13px; color: #1e293b;">'
+                                    f'{_escape_html(title_val)}</span>'
+                                    f'<input type="hidden" name="fields[{title_loc}]" '
+                                    f'class="docx-toc-title-input" value="{_escape_html(title_val)}">'
                                 )
                                 page_html = (
                                     f'<span class="toc-page-wrap" style="flex-shrink: 0; display: inline-flex; align-items: center;">'

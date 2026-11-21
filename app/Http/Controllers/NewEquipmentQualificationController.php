@@ -699,7 +699,7 @@ class NewEquipmentQualificationController extends Controller
         // Document-flexible: split Name + Department when template has a separate department column.
         [$nameText, $departmentText] = $this->approvalDisplayTexts($user, $step);
         $signatureText = 'Approved';
-        $dateText = now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+        $dateText = now()->timezone('Asia/Kolkata')->format('d-m-Y H:i');
         [$paragraphEdits, $cellEdits] = $this->buildApprovalStampPayload(
             $docxService,
             $sourcePath,
@@ -908,7 +908,7 @@ class NewEquipmentQualificationController extends Controller
         $target = $root->latestEditedCopy() ?: $root;
         $applyStats = [];
         $sourcePath = Storage::disk('public')->path($target->stored_path);
-        $dateText = now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+        $dateText = now()->timezone('Asia/Kolkata')->format('d-m-Y H:i');
         [$nameText, $departmentText] = $this->approvalDisplayTexts($actor, $step);
         $paragraphEdits = [];
         $cellEdits = [];
@@ -1003,7 +1003,7 @@ class NewEquipmentQualificationController extends Controller
             }
             [$nameText, $departmentText] = $this->approvalDisplayTexts($step->user, $step);
             $signatureText = 'Approved';
-            $dateText = $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+            $dateText = $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y H:i');
             [$stepParagraphs, $stepCells] = $this->buildApprovalStampPayload(
                 $docxService,
                 $absolutePath,
@@ -1745,10 +1745,10 @@ class NewEquipmentQualificationController extends Controller
                 'date_col' => (int) $step->date_col,
                 'paragraph_index' => $step->paragraph_index !== null ? (int) $step->paragraph_index : null,
                 'approved_at' => $step->approved_at
-                    ? $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A')
+                    ? $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y H:i')
                     : null,
                 'rejected_at' => $step->rejected_at
-                    ? $step->rejected_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A')
+                    ? $step->rejected_at->timezone('Asia/Kolkata')->format('d-m-Y H:i')
                     : null,
                 'remark' => $step->remark,
                 'name_text' => $nameText,
@@ -1756,12 +1756,12 @@ class NewEquipmentQualificationController extends Controller
                 'signature_text' => $step->rejected_at
                     ? 'Rejected'
                     : ($step->approved_at
-                        ? trim($nameText . "\n" . $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A'))
+                        ? trim($nameText . "\n" . $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y H:i'))
                         : ''),
                 'date_text' => $step->approved_at
-                    ? $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A')
+                    ? $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y H:i')
                     : ($step->rejected_at
-                        ? $step->rejected_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A')
+                        ? $step->rejected_at->timezone('Asia/Kolkata')->format('d-m-Y H:i')
                         : ''),
             ];
         })->values()->all();

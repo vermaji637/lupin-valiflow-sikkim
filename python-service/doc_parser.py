@@ -607,7 +607,14 @@ def has_paragraph_blank(text: str) -> bool:
             "list of attachments",
             "list of sops identified",
             "verification of draft sops",
+            "remarks / recommendation (if any)",
+            "remarks / recommendation",
+            "remarks/recommendation (if any)",
+            "remarks/recommendation",
         ):
+            return False
+        # "Remarks / Recommendation (if any):" is a section label — not a fill blank.
+        if re.search(r"(?i)^remarks\s*/\s*recommendation\b", cleaned):
             return False
         if len(cleaned) < 50 and len(cleaned.split()) <= 6:
             return True
@@ -1615,6 +1622,11 @@ _LOCKED_SECTION_TITLES_EXACT = {
     "list of attachments",
     "list of sops identified",
     "verification of draft sops",
+    # 8.6 — label only; dotted lines below are the fill targets (no textarea box).
+    "remarks / recommendation (if any)",
+    "remarks / recommendation",
+    "remarks/recommendation (if any)",
+    "remarks/recommendation",
     # NEQ IOQ section titles (often stored without the Word auto-number).
     "installation checks",
     "pre-installation checks",
@@ -1754,6 +1766,9 @@ def infer_field_widget(label: str, field_type: str) -> str:
     if is_date_field_label(label):
         return "date"
     ll = (label or "").lower()
+    # Section label only — never a full textarea box on the heading itself.
+    if re.search(r"(?i)^remarks\s*/\s*recommendation\b", (label or "").strip()):
+        return "text"
     if any(
         k in ll
         for k in (

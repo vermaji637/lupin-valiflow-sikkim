@@ -341,6 +341,8 @@ class DocxImportController extends Controller
         }
 
         $stampedFields = $this->fieldsWithApprovalStamps($report);
+        // PRE-APPROVAL Signature & Date must survive send-to-post / download regenerate.
+        $stampedFields = $this->applyRequalificationPreApproverNames($report, $stampedFields);
         // Merge stamps without overwriting pre-approval baseline values locked at fill submit.
         $fields        = $this->mergeDocxImportFieldsPreservingBaseline($baselineFields, $stampedFields, $report->id);
         if ($fields === []) {
@@ -364,6 +366,8 @@ class DocxImportController extends Controller
             'attachments'        => $attachments['attachments'] ?? $report->attachments,
             'rendered_html'      => null,
         ]);
+        // Force show-preview PDF rebuild so PRE Signature & Date appear immediately.
+        $this->invalidateFilledPdfCache($report->fresh());
     }
 
     // Builds read-only HTML preview for report show and approval pages, reusing cached HTML when valid.
@@ -515,6 +519,9 @@ class DocxImportController extends Controller
         // Re-stamp every completed POST step so Signature & Date stays name + datetime
         // on all rows (Prepared / Checked / Approved), not only the latest click.
         $stampedFields = $this->fieldsWithApprovalStamps($report, null);
+        // PRE-APPROVAL tables (Prepared/Checked/Approved By) need name + designation on every
+        // selected row — fieldsWithApprovalStamps only covers POST workflow steps.
+        $stampedFields = $this->applyRequalificationPreApproverNames($report, $stampedFields);
         // Baseline merge prevents POST stamps from overwriting user-filled pre-approval content.
         $fields        = $this->mergeDocxImportFieldsPreservingBaseline($baselineFields, $stampedFields, $report->id);
 
@@ -573,6 +580,10 @@ class DocxImportController extends Controller
             )
         );
 
+        // Requal PRE tables 1–3 are often tagged post_* by upgradeSignatureApproverRoles.
+        // Stamp + remrole them before blanking so send-to-post cannot wipe PRE Signature & Date.
+        $fields = $this->applyRequalificationPreApproverNames($report, $fields);
+
         // Close unapproved Signature/Date only — Name stays as the selected user.
         $fields = $this->blankUnapprovedPostApprovalDocxFields($fields, $report);
 
@@ -626,11 +637,11 @@ class DocxImportController extends Controller
 
             $isRejectedStep = $step->rejected_at !== null && $step->approved_at === null;
             $name = $this->resolveApproverDisplayName($data, $prefix);
-            $date = trim((string) ($data[$prefix . '_date'] ?? ''));
+            $date = $this->formatSignatureDateTimeForDocx((string) ($data[$prefix . '_date'] ?? ''));
             if ($date === '' && $isRejectedStep) {
-                $date = $step->rejected_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+                $date = $this->formatSignatureDateTimeForDocx($step->rejected_at);
             } elseif ($date === '' && $step->approved_at !== null) {
-                $date = $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+                $date = $this->formatSignatureDateTimeForDocx($step->approved_at);
             }
             $sig  = $isRejectedStep
                 ? 'Rejected'
@@ -665,8 +676,8 @@ class DocxImportController extends Controller
             if (! $usesCombinedSigDate) {
                 foreach ($approverLocations as $approverLoc) {
                     if (! preg_match('/^(table_\d+_row_\d+)_col_\d+$/', $approverLoc, $am)) {
-                        continue;
-                    }
+                    continue;
+                }
                     $rowPrefix = $am[1] . '_col_';
                     foreach ($fields as $field) {
                         if (! is_array($field)) {
@@ -694,16 +705,16 @@ class DocxImportController extends Controller
                     if (is_array($approverField) && $this->isPrefilledImportField($approverField)) {
                         continue;
                     }
-                    $this->applyApprovalStampToSignatureRow(
-                        $fields,
-                        $indexByLocation,
+                $this->applyApprovalStampToSignatureRow(
+                    $fields,
+                    $indexByLocation,
                         $approverLoc,
-                        $name,
-                        $date,
-                        $sig,
-                        $roleKey
-                    );
-                }
+                    $name,
+                    $date,
+                    $sig,
+                    $roleKey
+                );
+            }
                 continue;
             }
 
@@ -731,8 +742,18 @@ class DocxImportController extends Controller
      */
     private function isPostApprovalWorkflowField(array $field): bool
     {
+        // PRE-APPROVAL Prepared/Checked/Approved rows must never be treated as POST stamps.
+        if (! empty($field['is_pre_approver'])) {
+            return false;
+        }
+
         $type = (string) ($field['type'] ?? '');
         $role = trim((string) ($field['approver_role'] ?? ''));
+
+        // Non-post roles (prepared_by_*, checked_by_*, …) belong to PRE-APPROVAL tables.
+        if ($role !== '' && ! str_starts_with($role, 'post_')) {
+            return false;
+        }
 
         if (str_starts_with($type, 'approval_stamp_')) {
             return ($field['stamp_eligible'] ?? true) !== false;
@@ -761,8 +782,9 @@ class DocxImportController extends Controller
     }
 
     /**
-     * Fill-with-DOCX must not copy approval name, signature, date, or time.
-     * A value already stored on the source protocol is still left blank here.
+     * Fill-with-DOCX must not copy approval name, e-sign, signature, date, or time.
+     * Only content values (DETAILS / Description / checks / etc.) are copied.
+     * A stamp already stored on the source protocol is still left blank here.
      */
     private function isApprovalFieldExcludedFromDocxFill(array $field): bool
     {
@@ -771,22 +793,68 @@ class DocxImportController extends Controller
             return true;
         }
 
-        $label  = strtolower((string) ($field['label'] ?? ''));
-        $widget = strtolower((string) ($field['widget'] ?? ''));
-        if (str_contains($label, 'signature') && (str_contains($label, 'date') || str_contains($label, 'time'))) {
+        // PRE-APPROVAL Prepared/Checked/Approved Name rows.
+        if (! empty($field['is_pre_approver'])) {
             return true;
         }
 
-        $role = trim((string) ($field['approver_role'] ?? ''));
-        if ($role === '') {
+        // Any mapped approver cell (Name, Signature, Date) — keep blank for fresh e-sign.
+        if (trim((string) ($field['approver_role'] ?? '')) !== '') {
+            return true;
+        }
+
+        // "Checked By (Sign./Date)", "Done By Sign." etc. hold prior e-sign text.
+        if ($this->isSignOffTextField($field)) {
+            return true;
+        }
+
+        $label  = strtolower(trim((string) ($field['label'] ?? '')));
+        $widget = strtolower((string) ($field['widget'] ?? ''));
+
+        if ($label === '') {
             return false;
         }
 
-        return str_contains($label, 'signature')
-            || str_contains($label, 'date')
+        // Signature & Date / Sign./Date / Signature columns.
+        if (str_contains($label, 'signature')) {
+            return true;
+        }
+        if (preg_match('/\bsign\.?\b/', $label) === 1 && (
+            str_contains($label, 'date')
             || str_contains($label, 'time')
-            || $widget === 'date'
-            || $widget === 'datetime';
+            || str_contains($label, 'sign.')
+            || preg_match('/\b(checked|done|prepared|approved)\s*by\b/', $label) === 1
+        )) {
+            return true;
+        }
+        if (preg_match('/\bsign\.?\s*\/\s*date\b/', $label) === 1) {
+            return true;
+        }
+
+        // Approval-page short column headers (not "Name of Equipment").
+        if (preg_match('/^(name(\s*(&|\/|,)\s*designation)?|designation|signature|date|time)$/', $label) === 1) {
+            return true;
+        }
+
+        // Prepared / Checked / Approved By name or stamp cells.
+        if (
+            preg_match('/\b(prepared|checked|approved)\s*by\b/', $label) === 1
+            && (
+                str_contains($label, 'name')
+                || str_contains($label, 'sign')
+                || str_contains($label, 'date')
+                || str_contains($label, 'designation')
+                || str_contains($label, 'time')
+            )
+        ) {
+            return true;
+        }
+
+        return in_array($widget, ['date', 'time', 'datetime', 'datetime-local'], true)
+            && (
+                str_contains($label, 'sign')
+                || preg_match('/\b(prepared|checked|approved)\s*by\b/', $label) === 1
+            );
     }
 
     /**
@@ -814,6 +882,21 @@ class DocxImportController extends Controller
             return false;
         }
 
+        // 4.0 Qualification History — Report No. is always text (never a date picker).
+        if (preg_match('/^\s*report\s*no\.?\s*$/', $label) === 1) {
+            return false;
+        }
+        if (preg_match('/\breport\s*no\.?\b/', $label) === 1) {
+            // Merged parent "Report no and approval date": only col_2 is Approval Date.
+            if (preg_match('/\bapproval\s*date\b/', $label) === 1) {
+                if (preg_match('/_col_(\d+)$/', $location, $cm) === 1 && (int) $cm[1] !== 2) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+
         $widget = strtolower((string) ($field['widget'] ?? ''));
         if (in_array($widget, ['date', 'time', 'datetime', 'datetime-local'], true)) {
             return true;
@@ -839,8 +922,12 @@ class DocxImportController extends Controller
                 continue;
             }
             if (($field['date_selected'] ?? false) === true || ($field['date_selected'] ?? false) === 1 || ($field['date_selected'] ?? false) === '1') {
-                $fields[$idx]['widget'] = 'datetime-local';
-                $fields[$idx]['value'] = $this->normalizeDateTimeInputValue((string) ($field['value'] ?? ''));
+                // Requal/reval date columns: date-only calendar (no time picker).
+                $fields[$idx]['widget'] = 'date';
+                $normalized = $this->normalizeDateTimeInputValue((string) ($field['value'] ?? ''));
+                $fields[$idx]['value'] = $normalized !== ''
+                    ? substr($normalized, 0, 10)
+                    : '';
                 continue;
             }
             $kept = $this->normalizeDateTimeInputValue((string) ($field['value'] ?? ''));
@@ -848,8 +935,8 @@ class DocxImportController extends Controller
             // Keep that after refresh. Template dates such as 13/01/17 stay blank.
             if ($kept !== '' && preg_match('/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/', $kept) === 1) {
                 $fields[$idx]['date_selected'] = true;
-                $fields[$idx]['widget'] = 'datetime-local';
-                $fields[$idx]['value'] = $kept;
+                $fields[$idx]['widget'] = 'date';
+                $fields[$idx]['value'] = substr($kept, 0, 10);
                 continue;
             }
             $fields[$idx]['value'] = '';
@@ -862,7 +949,7 @@ class DocxImportController extends Controller
     }
 
     /**
-     * "Checked by (Engineering) (Sign. /Date)" is typed text, not a calendar.
+     * "Checked by (Engineering) (Sign. /Date)" / "Done By Sign." is e-sign text, not a calendar.
      */
     private function isSignOffTextField(array $field): bool
     {
@@ -870,12 +957,15 @@ class DocxImportController extends Controller
         if ($label === '') {
             return false;
         }
-        $hasSign = str_contains($label, 'signature') || preg_match('/\bsign\b/', $label) === 1;
+        $hasSign = str_contains($label, 'signature') || preg_match('/\bsign\.?\b/', $label) === 1;
         if (! $hasSign) {
             return false;
         }
 
-        return str_contains($label, 'date') || str_contains($label, 'sign.');
+        return str_contains($label, 'date')
+            || str_contains($label, 'time')
+            || str_contains($label, 'sign.')
+            || preg_match('/\b(checked|done|prepared|approved)\s*by\b/', $label) === 1;
     }
 
     /**
@@ -984,6 +1074,11 @@ class DocxImportController extends Controller
                 continue;
             }
 
+            // Never blank PRE-APPROVAL Signature & Date (requal tables 1–3).
+            if (! empty($field['is_pre_approver'])) {
+                continue;
+            }
+
             $value = trim((string) ($field['value'] ?? ''));
             $label = strtolower((string) ($field['label'] ?? ''));
             $isSigDate = (str_contains($label, 'signature') && str_contains($label, 'date'))
@@ -1005,6 +1100,21 @@ class DocxImportController extends Controller
             $loc = (string) ($field['location'] ?? '');
             if ($role === '' && preg_match('/^(table_\d+_row_\d+)_col_\d+$/', $loc, $m)) {
                 $role = (string) ($rowRoles[$m[1]] ?? '');
+            }
+
+            // Row name cell already remapped to a PRE role — keep sibling Signature/Date.
+            if (
+                $role !== ''
+                && ! str_starts_with($role, 'post_')
+            ) {
+                continue;
+            }
+            if (
+                preg_match('/^(table_\d+_row_\d+)_col_\d+$/', $loc, $m)
+                && isset($rowRoles[$m[1]])
+                && ! str_starts_with((string) $rowRoles[$m[1]], 'post_')
+            ) {
+                continue;
             }
 
             // Only blank POST workflow rows (keep true Word-prefilled stamps locked above).
@@ -1134,7 +1244,7 @@ class DocxImportController extends Controller
         if (is_file($pdfPath)) {
             @unlink($pdfPath);
         }
-        foreach (['.layout_v1', '.layout_v2', '.layout_v3', '.layout_v4', '.layout_v5', '.layout_v6'] as $suffix) {
+        foreach (['.layout_v1', '.layout_v2', '.layout_v3', '.layout_v4', '.layout_v5', '.layout_v6', '.layout_v7', '.layout_v8', '.layout_v9', '.layout_v10', '.layout_v11', '.layout_v12', '.layout_v13'] as $suffix) {
             $marker = $docxPath . $suffix;
             if (is_file($marker)) {
                 @unlink($marker);
@@ -1390,6 +1500,42 @@ class DocxImportController extends Controller
                 continue;
             }
 
+            // Numbered Sr. No. / Sl. No. from Word stay locked (type may already
+            // be table_multicol after pre-approval unlock remaps).
+            $isSlNoField = $type === 'table_sl_no'
+                || preg_match('/^(sr\.?\s*no\.?|s\.?\s*no\.?|sl\.?\s*no\.?|#)\b/i', $label) === 1;
+            if (
+                ! $isLetterhead
+                && $isSlNoField
+                && preg_match('/^table_\d+_row_[1-9]\d*_col_/', $location) === 1
+            ) {
+                $serialVal = trim((string) ($field['value'] ?? ''));
+                if ($serialVal !== '' && $this->looksLikeSlNoValue($serialVal)) {
+                    $fields[$idx]['locked'] = true;
+                    $fields[$idx]['prefilled'] = true;
+                    $fields[$idx]['draft_editable'] = false;
+                    $fields[$idx]['user_filled'] = false;
+
+                    continue;
+                }
+            }
+
+            // Original Word template columns stay locked on send-back too:
+            // Description, Instrument Name, Checks, Methodology, Acceptance criteria.
+            // Observation / Done by / dates stay reopenable below.
+            if (
+                ! $isLetterhead
+                && ! $this->isExecutionFillColumn($label)
+                && $this->isTemplateContentHeader($label)
+                && trim((string) ($field['value'] ?? '')) !== ''
+            ) {
+                $fields[$idx]['locked'] = true;
+                $fields[$idx]['prefilled'] = true;
+                $fields[$idx]['draft_editable'] = false;
+
+                continue;
+            }
+
             // True Word structural labels stay locked (same as fresh NEQ import).
             if (
                 ! $isLetterhead
@@ -1417,7 +1563,7 @@ class DocxImportController extends Controller
 
             $isDateEntry = $this->isDocxDateTimeEntryField($field);
             if ($isDateEntry) {
-                $fields[$idx]['locked'] = false;
+            $fields[$idx]['locked'] = false;
                 $fields[$idx]['draft_editable'] = true;
                 $fields[$idx]['user_filled'] = true;
                 $fields[$idx]['prefilled'] = false;
@@ -1497,9 +1643,13 @@ class DocxImportController extends Controller
 
             $isPostStampCell = $this->isPostApprovalWorkflowField($field)
                 || $this->isPostApprovalWorkflowField($proposed);
+            $isPreApproverStamp = ! empty($proposed['is_pre_approver'])
+                || ! empty($field['is_pre_approver']);
 
             // Post-approval Name / Signature are owned by the stamp pipeline (including blanks).
-            if ($isPostStampCell) {
+            // Pre-approval Prepared/Checked/Approved rows also take stamp values so
+            // "Name (email)" select labels are replaced with "Name - designation".
+            if ($isPostStampCell || $isPreApproverStamp) {
                 $mergedField          = array_merge($field, $proposed);
                 $mergedField['value'] = $proposedValue;
                 $merged[]             = $mergedField;
@@ -2078,13 +2228,13 @@ class DocxImportController extends Controller
             if (in_array($label, ['version', 'version no'], true)) {
                 $resolved = 'version';
             } else {
-                foreach ($labelToCover as $needle => $key) {
+            foreach ($labelToCover as $needle => $key) {
                     // Word-boundary match so "equipment identification" does not become
                     // cover_field=equipment_id (which opens a description box on bullets).
                     $needlePattern = '/(?:^| )' . preg_quote($needle, '/') . '(?: |$)/';
                     if (preg_match($needlePattern, ' ' . $label . ' ') !== 1) {
-                        continue;
-                    }
+                    continue;
+                }
                     // Avoid tagging "Reference Document No." / body "As per Document No." as protocol Document No.
                     if (
                         $key === 'document_no'
@@ -2094,14 +2244,20 @@ class DocxImportController extends Controller
                             || str_contains($label, 'as per')
                         )
                     ) {
-                        continue;
-                    }
+                    continue;
+                }
                     $resolved = $key;
                     break;
                 }
             }
 
-            if ($resolved !== null) {
+            $loc = (string) ($field['location'] ?? '');
+            // Cover identity sync is letterhead-only (header_* / txbx_*). Body tables
+            // like PM "Equipment Name / ID" must NOT get cover_field — that cross-wired
+            // Document No. edits into Equipment Name on requal fill.
+            $isLetterheadLoc = str_starts_with($loc, 'header_') || str_starts_with($loc, 'txbx_');
+
+            if ($resolved !== null && $isLetterheadLoc) {
                 // Always re-assert cover_field from the label so Att6 REF DOCUMENT
                 // is not left tagged as document_no from legacy HVAC mapping.
                 $fields[$idx]['cover_field'] = $resolved;
@@ -2109,7 +2265,10 @@ class DocxImportController extends Controller
                 if ($resolved === 'effective_date') {
                     $fields[$idx]['widget'] = 'date';
                 }
-            } elseif (! empty($field['cover_field'])) {
+            } elseif (! $isLetterheadLoc && (! empty($field['cover_field']) || $resolved !== null)) {
+                // Strip polluted cover tags from body/PM tables.
+                unset($fields[$idx]['cover_field']);
+            } elseif (! empty($field['cover_field']) && $isLetterheadLoc) {
                 $fields[$idx]['type'] = 'protocol_cover';
             }
         }
@@ -2562,14 +2721,14 @@ class DocxImportController extends Controller
             if ((string) ($field['cover_field'] ?? '') !== $coverField) {
                 continue;
             }
-            $loc = (string) ($field['location'] ?? '');
+                $loc = (string) ($field['location'] ?? '');
             if ($loc === '') {
                 continue;
             }
             // Att6 Document No. lives on row_5; row_4_col_2 is REF DOCUMENT.
             if ($coverField === 'document_no' && $loc === 'header_0_row_5_col_2') {
-                return $loc;
-            }
+                    return $loc;
+                }
             if ($coverField === 'reference_protocol_no' && $loc === 'header_0_row_4_col_2') {
                 return $loc;
             }
@@ -2756,7 +2915,17 @@ class DocxImportController extends Controller
             }
             $label = strtolower(trim((string) ($field['label'] ?? '')));
             $location = (string) ($field['location'] ?? '');
-            if (str_contains($label, 'connected accessories') && preg_match('/^table_(\d+)_row_0$/', $location, $m) === 1) {
+            // Header row may be table_N_row_0 or table_N_row_0_col_0 / col_1.
+            if (
+                str_contains($label, 'connected accessories')
+                && preg_match('/^table_(\d+)_row_0(_col_\d+)?$/', $location, $m) === 1
+            ) {
+                $tables[$m[1]] = true;
+            }
+            if (
+                $label === 'description'
+                && preg_match('/^table_(\d+)_row_0_col_1$/', $location, $m) === 1
+            ) {
                 $tables[$m[1]] = true;
             }
         }
@@ -2772,7 +2941,11 @@ class DocxImportController extends Controller
             if (preg_match('/^table_(\d+)_row_/', $location, $m) !== 1 || ! isset($tables[$m[1]])) {
                 continue;
             }
+            // Whole Connected Accessories table is Word template content → locked.
             $fields[$idx]['locked'] = true;
+            $fields[$idx]['prefilled'] = true;
+            $fields[$idx]['draft_editable'] = false;
+            $fields[$idx]['user_filled'] = false;
         }
 
         return $fields;
@@ -2791,14 +2964,99 @@ class DocxImportController extends Controller
         if ($text === '' || strlen($text) > 60) {
             return false;
         }
-        if (in_array($text, ['checks', 'methodology', 'instrument name', 'reason for revision'], true)) {
+        // 5.0 DETAILS|DESCRIPTION, 9.1/9.2 Checks/Methodology/Acceptance,
+        // 9.3 Identification / Position of valve + Acceptance criteria.
+        if (in_array($text, [
+            'checks',
+            'methodology',
+            'instrument name',
+            'reason for revision',
+            'description',
+            'details',
+        ], true)) {
             return true;
         }
         if (str_starts_with($text, 'acceptance')) {
             return true;
         }
+        if (str_starts_with($text, 'identification') && ! str_contains($text, 'number')) {
+            return true;
+        }
 
-        return str_starts_with($text, 'identification') && ! str_contains($text, 'number');
+        return str_contains($text, 'position of valve');
+    }
+
+    /**
+     * Lock Word-prefilled protocol template columns during fill / pre-approval:
+     * DESCRIPTION, Checks, Methodology, Acceptance criteria, Identification,
+     * and numbered Sr. No. cells. Observation / Done by stay editable.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function lockRequalificationTemplateFilledColumns(array $fields): array
+    {
+        $fields = $this->lockExistingTableContent($fields);
+
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $type = strtolower(trim((string) ($field['type'] ?? '')));
+            $location = strtolower(trim((string) ($field['location'] ?? '')));
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $value = trim((string) ($field['value'] ?? ''));
+
+            // Table headings (row 0) always locked.
+            if (preg_match('/^table_\d+_row_0(_col_\d+)?$/', $location) === 1) {
+                $fields[$idx]['locked'] = true;
+                $fields[$idx]['prefilled'] = true;
+                $fields[$idx]['draft_editable'] = false;
+                continue;
+            }
+
+            $isSlNo = $type === 'table_sl_no'
+                || preg_match('/^(sr\.?\s*no\.?|s\.?\s*no\.?|sl\.?\s*no\.?|#)\b/i', $label) === 1;
+            if ($isSlNo && preg_match('/^table_\d+_row_[1-9]\d*_col_/', $location) === 1) {
+                $serialVal = $value;
+                if ($serialVal !== '' && ! $this->looksLikeSlNoValue($serialVal)) {
+                    $serialVal = '';
+                }
+                if (
+                    $serialVal === ''
+                    && array_key_exists('auto_serial', $field)
+                    && $field['auto_serial'] !== null
+                    && $field['auto_serial'] !== ''
+                ) {
+                    $serialVal = ((int) $field['auto_serial']).'.';
+                    $fields[$idx]['value'] = $serialVal;
+                }
+                // Numbered Sr. No. from Word / auto_serial → locked.
+                if ($serialVal !== '' && $this->looksLikeSlNoValue($serialVal)) {
+                    $fields[$idx]['locked'] = true;
+                    $fields[$idx]['prefilled'] = true;
+                    $fields[$idx]['draft_editable'] = false;
+                    $fields[$idx]['user_filled'] = false;
+                }
+                continue;
+            }
+
+            // DESCRIPTION / Checks / Methodology / Acceptance / Identification
+            // with a filled Word value → locked (empty cells stay fillable).
+            if (
+                $value !== ''
+                && $value !== '—'
+                && $value !== '-'
+                && $this->isTemplateContentHeader($label)
+            ) {
+                $fields[$idx]['locked'] = true;
+                $fields[$idx]['prefilled'] = true;
+                $fields[$idx]['draft_editable'] = false;
+                $fields[$idx]['user_filled'] = false;
+            }
+        }
+
+        return $fields;
     }
 
     private function isFillEntryHeader(string $text): bool
@@ -3147,6 +3405,7 @@ class DocxImportController extends Controller
      */
     private function extractCoverTextValue(array $fields, string $coverKey): string
     {
+        $fallback = '';
         foreach ($fields as $field) {
             if (! is_array($field)) {
                 continue;
@@ -3155,12 +3414,20 @@ class DocxImportController extends Controller
                 continue;
             }
             $val = trim((string) ($field['value'] ?? ''));
-            if ($val !== '') {
+            if ($val === '') {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            // Prefer letterhead cells — ignore body "Equipment Name / ID" columns.
+            if (str_starts_with($loc, 'header_') || str_starts_with($loc, 'txbx_')) {
                 return $val;
+            }
+            if ($fallback === '') {
+                $fallback = $val;
             }
         }
 
-        return '';
+        return $fallback;
     }
 
     /**
@@ -3262,8 +3529,8 @@ class DocxImportController extends Controller
                 }
             }
             $legacy = trim($this->fieldValueByLocation($fields, $hdrLoc, ''));
-            if ($legacy !== '' && ! ctype_digit($legacy)) {
-                return $legacy;
+        if ($legacy !== '' && ! ctype_digit($legacy)) {
+            return $legacy;
             }
         }
 
@@ -3329,7 +3596,7 @@ class DocxImportController extends Controller
                     return;
                 }
                 if ($value !== '') {
-                    $fields[$idx]['value'] = $value;
+                $fields[$idx]['value'] = $value;
                 }
                 $fields[$idx]['cover_field'] = $fields[$idx]['cover_field'] ?? $coverKey;
                 $fields[$idx]['locked'] = false;
@@ -3448,7 +3715,7 @@ class DocxImportController extends Controller
         if (is_string($refLoc) && $refLoc !== '') {
             // Never blank out a letterhead value the user already typed.
             if ($refNo !== '' || trim((string) ($formFields[$refLoc] ?? '')) === '') {
-                $formFields[$refLoc] = $refNo;
+            $formFields[$refLoc] = $refNo;
             } elseif ($refNo === '' && trim((string) ($formFields[$refLoc] ?? '')) !== '') {
                 $refNo = trim((string) $formFields[$refLoc]);
                 $data['reference_protocol_no'] = $refNo;
@@ -3536,6 +3803,12 @@ class DocxImportController extends Controller
             if (! isset($map[$key])) {
                 $map[$key] = $loc;
             } elseif (
+                str_starts_with($loc, 'header_')
+                && ! str_starts_with((string) $map[$key], 'header_')
+            ) {
+                // Letterhead always wins over body table cells (PM Equipment Name/ID).
+                $map[$key] = $loc;
+            } elseif (
                 $key === 'document_no'
                 && $loc === 'header_0_row_5_col_2'
                 && ($map[$key] ?? '') !== 'header_0_row_2_col_2'
@@ -3576,12 +3849,12 @@ class DocxImportController extends Controller
                 }
             }
 
-            $data = $report->data ?? [];
-            if (is_string($data)) {
-                $data = json_decode($data, true) ?? [];
-            }
-            if (is_array($data) && ! empty($data['effective_date'])) {
-                return $this->normalizeEffectiveDateForForm((string) $data['effective_date']);
+        $data = $report->data ?? [];
+        if (is_string($data)) {
+            $data = json_decode($data, true) ?? [];
+        }
+        if (is_array($data) && ! empty($data['effective_date'])) {
+            return $this->normalizeEffectiveDateForForm((string) $data['effective_date']);
             }
         } catch (\Throwable $e) {
             // Ignore step query issues
@@ -3591,7 +3864,7 @@ class DocxImportController extends Controller
     }
 
     /**
-     * Latest approval timestamp (post preferred, else pre) as d-m-Y h:i A for the DOCX cover.
+     * Latest approval day (post preferred, else pre) as d-m-Y for the DOCX cover Effective Date.
      */
     private function resolveLastApprovalDateTime(Report $report): string
     {
@@ -3603,7 +3876,9 @@ class DocxImportController extends Controller
             ->sortByDesc(fn ($s) => $s->approved_at?->getTimestamp() ?? 0)
             ->first();
         if ($lastPost && $lastPost->approved_at) {
-            return $lastPost->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+            return $this->formatEffectiveDateForDocx(
+                $lastPost->approved_at->timezone('Asia/Kolkata')->format('Y-m-d')
+            );
         }
 
         $lastPre = $report->approvalSteps
@@ -3612,7 +3887,9 @@ class DocxImportController extends Controller
             ->sortByDesc(fn ($s) => $s->approved_at?->getTimestamp() ?? 0)
             ->first();
         if ($lastPre && $lastPre->approved_at) {
-            return $lastPre->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+            return $this->formatEffectiveDateForDocx(
+                $lastPre->approved_at->timezone('Asia/Kolkata')->format('Y-m-d')
+            );
         }
 
         return '';
@@ -3739,29 +4016,65 @@ class DocxImportController extends Controller
     }
 
     // Converts Y-m-d from form input into d-m-Y for DOCX cover cell display.
-    // Preserves approval timestamps already formatted as d-m-Y h:i A.
+    // Effective Date is date-only (no time) per original NEQ/IOQ cover cells.
     private function formatEffectiveDateForDocx(string $date): string
     {
         $date = trim($date);
         if ($date === '') {
             return '';
         }
-        // Already stamped with time from last approval — keep as-is.
-        if (preg_match('/^\d{2}-\d{2}-\d{4}\s+\d{1,2}:\d{2}\s*(?:AM|PM)$/i', $date)) {
-            return $date;
+        // Already stamped with optional time — keep the date part only.
+        if (preg_match('/^(\d{2}-\d{2}-\d{4})(?:\s+\d{1,2}:\d{2}(?:\s*(?:AM|PM))?)?$/i', $date, $m)) {
+            return $m[1];
         }
         if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $m)) {
             return $m[3] . '-' . $m[2] . '-' . $m[1];
         }
-        // Y-m-d H:i:s (or with timezone offset) → d-m-Y h:i A
+        // Y-m-d H:i:s (or with timezone offset) → d-m-Y (date only).
         try {
             $parsed = \Carbon\Carbon::parse($date)->timezone('Asia/Kolkata');
-            if (preg_match('/\d{1,2}:\d{2}/', $date)) {
-                return $parsed->format('d-m-Y h:i A');
-            }
+
             return $parsed->format('d-m-Y');
         } catch (\Throwable $e) {
-            return $date;
+        return $date;
+        }
+    }
+
+    /**
+     * Signature / approval stamps: d-m-Y H:i (24-hour, no AM/PM).
+     */
+    private function formatSignatureDateTimeForDocx(\Carbon\CarbonInterface|string|null $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+        if ($value instanceof \Carbon\CarbonInterface) {
+            return $value->timezone('Asia/Kolkata')->format('d-m-Y H:i');
+        }
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return '';
+        }
+        if (preg_match('/^(\d{2}-\d{2}-\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i', $raw, $m)) {
+            $hour = (int) $m[2];
+            $min = $m[3];
+            $ampm = strtoupper($m[4]);
+            if ($ampm === 'PM' && $hour < 12) {
+                $hour += 12;
+            }
+            if ($ampm === 'AM' && $hour === 12) {
+                $hour = 0;
+            }
+
+            return sprintf('%s %02d:%s', $m[1], $hour, $min);
+        }
+        if (preg_match('/^\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}$/', $raw)) {
+            return $raw;
+        }
+        try {
+            return \Carbon\Carbon::parse($raw)->timezone('Asia/Kolkata')->format('d-m-Y H:i');
+        } catch (\Throwable $e) {
+            return $raw;
         }
     }
 
@@ -4369,13 +4682,13 @@ PY;
         ];
 
         if (! $this->isNeqImportSource($importSource)) {
-            if (! $this->detectApprovalPageFromLegacyFields($fields)) {
-                return $this->upgradeApprovalPageSelectableNameRows(
-                    $this->repairMissingApprovalPagePerformerRows(
-                        $this->repairMissingApprovalPageStampRows($fields)
-                    )
-                );
-            }
+        if (! $this->detectApprovalPageFromLegacyFields($fields)) {
+            return $this->upgradeApprovalPageSelectableNameRows(
+                $this->repairMissingApprovalPagePerformerRows(
+                    $this->repairMissingApprovalPageStampRows($fields)
+                )
+            );
+        }
 
             foreach ($fields as $idx => $field) {
                 if (! is_array($field)) {
@@ -4415,15 +4728,15 @@ PY;
                 $approvalTableNums = $this->approvalPageTableNumbersFromNameSignatureDate($fields);
             }
 
-            foreach ($fields as $idx => $field) {
-                if (! is_array($field)) {
-                    continue;
-                }
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
 
-                $location = (string) ($field['location'] ?? '');
+            $location = (string) ($field['location'] ?? '');
                 if (! preg_match('/^table_(\d+)_row_(\d+)_col_(\d+)$/', $location, $m)) {
-                    continue;
-                }
+                continue;
+            }
 
                 $tableNum = $m[1];
                 if ($approvalTableNums !== [] && ! isset($approvalTableNums[$tableNum])) {
@@ -4432,25 +4745,25 @@ PY;
 
                 $row = (int) $m[2];
                 $col = (int) $m[3];
-                if ($row < 1 || $row > 3 || $col < 1 || $col > 3) {
-                    continue;
-                }
+            if ($row < 1 || $row > 3 || $col < 1 || $col > 3) {
+                continue;
+            }
 
-                $label = strtolower(trim((string) ($field['label'] ?? '')));
-                if (! isset($typeByLabel[$label])) {
-                    continue;
-                }
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            if (! isset($typeByLabel[$label])) {
+                continue;
+            }
 
-                $fields[$idx]['type'] = $typeByLabel[$label];
-                $fields[$idx]['locked'] = true;
-                $fields[$idx]['approver_role'] = $roleByRow[$row] ?? null;
+            $fields[$idx]['type'] = $typeByLabel[$label];
+            $fields[$idx]['locked'] = true;
+            $fields[$idx]['approver_role'] = $roleByRow[$row] ?? null;
             }
         }
 
         return $this->repairNeqReportApprovalNameDropdowns(
             $this->upgradeApprovalPageSelectableNameRows(
-                $this->repairMissingApprovalPagePerformerRows(
-                    $this->repairMissingApprovalPageStampRows($fields)
+            $this->repairMissingApprovalPagePerformerRows(
+                $this->repairMissingApprovalPageStampRows($fields)
                 )
             )
         );
@@ -5057,7 +5370,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
             if (str_starts_with($type, 'approval_stamp_')) {
-                $stampTables[$m[1]][(int) $m[2]][(int) $m[3]] = true;
+            $stampTables[$m[1]][(int) $m[2]][(int) $m[3]] = true;
             } elseif ($type === 'approver' && (int) $m[3] === 1) {
                 $stampTables[$m[1]][(int) $m[2]][1] = true;
             }
@@ -5783,10 +6096,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
             $escapedLoc = str_replace("'", "\\'", $location);
             $nodes      = $xpath->query("//*[@data-field='{$escapedLoc}']");
-            if (! $nodes) {
-                continue;
-            }
-
+            if ($nodes) {
             foreach ($nodes as $node) {
                 if (! $node instanceof \DOMElement) {
                     continue;
@@ -5818,6 +6128,49 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                             $node->appendChild($doc->createElement('br'));
                         }
                         $node->appendChild($doc->createTextNode($line));
+                        }
+                    }
+                }
+            }
+
+            // Fill/edit HTML: also patch named inputs/textareas (8.4 notes, 8.5 history, etc.).
+            $nameAttr = 'fields[' . $location . ']';
+            // XPath 1.0: quote with concat if value contains both quote types.
+            $nameLit = str_contains($nameAttr, "'")
+                ? ('concat(' . implode(', "\'", ', array_map(
+                    static fn (string $p): string => "'" . $p . "'",
+                    explode("'", $nameAttr)
+                )) . ')')
+                : ("'" . $nameAttr . "'");
+            $named = $xpath->query(
+                '//input[@name=' . $nameLit . ']'
+                . '|//textarea[@name=' . $nameLit . ']'
+                . '|//select[@name=' . $nameLit . ']'
+            );
+            if ($named) {
+                foreach ($named as $namedNode) {
+                    if (! $namedNode instanceof \DOMElement) {
+                        continue;
+                    }
+                    $tag = strtolower($namedNode->tagName);
+                    if ($tag === 'textarea') {
+                        while ($namedNode->firstChild) {
+                            $namedNode->removeChild($namedNode->firstChild);
+                        }
+                        $namedNode->appendChild($doc->createTextNode($value));
+                    } elseif ($tag === 'select') {
+                        foreach ($namedNode->getElementsByTagName('option') as $opt) {
+                            if (! $opt instanceof \DOMElement) {
+                                continue;
+                            }
+                            if ((string) $opt->getAttribute('value') === $value) {
+                                $opt->setAttribute('selected', 'selected');
+                            } else {
+                                $opt->removeAttribute('selected');
+                            }
+                        }
+                    } else {
+                        $namedNode->setAttribute('value', $value);
                     }
                 }
             }
@@ -6121,8 +6474,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                                         $this->upgradeApprovalPageFieldMetadata(
                                             $fields,
                                             $report->import_source ?? null
-                                        )
                                     )
+                                )
                                 ),
                                 (string) ($fileId ?? $report->docx_import_path ?? '')
                             )
@@ -6399,6 +6752,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 // Pre-approval rules lock every *_col_0; reopen user-typed left cells
                 // (e.g. "cvvv", "add for testing") that were baked into the Word template.
                 $fields = $this->unlockReturnedUserTypedCol0Cells($fields);
+                // Re-lock Word template columns after send-back unlock (Description,
+                // Instrument Name, Methodology, Acceptance, Sr. No.).
+                $fields = $this->lockConnectedAccessoriesDescriptions($fields);
+                $fields = $this->lockRequalificationTemplateFilledColumns($fields);
                 $reportDataForOps = $report->data;
                 if (is_string($reportDataForOps)) {
                     $reportDataForOps = json_decode($reportDataForOps, true) ?? [];
@@ -6443,15 +6800,23 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
 
             // After NEQ/requal lock rules: reopen fields for send-back so UX matches fresh fill.
-            if (in_array($report->status, ['post_returned', 'pre_returned'], true)) {
-                $fields = $this->unlockDocxFieldsForReturnedEdit($fields);
+        if (in_array($report->status, ['post_returned', 'pre_returned'], true)) {
+            $fields = $this->unlockDocxFieldsForReturnedEdit($fields);
+                // unlock clears POST stamps; re-stamp PRE-APPROVAL Signature & Date
+                // so send-back / fill open still shows completed pre-approval values.
+                if ($isRequalOrReval) {
+                    $fields = $this->applyRequalificationPreApproverNames($report, $fields);
+                    // Re-lock Word template columns (Description / Instrument Name /
+                    // Methodology / Acceptance / Sr. No.) after send-back unlock.
+                    $fields = $this->applyRequalificationPostPreApprovalLockRules($fields);
+                }
                 if ($report->docx_import_status === 'completed') {
                     $report->docx_import_status = 'pending';
                 }
-                if (! empty($report->docx_import_path)) {
-                    $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
-                }
+            if (! empty($report->docx_import_path)) {
+                $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
             }
+        }
 
             $report->docx_import_fields = $fields;
             $report->save();
@@ -6506,6 +6871,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         }
         // Replace attachment cells with download links when files were uploaded earlier.
         if (trim($previewHtml) !== '') {
+            // Patch named inputs/textareas (esp. synthetic para_*_body notes) so draft
+            // values survive even when Python fresh-parse omits those locations.
+            $previewHtml = $this->injectDocxFieldValuesIntoHtml($previewHtml, $previewFields, $report);
             $previewHtml = $this->prepareFillFormAttachmentCells($previewHtml, $report);
         }
         // Interactive table only when Python returned editable inputs (same as fresh import).
@@ -6919,6 +7287,13 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             if ($isChoiceField && ! $isQualHistoryLock) {
                 $isLocked = false;
             }
+            // 8.4 P&ID notes / section body textareas must always accept draft values.
+            if (
+                preg_match('/_body$/', $location) === 1
+                || str_contains($location, 'verification_pid')
+            ) {
+                $isLocked = false;
+            }
             $originalValue = (string) ($field['value'] ?? '');
             $submittedValue = $originalValue;
             $userFilled = ($field['user_filled'] ?? false) === true
@@ -6931,14 +7306,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 $userFilled = false;
             } elseif (! $isLocked && array_key_exists($location, $formFields)) {
                 $submittedValue = (string) $formFields[$location];
-                // NEQ + requal/reval pre-approval drafts: keep user-typed cells editable after refresh.
-                if (
-                    ($report->import_source ?? '') === 'new_equipment_qualification'
-                    || $isPreApprovalDraft
-                ) {
-                    $userFilled = true;
-                    $isLocked = false;
-                }
+                // Any draft-saved unlocked field must stay editable after refresh
+                // (8.4 P&ID notes, 8.5 history dates, calibration cells, etc.).
+                $userFilled = true;
+                $isLocked = false;
             } elseif ($isPreApprovalDraft && array_key_exists($location, $formFields)) {
                 // Pre-approval may still mark col_0 locked; accept typed draft values anyway.
                 $submittedValue = (string) $formFields[$location];
@@ -7013,16 +7384,24 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 'location' => $location,
                 'value'    => (string) $submittedValue,
                 'locked'   => false,
-                'type'     => isset($uploadedNames[$location]) ? 'attachment' : '',
-                'widget'   => isset($uploadedNames[$location]) ? 'file' : null,
+                'type'     => isset($uploadedNames[$location]) ? 'attachment' : (
+                    str_contains($location, '_body') ? 'paragraph_content' : (
+                        str_starts_with($location, 'txbx_') ? 'textbox_blank_part' : ''
+                    )
+                ),
+                'widget'   => isset($uploadedNames[$location]) ? 'file' : (
+                    str_contains($location, '_body') ? 'textarea' : null
+                ),
+                // Always mark draft-created locations so refresh/autosave keep them editable.
+                'user_filled'     => true,
+                'draft_editable'  => true,
+                'prefilled'       => false,
             ];
             $norm = $this->normalizeDateTimeInputValue((string) $submittedValue);
             if ($norm !== '') {
                 $newField['value'] = $norm;
                 $newField['widget'] = 'datetime-local';
                 $newField['date_selected'] = true;
-                $newField['user_filled'] = true;
-                $newField['draft_editable'] = true;
             }
             $updatedFields[] = $newField;
             $knownLocations[] = $location;
@@ -7098,7 +7477,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $tableOps = $this->normalizeTableOpsPayload($request->input('table_ops'));
         $data['table_ops'] = $tableOps;
 
-        $savedAt = now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+        $savedAt = $this->formatSignatureDateTimeForDocx(now());
         $data['docx_fill_draft_saved_at'] = $savedAt;
 
         $savedAttachmentPayload = [];
@@ -7357,6 +7736,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             if ($value === '') {
                 continue;
             }
+            // Drop leftover e-sign / stamp text even if the column label was ambiguous.
+            if ($this->looksLikeDocxApprovalStampValue($value, $field) || $this->looksLikeDocxApprovalStampValue($value, $sourceField)) {
+                continue;
+            }
 
             $matchedFields[$location] = $value;
         }
@@ -7366,6 +7749,47 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'approvers'    => [],
             'filled_count' => count($matchedFields),
         ];
+    }
+
+    /**
+     * Detect stamped e-sign / approval text that must not transfer via Fill with DOCX.
+     */
+    private function looksLikeDocxApprovalStampValue(string $value, array $field): bool
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return false;
+        }
+
+        $label = strtolower(trim((string) ($field['label'] ?? '')));
+        // "Name - Designation" style stamps in approval/name columns.
+        if (
+            preg_match('/^.+\s+-\s+.+$/u', $value) === 1
+            && (
+                $label === 'name'
+                || str_contains($label, 'name') && str_contains($label, 'designation')
+                || preg_match('/\b(prepared|checked|approved)\s*by\b/', $label) === 1
+                || trim((string) ($field['approver_role'] ?? '')) !== ''
+                || ! empty($field['is_pre_approver'])
+            )
+        ) {
+            return true;
+        }
+
+        // Datetime stamps: 21-11-2026 11:03:44 / 2026-11-21 11:03
+        if (preg_match('/\b\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\b/', $value) === 1) {
+            if (
+                str_contains($label, 'sign')
+                || str_contains($label, 'date')
+                || str_contains($label, 'time')
+                || preg_match('/\b(prepared|checked|approved|done)\s*by\b/', $label) === 1
+                || trim((string) ($field['approver_role'] ?? '')) !== ''
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Dropdown label: list code (REV10 / NEQ1) / Equipment ID / Equipment Name / Facility */
@@ -8430,7 +8854,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 if ($preparer) {
                     $recorderName = $this->formatUserOptionLabel($preparer);
                     $data['post_prepared_by_name_text'] = $recorderName;
-                    $data['post_prepared_by_date']      = now()->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+                    $data['post_prepared_by_date']      = $this->formatSignatureDateTimeForDocx(now());
                     $data['post_prepared_by_signature'] = $recorderName;
                 }
             }
@@ -8654,14 +9078,14 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         $pdfPath = dirname($docxPath) . DIRECTORY_SEPARATOR . pathinfo($docxPath, PATHINFO_FILENAME) . '.pdf';
         $isNeq = $this->isNeqImportSource($report->import_source ?? null);
-        // Requal/reval layout_v3 = letterhead pct→dxa + offsetFrom=text border clamp.
-        // NEQ layout_v6 = logo↔title gap (was v5 TOC/bold/gap).
-        $layoutMarker = $docxPath . ($isNeq ? '.layout_v6' : '.layout_v3');
+        // Requal/reval layout_v6 = 8.4 key+value + unbold VFD/dept labels.
+        // NEQ layout_v13 = header Effective Date date-only (was v12 gap/24h).
+        $layoutMarker = $docxPath . ($isNeq ? '.layout_v13' : '.layout_v6');
         $needsLayout = ! is_file($layoutMarker);
         if ($needsLayout) {
             $legacySuffixes = $isNeq
-                ? ['.layout_v1', '.layout_v2', '.layout_v3', '.layout_v4', '.layout_v5']
-                : ['.layout_v1', '.layout_v2'];
+                ? ['.layout_v1', '.layout_v2', '.layout_v3', '.layout_v4', '.layout_v5', '.layout_v6', '.layout_v7', '.layout_v8', '.layout_v9', '.layout_v10', '.layout_v11', '.layout_v12']
+                : ['.layout_v1', '.layout_v2', '.layout_v3', '.layout_v4', '.layout_v5'];
             foreach ($legacySuffixes as $legacySuffix) {
                 $legacyMarker = $docxPath . $legacySuffix;
                 if (is_file($legacyMarker)) {
@@ -8814,6 +9238,50 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         }
 
         return is_file(storage_path('app/public/' . ltrim($relative, '/')));
+    }
+
+    /**
+     * True when requal/reval is in POST but PRE-APPROVAL Signature & Date cells are still blank.
+     * Used by show to regenerate the filled DOCX/PDF once after send-to-post wipe.
+     */
+    public function requalPreApprovalSignaturesNeedRestore(Report $report): bool
+    {
+        if (! in_array(($report->import_source ?? ''), ['requalification', 'revalidation'], true)) {
+            return false;
+        }
+        if (($report->stage ?? '') !== 'post'
+            && ! in_array(($report->status ?? ''), ['post_pending', 'post_returned', 'approved'], true)
+        ) {
+            return false;
+        }
+        if (! $this->requalificationPreApprovalIsComplete($report)) {
+            return false;
+        }
+
+        $fields = $report->docx_import_fields ?? [];
+        if (! is_array($fields) || $fields === []) {
+            return false;
+        }
+
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            // PRE-APPROVAL signature tables are the first three Word tables.
+            if (! preg_match('/^table_[123]_row_\d+_col_\d+$/', $loc)) {
+                continue;
+            }
+            $label = strtolower((string) ($field['label'] ?? ''));
+            if (! str_contains($label, 'signature')) {
+                continue;
+            }
+            if (trim((string) ($field['value'] ?? '')) === '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -9258,7 +9726,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $isSlNoField = $type === 'table_sl_no'
                 || preg_match('/^(sr\.?\s*no\.?|s\.?\s*no\.?|sl\.?\s*no\.?|#)\b/i', $label) === 1;
 
-            // Sr. No. / Sl. No.: editable with default serial (user may change).
+            // Sr. No. / Sl. No.: Word-numbered cells stay locked; blank stay editable.
             if ($isSlNoField && preg_match('/^table_\d+_row_[1-9]\d*_col_/', $location) === 1) {
                 $serialVal = trim((string) ($field['value'] ?? ''));
                 if ($serialVal !== '' && ! $this->looksLikeSlNoValue($serialVal)) {
@@ -9275,11 +9743,18 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 $fields[$idx]['value'] = $serialVal;
                 $fields[$idx]['type'] = 'table_multicol';
                 $fields[$idx]['widget'] = 'text';
-                $fields[$idx]['locked'] = false;
-                $fields[$idx]['prefilled'] = false;
-                $fields[$idx]['user_filled'] = true;
-                $fields[$idx]['draft_editable'] = true;
-                $unlocked++;
+                if ($serialVal !== '' && $this->looksLikeSlNoValue($serialVal)) {
+                    $fields[$idx]['locked'] = true;
+                    $fields[$idx]['prefilled'] = true;
+                    $fields[$idx]['user_filled'] = false;
+                    $fields[$idx]['draft_editable'] = false;
+                } else {
+                    $fields[$idx]['locked'] = false;
+                    $fields[$idx]['prefilled'] = false;
+                    $fields[$idx]['user_filled'] = true;
+                    $fields[$idx]['draft_editable'] = true;
+                    $unlocked++;
+                }
                 continue;
             }
 
@@ -9360,7 +9835,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         // Match Word: Qualification History "Initial Qualification (PQ)" row stays
         // static (PQ label + Report No. + Approval Date), not editable inputs.
-        return $this->lockQualificationHistoryTemplateCells($fields);
+        // Also lock original Word template columns during pre-approval fill:
+        // Description, Instrument Name, Checks, Methodology, Acceptance, Sr. No.
+        $fields = $this->lockQualificationHistoryTemplateCells($fields);
+        $fields = $this->lockConnectedAccessoriesDescriptions($fields);
+
+        return $this->lockRequalificationTemplateFilledColumns($fields);
     }
 
     /**
@@ -9378,6 +9858,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $initialRows = [];
         $periodicRows = [];
         $qualTableIds = [];
+        $revisionTableIds = [];
         $rowCells = []; // rowKey => [col => value]
 
         foreach ($fields as $field) {
@@ -9394,6 +9875,17 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $value = trim((string) ($field['value'] ?? ''));
             $label = strtolower(trim((string) ($field['label'] ?? '')));
             $rowCells[$rowKey][$col] = $value;
+            // 15.0 REVISION HISTORY must never be treated as Qualification History
+            // (Reason "Initial Qualification" was overwriting Revision No. "1").
+            if (
+                str_contains($label, 'revision no')
+                || str_contains($label, 'rev. no')
+                || str_contains($label, 'rev no')
+                || str_contains($label, 'reason for revision')
+            ) {
+                $revisionTableIds[$tableId] = true;
+                continue;
+            }
             if (
                 str_contains($label, 'qualification')
                 || str_contains($label, 'report no')
@@ -9408,6 +9900,44 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
             if (preg_match('/^periodic\s+requalification\b/i', $value) === 1) {
                 $periodicRows[$rowKey] = true;
+            }
+        }
+
+        foreach (array_keys($revisionTableIds) as $revTableId) {
+            unset($qualTableIds[$revTableId]);
+        }
+        foreach (array_keys($initialRows) as $rowKey) {
+            if (preg_match('/^table_(\d+)_row_/', $rowKey, $rm) === 1 && isset($revisionTableIds[$rm[1]])) {
+                unset($initialRows[$rowKey]);
+            }
+        }
+        foreach (array_keys($periodicRows) as $rowKey) {
+            if (preg_match('/^table_(\d+)_row_/', $rowKey, $rm) === 1 && isset($revisionTableIds[$rm[1]])) {
+                unset($periodicRows[$rowKey]);
+            }
+        }
+
+        // Repair already-corrupted Revision No. cells (PQ text instead of 1/2/3).
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $value = trim((string) ($field['value'] ?? ''));
+            $location = (string) ($field['location'] ?? '');
+            if (
+                (
+                    str_contains($label, 'revision no')
+                    || str_contains($label, 'rev. no')
+                    || str_contains($label, 'rev no')
+                )
+                && preg_match('/^initial\s+qualification\b/i', $value) === 1
+                && preg_match('/^(table_\d+_row_(\d+))_col_0$/', $location, $rm) === 1
+            ) {
+                $fields[$idx]['value'] = (string) max(1, ((int) $rm[2]));
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['draft_editable'] = true;
+                $fields[$idx]['prefilled'] = false;
             }
         }
 
@@ -9486,12 +10016,14 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 $isApprovalDateCol = $col === 2;
                 $fields[$idx]['widget'] = $isApprovalDateCol ? 'date' : 'text';
                 $fields[$idx]['type'] = $fields[$idx]['type'] ?: 'table_multicol';
-                $fields[$idx]['label'] = $isApprovalDateCol ? 'Approval Date' : '';
+                // Explicit labels so JS/Python never treat Report No. as a date via the merged header.
+                $fields[$idx]['label'] = $isApprovalDateCol ? 'Approval Date' : 'Report No.';
                 $fields[$idx]['prefilled'] = false;
                 $fields[$idx]['user_filled'] = true;
                 $fields[$idx]['draft_editable'] = true;
                 if (! $isApprovalDateCol) {
                     unset($fields[$idx]['date_selected']);
+                    $fields[$idx]['date_selected'] = false;
                 }
             }
         }
@@ -9504,6 +10036,17 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
      */
     private function isQualificationHistoryTemplateLock(array $field): bool
     {
+        $label = strtolower(trim((string) ($field['label'] ?? '')));
+        // Never lock 15.0 REVISION HISTORY cells as Qualification History.
+        if (
+            str_contains($label, 'revision no')
+            || str_contains($label, 'rev. no')
+            || str_contains($label, 'rev no')
+            || str_contains($label, 'reason for revision')
+        ) {
+            return false;
+        }
+
         $value = trim((string) ($field['value'] ?? ''));
         if (preg_match('/^initial\s+qualification\b/i', $value) === 1) {
             return true;
@@ -9536,7 +10079,13 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if (str_contains($label, 'observation') || str_contains($label, 'result') || str_contains($label, 'evaluation') || str_contains($label, 'finding')) {
             return true;
         }
-        if (str_contains($label, 'instrument id') || str_contains($label, 'serial no') || str_contains($label, 'model no') || str_contains($label, 'identification no')) {
+        if (
+            str_contains($label, 'instrument id')
+            || str_contains($label, 'serial no')
+            || str_contains($label, 'model no')
+            || str_contains($label, 'identification no')
+            || str_contains($label, 'identification number')
+        ) {
             return true;
         }
         if (str_contains($label, 'calibration') || (str_contains($label, 'date') && ! str_contains($label, 'effective'))) {
@@ -9548,7 +10097,22 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if (str_contains($label, 'remark') || str_contains($label, 'comment') || str_contains($label, 'pass/fail') || str_contains($label, 'status')) {
             return true;
         }
-        if (str_starts_with($label, 'done by') || str_starts_with($label, 'performed by') || str_contains($label, 'tested by')) {
+        if (
+            str_starts_with($label, 'done by')
+            || str_starts_with($label, 'performed by')
+            || str_contains($label, 'tested by')
+            || str_contains($label, 'checked by')
+            || str_contains($label, 'checked. by')
+        ) {
+            return true;
+        }
+        // 8.2 Preventive Maintenance execution cells.
+        if (str_contains($label, 'preventive maintenance done') || str_contains($label, 'preventive maintenance due')) {
+            return true;
+        }
+        // 8.2 Preventive Maintenance "Equipment Name / ID" is fillable.
+        // Do NOT treat Connected Accessories "Description" or Instrument Name as execution.
+        if (str_contains($label, 'equipment name / id') || $label === 'equipment name / id') {
             return true;
         }
 
@@ -9576,7 +10140,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     private function applyRequalificationPostPreApprovalLockRules(array $fields): array
     {
         $fields = $this->lockConnectedAccessoriesDescriptions($fields);
-        $fields = $this->lockExistingTableContent($fields);
+        $fields = $this->lockRequalificationTemplateFilledColumns($fields);
 
         $lockedCount = 0;
         $unlockedCount = 0;
@@ -9590,10 +10154,20 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $location = strtolower(trim((string) ($field['location'] ?? '')));
             $label = strtolower(trim((string) ($field['label'] ?? '')));
 
-            // Row 0 col 1 of 2-col key-value tables is fillable (Name of Equipment value)
-            if (preg_match('/^table_\d+_row_0_col_1$/', $location) && $type === 'table_2col') {
-                $fields[$idx]['locked'] = false;
-                $unlockedCount++;
+            // Template locks from Checks/Acceptance/etc. — but never block execution
+            // columns (Instrument ID, dates, Observation, Checked by, 8.2 PM cells).
+            if (($field['locked'] ?? false) === true
+                && ($field['prefilled'] ?? false) === true
+                && ($field['draft_editable'] ?? true) === false) {
+                if ($this->isExecutionFillColumn($label)) {
+                    $fields[$idx]['locked'] = false;
+                    $fields[$idx]['prefilled'] = false;
+                    $fields[$idx]['draft_editable'] = true;
+                    $fields[$idx]['user_filled'] = true;
+                    $unlockedCount++;
+                    continue;
+                }
+                $lockedCount++;
                 continue;
             }
 
@@ -9604,7 +10178,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
 
-            // 2. Sr. No. / Sl. No.: stay editable with visible default (user may change).
+            // 2. Sr. No. / Sl. No.: numbered cells stay locked; blank stay editable.
             $isSlNoField = $type === 'table_sl_no'
                 || preg_match('/^(sr\.?\s*no\.?|s\.?\s*no\.?|sl\.?\s*no\.?|#)\b/i', $label) === 1;
             if ($isSlNoField && preg_match('/^table_\d+_row_[1-9]\d*_col_/', $location) === 1) {
@@ -9623,11 +10197,19 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 $fields[$idx]['value'] = $serialVal;
                 $fields[$idx]['type'] = 'table_multicol';
                 $fields[$idx]['widget'] = 'text';
-                $fields[$idx]['locked'] = false;
-                $fields[$idx]['prefilled'] = false;
-                $fields[$idx]['user_filled'] = true;
-                $fields[$idx]['draft_editable'] = true;
-                $unlockedCount++;
+                if ($serialVal !== '' && $this->looksLikeSlNoValue($serialVal)) {
+                    $fields[$idx]['locked'] = true;
+                    $fields[$idx]['prefilled'] = true;
+                    $fields[$idx]['user_filled'] = false;
+                    $fields[$idx]['draft_editable'] = false;
+                    $lockedCount++;
+                } else {
+                    $fields[$idx]['locked'] = false;
+                    $fields[$idx]['prefilled'] = false;
+                    $fields[$idx]['user_filled'] = true;
+                    $fields[$idx]['draft_editable'] = true;
+                    $unlockedCount++;
+                }
                 continue;
             }
 
@@ -9654,6 +10236,19 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     $fields[$idx]['widget'] = 'text';
                 }
                 $fields[$idx]['locked'] = false;
+                $unlockedCount++;
+                continue;
+            }
+            // 5b. 8.4 Verification P&ID notes (para_N_body) — never lock; these are fill textareas.
+            if (preg_match('/_body$/', $location) === 1 || str_contains($location, 'verification_pid')) {
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['prefilled'] = false;
+                $fields[$idx]['draft_editable'] = true;
+                $fields[$idx]['type'] = $type !== '' ? $type : 'paragraph_content';
+                $fields[$idx]['widget'] = 'textarea';
+                if (trim((string) ($field['value'] ?? '')) !== '') {
+                    $fields[$idx]['user_filled'] = true;
+                }
                 $unlockedCount++;
                 continue;
             }
@@ -10705,9 +11300,11 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $fieldsHash = md5(json_encode(array_values($fields), JSON_UNESCAPED_UNICODE));
         $cacheVer   = $this->docxPreviewCacheVersion($fileId, $reportId);
         $sourceKey  = $importSource !== '' ? $importSource : 'legacy';
+        // v111: readonly expands vMerge to per-row cells (no HTML rowspan) so
+        // 2nd-approval A4 spill keeps Sr.No / Identification aligned.
         $cacheKey   = $reportId
-            ? "docx_preview:v110:{$mode}:{$sourceKey}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
-            : "docx_preview:v110:{$mode}:{$sourceKey}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}";
+            ? "docx_preview:v111:{$mode}:{$sourceKey}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}"
+            : "docx_preview:v111:{$mode}:{$sourceKey}:{$fileId}:{$reportId}:{$cacheVer}:{$fieldsHash}";
         $cached     = Cache::get($cacheKey);
 
         // Return cached HTML when fields and mode have not changed since last preview.
@@ -10924,9 +11521,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
             $prefix = preg_replace('/_name$/', '', $role) ?? $role;
-            $date = trim((string) ($data[$prefix . '_date'] ?? ''));
+            $date = $this->formatSignatureDateTimeForDocx((string) ($data[$prefix . '_date'] ?? ''));
             if ($date === '') {
-                $date = $step->approved_at->timezone('Asia/Kolkata')->format('d-m-Y h:i A');
+                $date = $this->formatSignatureDateTimeForDocx($step->approved_at);
             }
             $dates[$role] = $date;
         }
@@ -10948,26 +11545,24 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             return;
         }
 
-        $current = trim((string) ($fields[$idx]['value'] ?? ''));
-        if ($lockApproved || $current === '' || in_array($current, ['—', '-', '–'], true)) {
-            $fields[$idx]['value'] = $name;
-        }
+        // Always write Name & Designation from the selected user. Fill-form selects
+        // often leave "Name (email)" in the cell — that must not block "Name - designation".
+        $fields[$idx]['value'] = $name;
+        // Select-label leftovers are not Word-prefilled content — allow stamp/merge updates.
+        $fields[$idx]['prefilled'] = false;
         if ($lockApproved) {
             $this->lockPreApprovalCell($fields[$idx]);
-        }
-
-        if ($approvedDate === null || $approvedDate === '') {
-            return;
         }
 
         $loc = (string) ($fields[$idx]['location'] ?? '');
         if (! preg_match('/^(table_\d+_row_\d+)_col_\d+$/', $loc, $match)) {
             return;
         }
-        $signature = $this->signatureLabelFromDisplayName($name);
-        $combined = trim($signature . '  ' . $approvedDate);
-        if ($combined === '') {
-            return;
+
+        $combined = '';
+        if ($approvedDate !== null && $approvedDate !== '') {
+            $signature = $this->signatureLabelFromDisplayName($name);
+            $combined = trim($signature . '  ' . $approvedDate);
         }
 
         foreach ($fields as $fieldIndex => $field) {
@@ -10982,9 +11577,25 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             if (! str_contains($label, 'signature') && ! str_contains($label, 'date')) {
                 continue;
             }
-            $existing = trim((string) ($field['value'] ?? ''));
-            if ($existing === '' || in_array($existing, ['—', '-', '–'], true)) {
-                $fields[$fieldIndex]['value'] = $combined;
+            // Detach from POST blank/stamp pipeline so send-to-post cannot clear these cells.
+            $fields[$fieldIndex]['approver_role'] = $roleKey;
+            $fields[$fieldIndex]['is_pre_approver'] = true;
+            $fields[$fieldIndex]['prefilled'] = false;
+
+            if ($combined !== '') {
+                $existing = trim((string) ($field['value'] ?? ''));
+                // Replace blank/dash cells and leftover select labels so Signature & Date
+                // always shows name + datetime after the step is approved.
+                // When PRE is complete, always force the PRE stamp (do not keep a wrong POST stamp
+                // that landed here because upgradeSignatureApproverRoles tagged the cell post_*).
+                if (
+                    $lockApproved
+                    || $existing === ''
+                    || in_array($existing, ['—', '-', '–'], true)
+                    || preg_match('/^.+\([^@\)]+@[^)]+\)$/', $existing)
+                ) {
+                    $fields[$fieldIndex]['value'] = $combined;
+                }
             }
             if ($lockApproved) {
                 $this->lockPreApprovalCell($fields[$fieldIndex]);
@@ -11011,31 +11622,23 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     private function preApproverNameAndDesignation(array $data, string $roleKey): string
     {
         $prefix = preg_replace('/_name$/', '', $roleKey) ?? $roleKey;
+
+        // Prefer live user record so Name & Designation always includes designation,
+        // even when *_name_text was cached as "Name (email)" from a select label.
+        $userId = $data[$roleKey] ?? null;
+        if (is_numeric($userId)) {
+            $user = User::find((int) $userId);
+            if ($user) {
+                return $this->formatUserOptionLabel($user);
+            }
+        }
+
         $stored = trim((string) ($data[$prefix . '_name_text'] ?? ''));
-        if ($stored !== '') {
+        if ($stored !== '' && ! preg_match('/^.+\([^@\)]+@[^)]+\)$/', $stored)) {
             return $stored;
         }
 
-        $userId = $data[$roleKey] ?? null;
-        if (! is_numeric($userId)) {
-            return '';
-        }
-
-        $user = User::find((int) $userId);
-        if (! $user) {
-            return '';
-        }
-
-        $fullName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
-        if ($fullName === '') {
-            $fullName = trim((string) ($user->name ?? ''));
-        }
-        $designation = trim((string) ($user->designation ?? ''));
-        if ($fullName === '') {
-            return '';
-        }
-
-        return $designation !== '' ? $fullName . ' - ' . $designation : $fullName;
+        return $stored;
     }
 
     private function applyReportPrefills(Report $report, array $fields): array
@@ -11522,6 +12125,10 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'observation/results and evaluation',
             'list of sops identified',
             'verification of draft sops',
+            'remarks / recommendation (if any)',
+            'remarks / recommendation',
+            'remarks/recommendation (if any)',
+            'remarks/recommendation',
             'installation checks',
             'pre-installation checks',
             'pre installation checks',
@@ -11530,6 +12137,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'identification of the contact surfaces',
         ];
         if (in_array($key, $exact, true)) {
+            return true;
+        }
+        if (preg_match('/^remarks\s*\/\s*recommendation\b/i', $key) === 1) {
             return true;
         }
 
@@ -11545,6 +12155,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'any other specific tests',
             'history of equipment',
             'review of change controls',
+            'remarks / recommendation',
+            'remarks/recommendation',
             'requalification checks',
             'installation re-qualification checks',
             'general checks',
