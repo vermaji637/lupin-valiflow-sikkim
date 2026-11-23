@@ -1264,6 +1264,217 @@ def _repair_header_echo_value(doc, location: str, value: str) -> str:
     return ""
 
 
+def _following_single_value_box(p_el):
+    """The 1-cell table that sits under a New Equipment section heading, if any."""
+    nxt = p_el.getnext()
+    while nxt is not None and nxt.tag == qn("w:p") and not _para_plain_text(nxt).strip():
+        nxt = nxt.getnext()
+    if nxt is None or nxt.tag != qn("w:tbl"):
+        return None
+    rows = nxt.findall(qn("w:tr"))
+    if len(rows) != 1:
+        return None
+    cells = rows[0].findall(qn("w:tc"))
+    if len(cells) != 1:
+        return None
+    return cells[0]
+
+
+def _is_neq_boxed_heading_text(text: str) -> bool:
+    """'5.0 Review and Discussions:' / '6.0 Conclusion:' — the answer belongs in the box."""
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    return bool(re.match(r"^\d+(?:\.\d+)+\s+\S.*:\s*$", cleaned))
+
+
+def _is_neq_value_box_paragraph(p_el) -> bool:
+    """Paragraph inside the single cell under a numbered colon heading."""
+    tc = p_el.getparent()
+    if tc is None or not str(tc.tag).endswith("}tc"):
+        return False
+    tr = tc.getparent()
+    tbl = tr.getparent() if tr is not None else None
+    if tbl is None or not str(tbl.tag).endswith("}tbl"):
+        return False
+    if len(tbl.findall(qn("w:tr"))) != 1 or len(tr.findall(qn("w:tc"))) != 1:
+        return False
+    prev = tbl.getprevious()
+    while prev is not None and str(prev.tag).endswith("}p") and not _para_plain_text(prev).strip():
+        prev = prev.getprevious()
+    if prev is None or not str(prev.tag).endswith("}p"):
+        return False
+    return _is_neq_boxed_heading_text(_para_plain_text(prev))
+
+
+def _write_neq_box_value(tc, value: str) -> None:
+    """Put the answer in the box: Arial 11, regular — the heading above stays bold."""
+    value = _normalize_text_value(value).strip()
+    p_el = tc.find(qn("w:p"))
+    if p_el is None:
+        p_el = OxmlElement("w:p")
+        tc.append(p_el)
+    for child in list(p_el):
+        if child.tag != qn("w:pPr"):
+            p_el.remove(child)
+    p_pr = p_el.find(qn("w:pPr"))
+    if p_pr is None:
+        p_pr = OxmlElement("w:pPr")
+        p_el.insert(0, p_pr)
+    mark = p_pr.find(qn("w:rPr"))
+    if mark is None:
+        mark = OxmlElement("w:rPr")
+        p_pr.append(mark)
+    _force_arial_11_on_rpr(mark, bold=False, force_size=True)
+    if not value:
+        return
+    run = OxmlElement("w:r")
+    r_pr = OxmlElement("w:rPr")
+    _force_arial_11_on_rpr(r_pr, bold=False, force_size=True)
+    run.append(r_pr)
+    t_el = OxmlElement("w:t")
+    if value[:1].isspace() or value[-1:].isspace():
+        t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    t_el.text = value
+    run.append(t_el)
+    p_el.append(run)
+
+
+def _fill_neq_heading_value_into_box(para, value: str) -> bool:
+    """
+    New Equipment only. '5.0 Review and Discussions:' and '6.0 Conclusion:'
+    keep their heading text. The typed answer goes in the empty box under them.
+    """
+    if not _active_is_neq():
+        return False
+    heading = re.sub(r"\s+", " ", (para.text or "")).strip()
+    if not _is_neq_boxed_heading_text(heading):
+        return False
+    tc = _following_single_value_box(para._element)
+    if tc is None:
+        return False
+    answer = _normalize_text_value(value).strip()
+    if answer.lower().startswith(heading.lower()):
+        answer = answer[len(heading):].strip()
+    _write_neq_box_value(tc, answer)
+    return True
+
+
+def _paragraph_style_id(p_el) -> str:
+    p_pr = p_el.find(qn("w:pPr"))
+    if p_pr is None:
+        return ""
+    ps = p_pr.find(qn("w:pStyle"))
+    if ps is None:
+        return ""
+    return (ps.get(qn("w:val")) or "").strip()
+
+
+def _body_toc_paragraph_elements(doc) -> list:
+    """
+    Body TOC lines in fill-form order (toc_sdt_0, toc_sdt_1, ...).
+
+    New Equipment IOQ protocols store the contents list as normal paragraphs
+    (style TOC1), not inside a Word content control. The form still names
+    those rows toc_sdt_N. Updating only w:sdt paragraphs left the typed
+    page numbers in the database and the old digits in the document.
+    """
+    found = []
+    for child in list(doc.element.body):
+        if child.tag != qn("w:p"):
+            continue
+        style = _paragraph_style_id(child).lower().replace(" ", "")
+        # toc 3 is a body heading style on Att14, not a contents row.
+        if style in {"toc3"}:
+            continue
+        title, page = _parse_toc_title_from_element(child)
+        if not title or not page:
+            continue
+        if style.startswith("toc"):
+            found.append(child)
+            continue
+        raw = ""
+        for node in child.iter():
+            if node.tag == qn("w:t") and node.text:
+                raw += node.text
+            elif node.tag == qn("w:tab"):
+                raw += "\t"
+        if "\t" in raw or re.search(r"[\.\u2026]{3,}", raw):
+            found.append(child)
+    return found
+
+
+def _toc_sdt_target_paragraph(doc, index: int):
+    """Paragraph for toc_sdt_{index}: body TOC row first, content-control row otherwise."""
+    body = _body_toc_paragraph_elements(doc)
+    if 0 <= index < len(body):
+        return body[index]
+    try:
+        sdt_paras = doc._element.xpath("//w:sdt//w:p")
+    except Exception:
+        sdt_paras = []
+    if 0 <= index < len(sdt_paras):
+        return sdt_paras[index]
+    return None
+
+
+def _reapply_preserved_toc_pages(doc, field_values) -> int:
+    """
+    Write the TOC page digits from the fill form again after layout/realign.
+
+    New Equipment preview and final download must show the numbers the user
+    typed. An earlier fill only updated content-control paragraphs, so body
+    TOC1 rows kept the template digits. Re-applying here is the last write.
+    """
+    if not field_values:
+        return 0
+    applied = 0
+    for field in field_values:
+        if not isinstance(field, dict):
+            continue
+        location = str(field.get("location") or "")
+        value = str(field.get("value") or "").strip()
+        if not value or not re.fullmatch(r"\d+", value):
+            continue
+        is_toc_page = (
+            (location.startswith("toc_sdt_") and not location.endswith("_title"))
+            or (
+                location.startswith("table_")
+                and "_toc_" in location
+                and not location.endswith("_title")
+            )
+        )
+        if not is_toc_page:
+            continue
+        before = None
+        try:
+            if location.startswith("toc_sdt_"):
+                m = re.match(r"^toc_sdt_(\d+)$", location)
+                if not m:
+                    continue
+                p_el = _toc_sdt_target_paragraph(doc, int(m.group(1)))
+                if p_el is not None:
+                    before = _parse_toc_title_from_element(p_el)[1]
+            _apply_single_field(
+                doc,
+                location,
+                value,
+                False,
+                None,
+                field.get("type") or "toc_entry",
+            )
+            if location.startswith("toc_sdt_"):
+                m = re.match(r"^toc_sdt_(\d+)$", location)
+                p_el = _toc_sdt_target_paragraph(doc, int(m.group(1))) if m else None
+                after = _parse_toc_title_from_element(p_el)[1] if p_el is not None else ""
+                if after == value:
+                    applied += 1
+            else:
+                applied += 1
+        except Exception:
+            continue
+        _ = before
+    return applied
+
+
 def _apply_single_field(
     doc,
     location: str,
@@ -1293,28 +1504,29 @@ def _apply_single_field(
     try:
         if location.startswith("toc_sdt_"):
             m_sdt_title = re.match(r"^toc_sdt_(\d+)_title$", location)
+            m_sdt = re.match(r"^toc_sdt_(\d+)$", location)
+            sdt_idx = None
             if m_sdt_title:
                 sdt_idx = int(m_sdt_title.group(1))
-                sdt_paras = doc._element.xpath("//w:sdt//w:p")
-                if sdt_idx < len(sdt_paras):
-                    p_el = sdt_paras[sdt_idx]
-                    _title, page = _parse_toc_title_from_element(p_el)
-                    # Keep existing page; rewrite full line so page digits stay on one tab column.
-                    if page:
-                        _rewrite_toc_paragraph_element(p_el, str(value).strip(), page)
-                return
-
-            m_sdt = re.match(r"^toc_sdt_(\d+)$", location)
-            if m_sdt:
+            elif m_sdt:
                 sdt_idx = int(m_sdt.group(1))
-                W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-                sdt_paras = doc._element.xpath("//w:sdt//w:p")
-                if sdt_idx < len(sdt_paras):
-                    p_el = sdt_paras[sdt_idx]
+            p_el = _toc_sdt_target_paragraph(doc, sdt_idx) if sdt_idx is not None else None
+            if p_el is not None and m_sdt_title:
+                _title, page = _parse_toc_title_from_element(p_el)
+                # Keep the page digit; only the section title changed.
+                if page:
+                    _rewrite_toc_paragraph_element(p_el, str(value).strip(), page)
+            elif p_el is not None and m_sdt:
+                title, _old = _parse_toc_title_from_element(p_el)
+                page_digits = str(value).strip()
+                if title and page_digits:
+                    _rewrite_toc_paragraph_element(p_el, title, page_digits)
+                else:
+                    W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
                     for node in reversed(p_el.findall(f".//{{{W_NS}}}t")):
                         txt = (node.text or "").strip()
                         if re.search(r"\d+\s*$", txt):
-                            node.text = re.sub(r"\d+\s*$", str(value).strip(), node.text)
+                            node.text = re.sub(r"\d+\s*$", page_digits, node.text or "")
                             break
             return
 
@@ -1463,6 +1675,8 @@ def _apply_single_field(
                 return
             p = int(parts[1])
             para = _body_paragraph(doc, p)
+            if para is not None and _fill_neq_heading_value_into_box(para, value):
+                return
             if para is not None:
                 val_lower = str(value).strip().lower()
                 if field_type == "paragraph_radio" and val_lower in ("yes", "no"):
@@ -1612,6 +1826,62 @@ def _apply_heading_font_from_paragraph_mark(doc) -> None:
 
 def _paragraph_plain_text(p_element) -> str:
     return "".join(node.text or "" for node in p_element.iter(qn("w:t"))).strip()
+
+
+def _is_numbered_section_title(text: str) -> bool:
+    """Body lines such as '5.0 Review and Discussions:' — not TOC dot leaders."""
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned or len(cleaned) > 120 or "…" in cleaned or "...." in cleaned:
+        return False
+    return bool(re.match(r"^\d+(?:\.\d+)+\s+\S", cleaned))
+
+
+def _rpr_is_bold(r_pr) -> bool:
+    if r_pr is None:
+        return False
+    bold = r_pr.find(qn("w:b"))
+    if bold is None:
+        return False
+    return (bold.get(qn("w:val")) or "true").lower() not in {"0", "false", "off"}
+
+
+def _paragraph_is_bold(p_el) -> bool:
+    """True when the original paragraph mark or a text run is bold."""
+    p_pr = p_el.find(qn("w:pPr"))
+    if p_pr is not None and _rpr_is_bold(p_pr.find(qn("w:rPr"))):
+        return True
+    for run in p_el.findall(qn("w:r")):
+        if not "".join(node.text or "" for node in run.findall(qn("w:t"))).strip():
+            continue
+        if _rpr_is_bold(run.find(qn("w:rPr"))):
+            return True
+    return False
+
+
+def _keep_neq_bold_heading_font(p_el) -> None:
+    """
+    Heading that is already bold in the New Equipment template stays bold.
+    Missing size becomes Arial 11. An existing size (11pt on Att14 headings) is kept.
+    """
+    def touch(r_pr) -> None:
+        has_sz = r_pr.find(qn("w:sz")) is not None
+        _force_arial_11_on_rpr(r_pr, bold=True, force_size=not has_sz)
+
+    p_pr = p_el.find(qn("w:pPr"))
+    if p_pr is not None:
+        mark = p_pr.find(qn("w:rPr"))
+        if mark is None:
+            mark = OxmlElement("w:rPr")
+            p_pr.append(mark)
+        touch(mark)
+    for run in p_el.findall(qn("w:r")):
+        if not "".join(node.text or "" for node in run.findall(qn("w:t"))).strip():
+            continue
+        r_pr = run.find(qn("w:rPr"))
+        if r_pr is None:
+            r_pr = OxmlElement("w:rPr")
+            run.insert(0, r_pr)
+        touch(r_pr)
 
 
 def _looks_like_kept_heading(text: str) -> bool:
@@ -1853,6 +2123,10 @@ def _unbold_filled_body_lines(doc) -> None:
         ilvl = _paragraph_numbering_ilvl(child) if has_num else None
 
         if is_neq:
+            # Value typed for 5.0 / 6.0 belongs in the box, in normal type.
+            if _is_neq_value_box_paragraph(child):
+                _ensure_arial_11_regular_runs(child)
+                continue
             # Att14 cover titles stay bold in the original Word template.
             if re.search(
                 r"\(IOQ\)\s*REPORT\s+FOR|Identification\s*No\.?\s*:",
@@ -1860,6 +2134,11 @@ def _unbold_filled_body_lines(doc) -> None:
                 re.I,
             ):
                 _ensure_arial_11_on_heading_runs(child)
+                continue
+            # Numbered titles that are bold in the template stay bold (5.0, 6.0, 7.0).
+            # Titles that are regular in the template (1.0 Objective, 3.2) stay regular.
+            if _is_numbered_section_title(text) and _paragraph_is_bold(child):
+                _keep_neq_bold_heading_font(child)
                 continue
             if has_num:
                 if _should_keep_neq_heading_bold(text, ilvl):
@@ -2327,12 +2606,18 @@ def _normalize_neq_document_fonts(doc) -> None:
                 continue
         except Exception:
             pass
+        if _is_neq_value_box_paragraph(p_el):
+            _ensure_arial_11_regular_runs(p_el)
+            continue
         if re.search(
             r"\(IOQ\)\s*REPORT\s+FOR|Identification\s*No\.?\s*:",
             text or "",
             re.I,
         ):
             _ensure_arial_11_on_heading_runs(p_el)
+            continue
+        if _is_numbered_section_title(text) and _paragraph_is_bold(p_el):
+            _keep_neq_bold_heading_font(p_el)
             continue
         ilvl = _paragraph_numbering_ilvl(p_el) if _paragraph_has_numbering(p_el) else None
         if _paragraph_has_numbering(p_el) and _should_keep_neq_heading_bold(text, ilvl):
@@ -2554,6 +2839,7 @@ def fill_docx(
     equipment_id: str | None = None,
     table_ops: list | None = None,
     import_source: str | None = None,
+    preserve_toc_pages: bool = False,
 ) -> tuple[str, dict[str, str]]:
     """
     Fill template DOCX with user values.
@@ -2579,6 +2865,7 @@ def fill_docx(
             equipment_id=equipment_id,
             table_ops=table_ops,
             import_source=import_source,
+            preserve_toc_pages=preserve_toc_pages,
         )
     finally:
         _CURRENT_IMPORT_SOURCE = prev_source
@@ -2592,6 +2879,7 @@ def _fill_docx_inner(
     equipment_id: str | None = None,
     table_ops: list | None = None,
     import_source: str | None = None,
+    preserve_toc_pages: bool = False,
 ) -> tuple[str, dict[str, str]]:
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     shutil.copy2(template_path, output_path)
@@ -2739,15 +3027,19 @@ def _fill_docx_inner(
     # Att14: undo any prior bad rewrite of body "toc 3" headings before TOC realign.
     _restore_misstyled_att14_body_headings(doc)
     _ensure_att14_cover_titles_bold(doc)
-    # [TOC] Save filled DOCX first, then fix Table of Contents page numbers.
-    # Called from API: POST /fill  (and CLI fill). Uses Word first, LibreOffice only as backup.
+    # [TOC] Save filled DOCX first. Final fill recomputes page numbers.
+    # Word preview / NEQ final keep the digits typed on the form.
     doc.save(output_path)
-    toc_updates = recompute_toc_page_numbers(doc, layout_docx_path=output_path)
-    if toc_updates:
-        repaired_values.update(toc_updates)
+    if not preserve_toc_pages:
+        toc_updates = recompute_toc_page_numbers(doc, layout_docx_path=output_path)
+        if toc_updates:
+            repaired_values.update(toc_updates)
     # Guarantee every TOC page digit sits on the same right-tab column.
     # Table TOC (Att14) uses literal ellipsis leaders — tabs do not print in LO PDF.
     _realign_toc_page_columns(doc)
+    if preserve_toc_pages:
+        # Last write wins: put the form digits back after realign/layout.
+        _reapply_preserved_toc_pages(doc, body_fields)
     doc.save(output_path)
 
     return output_path, repaired_values
@@ -3741,13 +4033,100 @@ def _make_toc_tc(width_dxa: str, paragraphs_xml: list) -> "OxmlElement":
     return tc
 
 
+# Arial Bold 11pt advance widths in twips (measured from arialbd.ttf).
+# Every TOC leader dot uses this same period width so the glyph size matches
+# on every New Equipment contents line.
+_NEQ_TOC_ARIAL_BOLD_11_TWIPS = {
+    "A": 158, "B": 158, "C": 158, "D": 158, "E": 146, "F": 134, "G": 172,
+    "H": 158, "I": 62, "J": 122, "K": 158, "L": 134, "M": 184, "N": 158,
+    "O": 172, "P": 146, "Q": 172, "R": 158, "S": 146, "T": 134, "U": 158,
+    "V": 146, "W": 208, "X": 146, "Y": 146, "Z": 134,
+    "0": 122, "1": 122, "2": 122, "3": 122, "4": 122,
+    "5": 122, "6": 122, "7": 122, "8": 122, "9": 122,
+    " ": 62, ".": 62, "/": 62, "&": 158, "-": 74,
+}
+_NEQ_TOC_TITLE_CELL_TWIPS = 9000
+_NEQ_TOC_CELL_PAD_TWIPS = 108  # Word/LibreOffice default left and right cell pad
+_NEQ_TOC_DOT_SAFETY_TWIPS = 200  # keep the last period inside the cell (no wrap)
+
+
+def _neq_arial_bold_11_twips(text: str) -> int:
+    total = 0
+    for ch in text or "":
+        total += _NEQ_TOC_ARIAL_BOLD_11_TWIPS.get(
+            ch, _NEQ_TOC_ARIAL_BOLD_11_TWIPS.get(ch.upper(), 158)
+        )
+    return total
+
+
+def _neq_toc_uniform_dot_count(label: str) -> int:
+    """How many identical '.' glyphs fit between this title and the page column."""
+    usable = _NEQ_TOC_TITLE_CELL_TWIPS - (2 * _NEQ_TOC_CELL_PAD_TWIPS) - _NEQ_TOC_DOT_SAFETY_TWIPS
+    remain = usable - _neq_arial_bold_11_twips((label or "") + " ")
+    dot_w = _NEQ_TOC_ARIAL_BOLD_11_TWIPS["."]
+    return max(8, remain // dot_w)
+
+
+def _build_neq_att14_uniform_dot_title_para(label: str) -> "OxmlElement":
+    """
+    New Equipment Att14 contents line.
+
+    One run of Arial Bold 11pt periods — the same glyph, size, and spacing on
+    every row. No tab leader and no condensed Courier dots (those two styles
+    were printing at different sizes in the Word preview).
+    """
+    p_el = OxmlElement("w:p")
+    p_pr = OxmlElement("w:pPr")
+    ps = OxmlElement("w:pStyle")
+    ps.set(qn("w:val"), "Header")
+    p_pr.append(ps)
+    # Empty tab list so the Header style's right tab is not inherited.
+    _ppr_insert_tabs(p_pr, OxmlElement("w:tabs"))
+    spacing = OxmlElement("w:spacing")
+    spacing.set(qn("w:before"), "60")
+    spacing.set(qn("w:after"), "60")
+    spacing.set(qn("w:line"), "240")
+    spacing.set(qn("w:lineRule"), "auto")
+    p_pr.append(spacing)
+    p_el.append(p_pr)
+    p_el.append(_toc_run_arial_bold_11(label + " "))
+
+    dots_run = OxmlElement("w:r")
+    r_pr = OxmlElement("w:rPr")
+    fonts = OxmlElement("w:rFonts")
+    fonts.set(qn("w:ascii"), "Arial")
+    fonts.set(qn("w:hAnsi"), "Arial")
+    fonts.set(qn("w:cs"), "Arial")
+    r_pr.append(fonts)
+    r_pr.append(OxmlElement("w:b"))
+    r_pr.append(OxmlElement("w:bCs"))
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), "22")
+    r_pr.append(sz)
+    sz_cs = OxmlElement("w:szCs")
+    sz_cs.set(qn("w:val"), "22")
+    r_pr.append(sz_cs)
+    kern = OxmlElement("w:kern")
+    kern.set(qn("w:val"), "0")
+    r_pr.append(kern)
+    sp = OxmlElement("w:spacing")
+    sp.set(qn("w:val"), "0")
+    r_pr.append(sp)
+    dots_run.append(r_pr)
+    t_el = OxmlElement("w:t")
+    t_el.text = "." * _neq_toc_uniform_dot_count(label)
+    dots_run.append(t_el)
+    p_el.append(dots_run)
+    return p_el
+
+
 def _build_att14_toc_title_para(title: str) -> "OxmlElement":
     """
     Title cell: '1.0   TITLE' + leaders that fill to the page column.
 
-    Uses a right-tab with dot leader to the title-cell edge, plus a Courier
-    period run sized to remaining width so LibreOffice PDF (which often skips
-    tab leaders in cells) still draws dots all the way to page 2/4/5.
+    New Equipment uses identical Arial periods (see
+    _build_neq_att14_uniform_dot_title_para). Other documents keep the
+    right-tab leader plus a Courier period run.
     """
     title = re.sub(r"\s+", " ", (title or "")).strip()
     m = re.match(r"^(\d+(?:\.\d+)*)\s*(.*)$", title)
@@ -3757,6 +4136,9 @@ def _build_att14_toc_title_para(title: str) -> "OxmlElement":
         label = f"{num_part}   {rest}".rstrip() if rest else num_part
     else:
         label = title.upper()
+
+    if _active_is_neq():
+        return _build_neq_att14_uniform_dot_title_para(label)
 
     p_el = OxmlElement("w:p")
     p_pr = OxmlElement("w:pPr")
@@ -3976,6 +4358,9 @@ def _realign_toc_page_columns(doc) -> int:
                 continue
             # Title cells in converted TOC already include leaders — don't glue page back on.
             if title and not page and "…" in (raw or ""):
+                continue
+            # NEQ Att14 leaders are plain periods (same size on every row).
+            if _active_is_neq() and title and not page and re.search(r"\.{6,}", raw or ""):
                 continue
         title, page = _parse_toc_title_from_element(p_el)
         if not title or not page:
@@ -5606,8 +5991,14 @@ def _repair_abbreviation_entries(doc) -> int:
     if start is None:
         return 0
 
-    # Start the list under the letterhead so LO does not clip entries under ANNEX.
-    _set_para_page_break_before(body[start], enabled=True)
+    # Requal only: start the list on a new page so LibreOffice does not clip it
+    # under the annex footer. NEQ's original protocol has no page break here —
+    # ABBREVIATIONS follows REFERENCES after one blank line. A forced break
+    # left the rest of that page empty (the large gap after 15.0 REFERENCES).
+    if _active_is_neq():
+        _set_para_page_break_before(body[start], enabled=False)
+    else:
+        _set_para_page_break_before(body[start], enabled=True)
     _ensure_para_keep_next(body[start])
 
     fixed = 0

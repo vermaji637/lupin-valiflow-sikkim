@@ -3263,6 +3263,13 @@ class DocxImportController extends Controller
      */
     private function shouldSkipFieldForPythonFill(array $field): bool
     {
+        $location = (string) ($field['location'] ?? '');
+        if (
+            (str_contains($location, '_toc_') || str_starts_with($location, 'toc_sdt_'))
+            && ! str_ends_with($location, '_title')
+        ) {
+            return false;
+        }
         $type = strtolower(trim((string) ($field['type'] ?? '')));
         if ($type === 'table_sl_no') {
             return true;
@@ -5224,10 +5231,12 @@ PY;
             if (str_contains($dept, 'validation') || str_contains($dept, 'user')) {
                 return 'post_checked_by_validation_name';
             }
+            // Blank Att14 rows have no department label. Top to bottom matches
+            // the approval sequence: Engineering, Production, Validation, QA.
             $byOffset = [
-                0 => 'post_checked_by_validation_name',
+                0 => 'post_checked_by_engineering_name',
                 1 => 'post_checked_by_production_name',
-                2 => 'post_checked_by_engineering_name',
+                2 => 'post_checked_by_validation_name',
                 3 => 'post_checked_by_quality_name',
             ];
 
@@ -6445,11 +6454,16 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
      * @return array|null  attachments array + docx_filled_path when successful
      */
     // Calls Python /fill to produce the downloadable DOCX stored as attachment index 99.
-    private function regenerateFilledDocxAttachment(Report $report, array $fields): ?array
+    private function regenerateFilledDocxAttachment(Report $report, array $fields, bool $preserveTocPages = false): ?array
     {
         $fileId = $report->docx_import_path;
         if (! $fileId) {
             return null;
+        }
+
+        // NEQ TOC page numbers are typed by the user. Do not replace them on preview or approval.
+        if ($this->isNeqImportSource($report->import_source ?? null)) {
+            $preserveTocPages = true;
         }
 
         if (! $this->ensureDocxTemplateOnDisk($report)) {
@@ -6494,8 +6508,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         try {
             // [API] POST {PYTHON_NLP_URL}/fill  (default http://127.0.0.1:8001/fill)
-            // Python fill_docx writes the DOCX, then fixes TOC pages:
-            //   [WORD COM] first → [LIBREOFFICE] DOCX→PDF only if Word fails.
+            // Final fill recomputes TOC pages. Word preview sets preserve_toc_pages.
             $response = Http::timeout(90)
                 ->asJson()
                 ->post("{$pythonUrl}/fill", [
@@ -6507,6 +6520,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                         ? (string) ($report->equipment_id ?? '')
                         : '',
                     'import_source'     => (string) ($report->import_source ?? ''),
+                    'preserve_toc_pages' => $preserveTocPages,
                 ]);
 
             if (! $response->successful()) {
@@ -6526,7 +6540,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     is_array($repairedValues) ? $repairedValues : []
                 );
             }
-            if (is_array($tocValues) && $tocValues !== []) {
+            // Preview keeps the page numbers the user typed. Do not write auto TOC digits back.
+            if (! $preserveTocPages && is_array($tocValues) && $tocValues !== []) {
                 $fields = $this->applyTocFieldValues($fields, $tocValues);
             }
 
@@ -7571,6 +7586,16 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
             $originalValue = (string) ($field['value'] ?? '');
             $submittedValue = $originalValue;
+            $isTocPageField = (
+                (str_contains($location, '_toc_') || str_starts_with($location, 'toc_sdt_'))
+                && ! str_ends_with($location, '_title')
+            );
+            if ($isTocPageField && array_key_exists($location, $formFields)) {
+                // Manual TOC page digits must be stored even if a heading rule locked the row.
+                $submittedValue = (string) $formFields[$location];
+                $isLocked = false;
+                $userFilled = true;
+            }
             $userFilled = ($field['user_filled'] ?? false) === true
                 || ($field['draft_editable'] ?? false) === true
                 || $isChoiceField;
@@ -7801,7 +7826,47 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if ($report->docx_import_status !== 'completed') {
             $report->docx_import_status = 'pending';
         }
-        $report->save();
+
+        // A slower autosave must not replace page numbers the user just typed
+        // and sent with Word Preview. Higher draft_seq wins.
+        $incomingSeq = (int) $request->input('draft_seq', 0);
+        $seqKey = 'docx-draft-seq-' . $report->id;
+        $seqLock = null;
+        if ($incomingSeq > 0) {
+            $seqLock = Cache::lock($seqKey . '-lock', 20);
+            try {
+                $seqLock->block(12);
+                $currentSeq = (int) Cache::get($seqKey, 0);
+                if ($currentSeq > $incomingSeq) {
+                    $seqLock->release();
+
+                    return response()->json([
+                        'success'  => true,
+                        'stale'    => true,
+                        'message'  => 'Draft skipped because a newer edit was already saved.',
+                        'saved_at' => (string) data_get($report->data, 'docx_fill_draft_saved_at', ''),
+                    ]);
+                }
+                Cache::put($seqKey, $incomingSeq, now()->addDays(14));
+            } catch (\Throwable $e) {
+                Log::warning('DOCX draft sequence lock skipped', [
+                    'report_id' => $report->id,
+                    'error'     => $e->getMessage(),
+                ]);
+                $seqLock = null;
+            }
+        }
+
+        try {
+            $report->save();
+        } finally {
+            if ($seqLock) {
+                try {
+                    $seqLock->release();
+                } catch (\Throwable $e) {
+                }
+            }
+        }
 
         if (! empty($report->docx_import_path)) {
             $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
@@ -8904,6 +8969,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                         ? (string) ($report->equipment_id ?? '')
                         : '',
                     'import_source'     => (string) ($report->import_source ?? ''),
+                    'preserve_toc_pages' => ($report->import_source ?? '') === 'new_equipment_qualification',
                 ]);
 
                 if ($response->successful()) {
@@ -8991,7 +9057,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     is_array($repairedValues) ? $repairedValues : []
                 );
             }
-            if (is_array($tocValues) && $tocValues !== []) {
+            // NEQ page numbers are typed. Do not replace them with layout digits.
+            $preserveNeqToc = ($report->import_source ?? '') === 'new_equipment_qualification';
+            if (! $preserveNeqToc && is_array($tocValues) && $tocValues !== []) {
                 $updatedFields = $this->applyTocFieldValues($updatedFields, $tocValues);
             }
 
@@ -9329,8 +9397,37 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ], 422);
         }
 
+        // Preview must use the TOC digits on this request even if an older
+        // autosave won the draft race. Overlay request fields[...] on top.
+        $requestFields = $request->input('fields', []);
+        if (is_array($requestFields) && $requestFields !== []) {
+            foreach ($fields as $idx => $field) {
+                if (! is_array($field)) {
+                    continue;
+                }
+                $location = (string) ($field['location'] ?? '');
+                if ($location === '' || ! array_key_exists($location, $requestFields)) {
+                    continue;
+                }
+                $isTocPage = (
+                    (str_contains($location, '_toc_') || str_starts_with($location, 'toc_sdt_'))
+                    && ! str_ends_with($location, '_title')
+                );
+                if (! $isTocPage) {
+                    continue;
+                }
+                $page = trim((string) $requestFields[$location]);
+                if ($page === '' || ! preg_match('/^\d+$/', $page)) {
+                    continue;
+                }
+                $fields[$idx]['value'] = $page;
+                $fields[$idx]['locked'] = false;
+                $fields[$idx]['user_filled'] = true;
+            }
+        }
+
         $fields = $this->applyRequalificationPreApproverNames($report, $fields);
-        $result = $this->regenerateFilledDocxAttachment($report, $fields);
+        $result = $this->regenerateFilledDocxAttachment($report, $fields, true);
         if ($result === null) {
             return response()->json([
                 'success' => false,
@@ -9342,7 +9439,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ? $result['fields']
             : $fields;
 
-        // Sync recomputed TOC digits back into the fill draft so the form matches Word.
+        // Keep the draft the user just saved, including the TOC page numbers they typed.
         $report->docx_import_fields = $syncedFields;
         $report->save();
 
@@ -9367,21 +9464,15 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ], 500);
         }
 
-        $tocForClient = $this->extractTocValuesFromRepaired(
-            collect($syncedFields)
-                ->filter(fn ($f) => is_array($f) && ($f['location'] ?? '') !== '')
-                ->mapWithKeys(fn ($f) => [(string) $f['location'] => (string) ($f['value'] ?? '')])
-                ->all()
-        );
-
         $previewUrl = route('reports.docx-import.preview-word-download', $report);
 
         return response()->json([
             'success'           => true,
-            'message'           => 'Word preview ready (TOC pages from Word/LibreOffice).',
+            'message'           => 'Word preview ready. Table of contents uses the page numbers you entered.',
+            'toc_preserved'     => true,
             'preview_url'       => $previewUrl,
             'download_url'      => $previewUrl, // legacy alias
-            'toc_field_values'  => $tocForClient,
+            'toc_field_values'  => [],
         ]);
     }
 
@@ -12539,6 +12630,13 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 continue;
             }
             $label = trim((string) ($field['label'] ?? ''));
+            $location = (string) ($field['location'] ?? '');
+            if (
+                (str_contains($location, '_toc_') || str_starts_with($location, 'toc_sdt_'))
+                && ! str_ends_with($location, '_title')
+            ) {
+                continue;
+            }
             if (! $this->isLockedSectionHeadingText($label)) {
                 continue;
             }

@@ -5923,9 +5923,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (idx < 0) return '';
         if (title.includes('checked by')) {
             const roles = [
-                'post_checked_by_validation_name',
-                'post_checked_by_production_name',
                 'post_checked_by_engineering_name',
+                'post_checked_by_production_name',
+                'post_checked_by_validation_name',
                 'post_checked_by_quality_name',
             ];
             return roles[idx] || '';
@@ -7282,6 +7282,8 @@ document.addEventListener('DOMContentLoaded', function () {
     let draftTimer = null;
     let draftSaving = false;
     let draftPending = false;
+    let draftSeq = 0;
+    let draftAbort = null;
     let draftDirty = false;
     let finalSubmitting = false;
     let wordPreviewBusy = false;
@@ -7354,6 +7356,24 @@ document.addEventListener('DOMContentLoaded', function () {
             };
             best[el.name] = pickBestFieldValue(best[el.name], entry);
         });
+        // The yellow TOC page boxes are what the user typed. They win over
+        // any cloned or hidden copy of the same fields[...] name.
+        // A line moved onto the next sheet stays visible; a hidden leftover
+        // with the old digit must not replace it.
+        form.querySelectorAll('input.docx-toc-page-input[name^="fields["]').forEach(function (el) {
+            if (!el.name || el.disabled) return;
+            if (el.closest && el.closest('.docx-page-official-header, .docx-page-official-footer')) return;
+            const visible = !!(el.offsetParent || (el.getClientRects && el.getClientRects().length));
+            const prev = best[el.name];
+            if (prev && prev.isToc && prev.isVisible && !visible) return;
+            best[el.name] = {
+                value: el.value || '',
+                isHidden: false,
+                isGhost: false,
+                isToc: true,
+                isVisible: visible,
+            };
+        });
         Object.keys(best).forEach(function (key) {
             cleaned.append(key, best[key].value);
         });
@@ -7414,6 +7434,8 @@ document.addEventListener('DOMContentLoaded', function () {
         let body;
         try {
             body = collectDraftFormData();
+            draftSeq += 1;
+            body.append('draft_seq', String(draftSeq));
         } catch (collectErr) {
             console.warn('DOCX draft FormData collect failed', collectErr);
             draftSaving = false;
@@ -7422,6 +7444,12 @@ document.addEventListener('DOMContentLoaded', function () {
             if (btnSaveDraft) btnSaveDraft.disabled = false;
             return Promise.resolve(false);
         }
+
+        if (draftAbort) {
+            try { draftAbort.abort(); } catch (abortErr) {}
+        }
+        draftAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        const thisAbort = draftAbort;
 
         return fetch(draftSaveUrl, {
             method: 'POST',
@@ -7432,7 +7460,8 @@ document.addEventListener('DOMContentLoaded', function () {
             },
             credentials: 'same-origin',
             body: body,
-            keepalive: !!opts.keepalive,
+            keepalive: !!opts.keepalive && !thisAbort,
+            signal: thisAbort ? thisAbort.signal : undefined,
         })
             .then(function (response) {
                 return response.json().then(function (data) {
@@ -7472,7 +7501,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 );
                 return true;
             })
-            .catch(function () {
+            .catch(function (err) {
+                if (err && err.name === 'AbortError') {
+                    return false;
+                }
                 setDraftStatus('<i class="fas fa-exclamation-triangle mr-1"></i> Draft save failed (network).', 'danger');
                 draftDirty = true;
                 return false;
@@ -7518,10 +7550,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const draftInputTarget = function (t) {
         if (!t) return false;
         if (t.name === 'password') return false;
-        // Programmatic TOC page sync must not start another draft+paginate loop.
-        if (t.classList && (t.classList.contains('docx-toc-page-input') || t.classList.contains('docx-toc-title-input'))) {
-            return false;
-        }
+        // A typed TOC page must be saved. Ignore only the automatic sync pass.
         if (window.docxTocSyncing) return false;
         if (t.closest && !t.closest('#docxFillForm, .docx-preview-wrapper')) return false;
         return true;
@@ -7624,17 +7653,24 @@ document.addEventListener('DOMContentLoaded', function () {
                 } catch (e) {}
             }
 
-            try {
-                if (typeof window.prepareDocxTocForSave === 'function') {
-                    window.docxWithPreservedScroll
-                        ? window.docxWithPreservedScroll(window.prepareDocxTocForSave)
-                        : window.prepareDocxTocForSave();
-                }
-            } catch (tocErr) {}
-
+            // Keep the TOC page numbers the user typed. Do not replace them
+            // with the on-screen auto page estimate before building the preview.
+            // Cancel a draft that was collected before this click so it cannot
+            // write the old page numbers after this preview.
+            if (draftTimer) {
+                clearTimeout(draftTimer);
+                draftTimer = null;
+            }
+            draftPending = false;
+            if (draftAbort) {
+                try { draftAbort.abort(); } catch (abortErr) {}
+                draftAbort = null;
+            }
             let body;
             try {
                 body = collectDraftFormData();
+                draftSeq += 1;
+                body.append('draft_seq', String(draftSeq));
             } catch (collectErr) {
                 if (previewTab) {
                     try { previewTab.close(); } catch (e) {}
@@ -7680,7 +7716,9 @@ document.addEventListener('DOMContentLoaded', function () {
                         setDraftStatus('<i class="fas fa-exclamation-triangle mr-1"></i> ' + msg, 'danger');
                         return;
                     }
-                    applyWordPreviewToc(result.data.toc_field_values || {});
+                    if (!result.data.toc_preserved) {
+                        applyWordPreviewToc(result.data.toc_field_values || {});
+                    }
                     if (previewTab) {
                         previewTab.location.href = previewUrl;
                     } else {
@@ -7688,7 +7726,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         window.open(previewUrl, '_blank', 'noopener');
                     }
                     setDraftStatus(
-                        '<i class="fas fa-file-word mr-1"></i> Word preview opened in a new tab — TOC pages synced.',
+                        '<i class="fas fa-file-word mr-1"></i> Word preview opened. TOC page numbers are the ones you entered.',
                         'ok'
                     );
                 })
@@ -7726,6 +7764,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
     /* ── Table of Contents (TOC) Auto-Sync Page Numbers ── */
     (function () {
+        // NEQ: page numbers already saved in the form must survive a refresh.
+        // Auto-sync only fills an empty box. A typed or stored digit stays.
+        const neqFill = document.getElementById('docxFillForm');
+        if (neqFill && neqFill.classList.contains('docx-import-neq')) {
+            neqFill.querySelectorAll('input.docx-toc-page-input').forEach(function (el) {
+                if (String(el.value || '').trim() !== '') {
+                    el.dataset.tocUserEdited = '1';
+                }
+            });
+        }
+
         function headingTextOf(el) {
             if (!el) return '';
             const prefixEl = el.querySelector && el.querySelector(':scope > .docx-num-prefix, .docx-num-prefix');
@@ -8066,6 +8115,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 function applyPage(node, pageNo, isInput) {
                     if (!pageNo || pageNo < 1) return;
+                    // Keep a page number the user typed. Auto-sync must not put it back.
+                    if (isInput && node && node.dataset && node.dataset.tocUserEdited === '1') return;
                     if (totalPages > 0 && pageNo > totalPages) pageNo = totalPages;
                     if (isInput) {
                         const curVal = parseInt(node.value, 10);
@@ -8123,6 +8174,19 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         window.syncTocPageNumbers = syncTocPageNumbers;
+
+        document.addEventListener('input', function (ev) {
+            const t = ev.target;
+            if (!t || !t.classList || !t.classList.contains('docx-toc-page-input')) return;
+            if (window.docxTocSyncing) return;
+            t.dataset.tocUserEdited = '1';
+        });
+        document.addEventListener('change', function (ev) {
+            const t = ev.target;
+            if (!t || !t.classList || !t.classList.contains('docx-toc-page-input')) return;
+            if (window.docxTocSyncing) return;
+            t.dataset.tocUserEdited = '1';
+        });
 
         /** Lock TOC section titles (1.0 OBJECTIVE…); keep only page numbers editable. */
         function lockTocSectionTitles() {

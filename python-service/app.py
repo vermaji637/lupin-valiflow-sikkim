@@ -81,6 +81,8 @@ class FillRequest(BaseModel):
     equipment_id: Optional[str] = None
     table_ops: Optional[List[dict]] = None
     import_source: Optional[str] = None
+    # Word preview keeps the page numbers typed in the TOC. Final fill still recomputes them.
+    preserve_toc_pages: bool = False
 
     @field_validator("attachment_links", mode="before")
     @classmethod
@@ -416,6 +418,7 @@ async def fill_document(request: FillRequest):
             request.equipment_id or "",
             request.table_ops or [],
             request.import_source or "",
+            preserve_toc_pages=bool(request.preserve_toc_pages),
         )
     except Exception as e:
         raise HTTPException(
