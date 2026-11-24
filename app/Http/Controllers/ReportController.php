@@ -3187,8 +3187,7 @@ public function reportfillAfterPreaAprove(Report $report)
 
     $report->load('template');
 
-    if ($report->template && $report->template->template_type === 'docx'
-        && $report->docx_import_path) {
+    if ($report->docx_import_path || ($report->template && $report->template->template_type === 'docx')) {
         return redirect()->route('reports.docx-import.fill-form', $report);
     }
 

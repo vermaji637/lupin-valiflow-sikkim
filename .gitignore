@@ -23,3 +23,6 @@ yarn-error.log
 valiflow_database_export.sql
 templates_docx.zip
 *.zip
+*.bak
+*.sql
+scratch/

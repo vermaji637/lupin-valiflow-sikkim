@@ -828,22 +828,23 @@ def is_toc_list_table(table) -> bool:
     return content_rows >= 3 and toc_rows >= max(2, int(content_rows * 0.6))
 
 
-# True for Sl.No + Description + section-number table-of-contents tables.
+# True for table-of-contents tables with an explicit Page No column or dot leaders.
 def is_toc_table(table) -> bool:
-    """True for table-of-contents tables (Sl.No + Description + section numbers)."""
+    """True for table-of-contents tables (single-col Att14 list, or explicit Page No column)."""
     if is_toc_list_table(table):
         return True
     if not table.rows:
         return False
+    # If the table has only 2 columns (Sl. No. and Description) with no page column,
+    # it is a regular section table without page numbers.
     texts = " ".join(
         cell.text.strip().lower()
-        for row in table.rows[:4]
+        for row in table.rows[:3]
         for cell in row.cells
     )
-    has_sl = any(x in texts for x in ("sl. no", "sl no", "s. no"))
-    has_desc = "description" in texts
-    has_section = any(x in texts for x in ("1.0", "objective", "2.0", "methodology"))
-    return has_sl and has_desc and has_section
+    has_page_col = any(x in texts for x in ("page no", "page #", "page num", "pg no", "page."))
+    has_leaders = any(re.search(r"[\.\u2026]{4,}\s*\d+", cell.text) for row in table.rows for cell in row.cells)
+    return has_page_col or has_leaders
 
 
 # True when header row contains Prepared By / Checked By / Approved By keywords.
@@ -1268,8 +1269,8 @@ def resolve_sl_no_column_index(col_headers: list, header_row: list) -> int | Non
     return None
 
 
-# Integer serials only (1, 1., 2)). Outline section numbers like 10.0 / 10.1 are NOT Sl. No.
-_SL_NO_VALUE_RE = re.compile(r"^\d+[\.\)]?$")
+# Serials (1, 1., 2), 1.0, 10.0) — allows section-table numbering.
+_SL_NO_VALUE_RE = re.compile(r"^\d+(\.\d+)*[\.\)]?$")
 
 
 def looks_like_sl_no_value(value: str) -> bool:
@@ -1294,8 +1295,24 @@ def cell_has_word_numbering(cell) -> bool:
 # True for footer rows containing "Verified by sign and date".
 def is_verified_by_sign_row(row) -> bool:
     """Footer row: Verified by sign and date."""
-    text = " ".join(c.text.strip().lower() for c in row.cells)
-    return "verified by" in text
+    seen: set[int] = set()
+    parts: list[str] = []
+    for cell in row.cells:
+        tc_id = id(cell._tc)
+        if tc_id in seen:
+            continue
+        seen.add(tc_id)
+        text = (cell.text or "").strip()
+        if text:
+            parts.append(text)
+    if not parts:
+        return False
+    text = re.sub(r"\s+", " ", " ".join(parts)).strip().lower()
+    if "identified" in text:
+        return False
+    if "sop" in text or "changes required" in text:
+        return False
+    return bool(re.search(r"\bverified\s+by\s*(?:\(?[^)]*\b(?:sign|signature|date)\b)", text))
 
 
 def is_safety_by_sign_row(row) -> bool:

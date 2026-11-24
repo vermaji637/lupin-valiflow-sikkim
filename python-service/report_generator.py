@@ -1022,6 +1022,25 @@ def _append_colon_blank_value(para, value: str) -> bool:
     if not value:
         return False
 
+    full_para_text = (para.text or "").strip()
+    norm_val = re.sub(r"[\s:]+", " ", value).strip().lower()
+    norm_para = re.sub(r"[\s:]+", " ", full_para_text).strip().lower()
+
+    # If the value equals the paragraph heading/label, no separate answer was typed.
+    # Preserve the label as-is without appending or duplicating.
+    if norm_val == norm_para:
+        return True
+
+    # If the typed value starts with the heading label (e.g. "Label: typed text"),
+    # strip the duplicated prefix so it does not repeat.
+    for prefix in (full_para_text, full_para_text.rstrip(":").strip()):
+        if prefix and value.lower().startswith(prefix.lower()):
+            val_after = value[len(prefix):].lstrip(" :")
+            if not val_after:
+                return True
+            value = val_after
+            break
+
     runs = list(para.runs)
     for run in reversed(runs):
         text = run.text or ""
@@ -1034,7 +1053,7 @@ def _append_colon_blank_value(para, value: str) -> bool:
             return True
         break
 
-    full = (para.text or "").strip()
+    full = full_para_text
     if not full.endswith(":"):
         return False
 
@@ -1100,6 +1119,10 @@ def _fill_paragraph_blank(para, value: str) -> None:
         return
 
     if PARA_COLON_BLANK_RE.search(full_text.strip()):
+        norm_val = re.sub(r"[\s:]+", " ", value).strip().lower()
+        norm_para = re.sub(r"[\s:]+", " ", full_text).strip().lower()
+        if norm_val == norm_para:
+            return
         if _append_colon_blank_value(para, value):
             return
         new_text = re.sub(r":\s*$", f": {value}", full_text.strip())
@@ -1377,6 +1400,15 @@ def _body_toc_paragraph_elements(doc) -> list:
     those rows toc_sdt_N. Updating only w:sdt paragraphs left the typed
     page numbers in the database and the old digits in the document.
     """
+    try:
+        sdt_paras = doc._element.xpath("//w:sdt//w:p")
+    except Exception:
+        sdt_paras = []
+    # If the document has content-control TOC entries (like Requalification),
+    # body paragraphs are never TOC rows!
+    if len(sdt_paras) >= 4:
+        return []
+
     found = []
     for child in list(doc.element.body):
         if child.tag != qn("w:p"):
@@ -1388,8 +1420,8 @@ def _body_toc_paragraph_elements(doc) -> list:
         title, page = _parse_toc_title_from_element(child)
         if not title or not page:
             continue
-        if style.startswith("toc"):
-            found.append(child)
+        # Page must be 1 to 4 clean digits (not trailing digits of doc codes like SK/IOQ/16-001)
+        if not re.fullmatch(r"\d{1,4}", page.strip()):
             continue
         raw = ""
         for node in child.iter():
@@ -1397,22 +1429,31 @@ def _body_toc_paragraph_elements(doc) -> list:
                 raw += node.text
             elif node.tag == qn("w:tab"):
                 raw += "\t"
-        if "\t" in raw or re.search(r"[\.\u2026]{3,}", raw):
+        raw_upper = raw.upper()
+        # Never match body reference lines
+        if any(bad in raw_upper for bad in ("SK/", "SKM/", "QUALIFICATION DOCUMENT", "REQUALIFICATION DOCUMENT")):
+            continue
+        if style.startswith("toc"):
             found.append(child)
+            continue
+        # Must look like a real TOC entry (e.g. "1.0 OBJECTIVE ... 3" or numbered section)
+        if _para_text_looks_like_toc_entry(raw) or re.match(r"^\d+(\.\d+)*\s+[A-Za-z]", title):
+            if "\t" in raw or re.search(r"[\.\u2026]{3,}", raw):
+                found.append(child)
     return found
 
 
 def _toc_sdt_target_paragraph(doc, index: int):
-    """Paragraph for toc_sdt_{index}: body TOC row first, content-control row otherwise."""
-    body = _body_toc_paragraph_elements(doc)
-    if 0 <= index < len(body):
-        return body[index]
+    """Paragraph for toc_sdt_{index}: content-control row first, body TOC row otherwise."""
     try:
         sdt_paras = doc._element.xpath("//w:sdt//w:p")
     except Exception:
         sdt_paras = []
     if 0 <= index < len(sdt_paras):
         return sdt_paras[index]
+    body = _body_toc_paragraph_elements(doc)
+    if 0 <= index < len(body):
+        return body[index]
     return None
 
 
@@ -1475,6 +1516,58 @@ def _reapply_preserved_toc_pages(doc, field_values) -> int:
     return applied
 
 
+def _clone_table_row_for_growth(table):
+    """Clone the last data row of a table to add a new empty row matching style/widths."""
+    if not table.rows:
+        return None
+    try:
+        from neq_docx_save import _row_is_matrix_section_banner
+    except Exception:
+        _row_is_matrix_section_banner = lambda r: False
+
+    template_tr = table.rows[-1]._tr
+    for row in reversed(table.rows):
+        if not _row_is_matrix_section_banner(row):
+            template_tr = row._tr
+            break
+    new_tr = deepcopy(template_tr)
+    for tc in new_tr.xpath(".//w:tc"):
+        for p in tc.xpath(".//w:p"):
+            for r in list(p.xpath(".//w:r")):
+                p.remove(r)
+    tr_pr = new_tr.find(qn("w:trPr"))
+    if tr_pr is not None:
+        tbl_header = tr_pr.find(qn("w:tblHeader"))
+        if tbl_header is not None:
+            tr_pr.remove(tbl_header)
+    table._tbl.append(new_tr)
+    return new_tr
+
+
+def _ensure_table_rows_for_fields(doc, fields: list[dict]) -> int:
+    """Ensure tables have enough rows to accommodate all table_t_row_r_col_c locations."""
+    max_row_by_table: dict[int, int] = {}
+    for f in (fields or []):
+        loc = str((f or {}).get("location") or "")
+        if loc.startswith("table_") and "_col_" in loc:
+            parts = loc.split("_")
+            try:
+                t = int(parts[1])
+                r = int(parts[3])
+                max_row_by_table[t] = max(max_row_by_table.get(t, -1), r)
+            except (IndexError, ValueError):
+                continue
+
+    added = 0
+    for t_idx, max_r in max_row_by_table.items():
+        if t_idx < len(doc.tables):
+            table = doc.tables[t_idx]
+            while len(table.rows) <= max_r:
+                _clone_table_row_for_growth(table)
+                added += 1
+    return added
+
+
 def _apply_single_field(
     doc,
     location: str,
@@ -1487,8 +1580,23 @@ def _apply_single_field(
     normalized_type = str(field_type or "")
     is_toc_update = location.startswith("toc_sdt_") or (location.startswith("table_") and "_toc_" in location)
     # Locked cells keep the original DOCX text — never overwrite pre-filled content.
+    # Exception: if a table cell in the document is currently empty (e.g. freshly cloned row), allow writing.
     if locked and normalized_type != "table_sl_no" and not is_toc_update:
-        return
+        is_empty_table_cell = False
+        if location.startswith("table_") and "_col_" in location:
+            try:
+                parts_check = location.split("_")
+                t_c = int(parts_check[1])
+                r_c = int(parts_check[3])
+                c_c = int(parts_check[5])
+                if t_c < len(doc.tables) and r_c < len(doc.tables[t_c].rows):
+                    row_c = doc.tables[t_c].rows[r_c]
+                    if c_c < len(row_c.cells) and not (row_c.cells[c_c].text or "").strip():
+                        is_empty_table_cell = True
+            except Exception:
+                pass
+        if not is_empty_table_cell:
+            return
     if value is None or str(value).strip() == "":
         return
 
@@ -1532,44 +1640,75 @@ def _apply_single_field(
 
         elif location.startswith("table") and "_toc_" in location:
             m_tbl_title = re.match(r"^table_(\d+)_row_(\d+)_toc_(\d+)_title$", location)
-            if m_tbl_title:
-                t_i = int(m_tbl_title.group(1))
-                r_i = int(m_tbl_title.group(2))
-                l_i = int(m_tbl_title.group(3))
-                if t_i < len(doc.tables) and r_i < len(doc.tables[t_i].rows):
-                    cell = doc.tables[t_i].rows[r_i].cells[0]
-                    paras = cell.paragraphs
-                    if l_i < len(paras):
-                        p_el = paras[l_i]._element
+            m_tbl_toc = re.match(r"^table_(\d+)_row_(\d+)_toc_(\d+)$", location)
+            if not m_tbl_title and not m_tbl_toc:
+                return
+
+            m = m_tbl_title or m_tbl_toc
+            t_i = int(m.group(1))
+            r_i = int(m.group(2))
+            l_i = int(m.group(3))
+
+            if t_i >= len(doc.tables):
+                return
+            tbl = doc.tables[t_i]
+            if not tbl.rows:
+                return
+
+            # Guard: If table is NOT an Att14-style TOC table, do not treat as _toc_!
+            if not _is_att14_style_toc_table(tbl) and not is_toc_list_table(tbl):
+                return
+
+            target_r = (r_i + l_i) if (r_i + l_i) < len(tbl.rows) else r_i
+            if target_r >= len(tbl.rows):
+                return
+            row = tbl.rows[target_r]
+
+            if len(row.cells) >= 2:
+                # Converted 2-col TOC table:
+                # cells[0] holds title + uniform dot leaders.
+                # cells[1] holds the right-aligned page number.
+                if m_tbl_title:
+                    title_text = str(value).strip()
+                    if title_text:
+                        p_el = _build_att14_toc_title_para(title_text)
+                        tc = row.cells[0]._tc
+                        for p in tc.findall(qn("w:p")):
+                            tc.remove(p)
+                        tc.append(p_el)
+                elif m_tbl_toc:
+                    page_digits = str(value).strip()
+                    if page_digits:
+                        p_el = _build_att14_toc_page_para(page_digits)
+                        tc = row.cells[1]._tc
+                        for p in tc.findall(qn("w:p")):
+                            tc.remove(p)
+                        tc.append(p_el)
+            else:
+                # 1-col unconverted TOC table:
+                cell = row.cells[0]
+                paras = cell.paragraphs
+                target_l = 0 if target_r != r_i else l_i
+                if target_l < len(paras):
+                    p_el = paras[target_l]._element
+                    if m_tbl_title:
                         _title, page = _parse_toc_title_from_element(p_el)
                         if page:
                             _rewrite_toc_paragraph_element(p_el, str(value).strip(), page)
-                return
-
-            m_tbl_toc = re.match(r"^table_(\d+)_row_(\d+)_toc_(\d+)$", location)
-            if m_tbl_toc:
-                t_i = int(m_tbl_toc.group(1))
-                r_i = int(m_tbl_toc.group(2))
-                l_i = int(m_tbl_toc.group(3))
-                if t_i < len(doc.tables) and r_i < len(doc.tables[t_i].rows):
-                    cell = doc.tables[t_i].rows[r_i].cells[0]
-                    paras = cell.paragraphs
-                    if l_i < len(paras):
-                        p_el = paras[l_i]._element
-                        title, _old = _parse_toc_title_from_element(p_el)
-                        if title:
-                            _rewrite_toc_paragraph_element(
-                                p_el, title, str(value).strip()
-                            )
-                        else:
-                            W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-                            for node in reversed(p_el.findall(f".//{{{W_NS}}}t")):
-                                txt = (node.text or "").strip()
-                                if re.search(r"\d+\s*$", txt):
-                                    node.text = re.sub(
-                                        r"\d+\s*$", str(value).strip(), node.text
-                                    )
-                                    break
+                    elif m_tbl_toc:
+                        page_digits = str(value).strip()
+                        W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        updated = False
+                        for node in reversed(p_el.findall(f".//{{{W_NS}}}t")):
+                            txt = (node.text or "").strip()
+                            if re.search(r"\d+\s*$", txt):
+                                node.text = re.sub(r"\d+\s*$", page_digits, node.text or "")
+                                updated = True
+                                break
+                        if not updated:
+                            title, _old = _parse_toc_title_from_element(p_el)
+                            if title:
+                                _rewrite_toc_paragraph_element(p_el, title, page_digits)
             return
 
         elif location.startswith("header_"):
@@ -1583,10 +1722,15 @@ def _apply_single_field(
             t = int(parts[1])
             r = int(parts[3])
             c = int(parts[5])
+            if t >= len(doc.tables):
+                return
+            table = doc.tables[t]
+            while r >= len(table.rows):
+                _clone_table_row_for_growth(table)
             # Never push user/data values into section banners or repeated header rows.
             if _is_structural_table_row(doc, t, r):
                 return
-            row = doc.tables[t].rows[r]
+            row = table.rows[r]
             if c >= len(row.cells):
                 return
             cell = row.cells[c]
@@ -1675,33 +1819,56 @@ def _apply_single_field(
                 return
             p = int(parts[1])
             para = _body_paragraph(doc, p)
-            if para is not None and _fill_neq_heading_value_into_box(para, value):
+            if para is None:
                 return
-            if para is not None:
-                val_lower = str(value).strip().lower()
-                if field_type == "paragraph_radio" and val_lower in ("yes", "no"):
-                    _fill_paragraph_yes_no(para, value)
-                elif field_type == "paragraph_checkbox" and val_lower in (
-                    "1",
-                    "yes",
-                    "true",
-                    "on",
-                ):
-                    _fill_paragraph_checkbox(para)
-                elif field_type == "paragraph_content":
-                    font_name = None
-                    font_size = None
-                    if para.runs:
-                        font_name = para.runs[0].font.name
-                        font_size = para.runs[0].font.size
-                    _clear_text_runs(para)
-                    new_run = para.add_run(str(value))
-                    if font_name:
-                        new_run.font.name = font_name
-                    if font_size:
-                        new_run.font.size = font_size
-                else:
-                    _fill_paragraph_blank(para, value)
+
+            para_text_raw = (para.text or "").strip()
+            # NEVER overwrite a section heading paragraph (OBJECTIVE, SCOPE, RESPONSIBILITY, etc.)
+            try:
+                from doc_parser import is_section_heading_paragraph
+                is_heading = is_section_heading_paragraph(para_text_raw)
+            except Exception:
+                is_heading = False
+            if is_heading or _is_tight_gap_section_heading(para_text_raw):
+                return
+
+            if _fill_neq_heading_value_into_box(para, value):
+                return
+
+            val_lower = str(value).strip().lower()
+            if field_type == "paragraph_radio" and val_lower in ("yes", "no"):
+                _fill_paragraph_yes_no(para, value)
+            elif field_type == "paragraph_checkbox" and val_lower in (
+                "1",
+                "yes",
+                "true",
+                "on",
+            ):
+                _fill_paragraph_checkbox(para)
+            elif field_type == "paragraph_content":
+                if locked:
+                    return
+                # If target paragraph already has this exact text, nothing to do
+                if para_text_raw == str(value).strip():
+                    return
+                # Do not write if value is identical to some other paragraph in the doc
+                # (which indicates a shifted index from an older/different template)
+                if para_text_raw and any(p_other.text.strip() == str(value).strip() for p_other in doc.paragraphs):
+                    return
+
+                font_name = None
+                font_size = None
+                if para.runs:
+                    font_name = para.runs[0].font.name
+                    font_size = para.runs[0].font.size
+                _clear_text_runs(para)
+                new_run = para.add_run(str(value))
+                if font_name:
+                    new_run.font.name = font_name
+                if font_size:
+                    new_run.font.size = font_size
+            else:
+                _fill_paragraph_blank(para, value)
 
     except (IndexError, ValueError):
         return
@@ -2931,6 +3098,8 @@ def _fill_docx_inner(
         from neq_docx_save import _apply_table_ops
         _apply_table_ops(doc, table_ops)
 
+    _ensure_table_rows_for_fields(doc, body_fields)
+
     # Fill multi-blank paragraphs from last blank to first so match indices stay stable.
     body_fields.sort(key=lambda f: _blank_sort_key(f) if "_blank_" in f.get("location", "") else (10**9, 0))
 
@@ -3686,10 +3855,19 @@ def _parse_toc_title_from_element(p_el) -> tuple[str, str]:
     # Prefer split on tab (title | page).
     if "\t" in raw:
         left, right = raw.rsplit("\t", 1)
-        page = re.sub(r"\D", "", right)
-        title = re.sub(r"[\.\u2026\u22ef\t_:]+$", "", left).strip()
-        title = re.sub(r"^(\d+\.\d+)\s*([A-Za-z])", r"\1 \2", title)
-        return re.sub(r"\s+", " ", title), page
+        if not re.search(r"[A-Za-z]", right):
+            page = re.sub(r"\D", "", right)
+            title = re.sub(r"[\.\u2026\u22ef\t_:]+$", "", left).strip()
+            title = re.sub(r"^(\d+\.\d+)\s*([A-Za-z])", r"\1 \2", title)
+            return re.sub(r"\s+", " ", title), page
+        else:
+            m = re.search(r"^(.*?)[ \t\.\u2026\u22ef]+(\d+)\s*$", right)
+            if m:
+                title = f"{left} {m.group(1)}"
+                page = m.group(2)
+                title = re.sub(r"[\.\u2026\u22ef\t_:]+$", "", title).strip()
+                title = re.sub(r"^(\d+\.\d+)\s*([A-Za-z])", r"\1 \2", title)
+                return re.sub(r"\s+", " ", title), page
     m = re.search(r"^(.*?)[ \t\.\u2026\u22ef]+(\d+)\s*$", raw)
     if not m:
         m = re.search(r"^(.*?)(\d+)\s*$", raw)
@@ -3963,9 +4141,10 @@ def _iter_toc_paragraph_elements(doc):
         sdt_paras = []
     for p_el in sdt_paras:
         yield p_el
-    for para in doc.paragraphs:
-        if _is_toc_body_paragraph(para):
-            yield para._element
+    if not sdt_paras:
+        for para in doc.paragraphs:
+            if _is_toc_body_paragraph(para):
+                yield para._element
     for table in doc.tables:
         if not table.rows:
             continue
@@ -4227,6 +4406,10 @@ def _is_att14_style_toc_table(table) -> bool:
     if is_toc_list_table(table):
         return True
     if not table.rows or len(table.columns) != 2:
+        return False
+    # If the header has 'description' or 'sl. no', this is a section table, NOT Att14 TOC!
+    header_text = " ".join(c.text.strip().lower() for c in table.rows[0].cells)
+    if "description" in header_text or "sl. no" in header_text or "sl no" in header_text:
         return False
     hits = 0
     for row in table.rows:
@@ -5088,6 +5271,30 @@ def _expand_clipping_textboxes(doc) -> int:
     return changed
 
 
+def _dedupe_all_colon_paragraphs(doc) -> None:
+    """
+    Collapse duplicated colon labels in document paragraphs, e.g.
+    'Verification with the current P & ID: Verification with the current P & ID:'
+    → 'Verification with the current P & ID:'
+    """
+    try:
+        from app import dedupe_colon_label
+    except Exception:
+        return
+    for para in doc.paragraphs:
+        txt = (para.text or "").strip()
+        if ":" in txt:
+            cleaned = dedupe_colon_label(txt)
+            if cleaned != txt:
+                runs = list(para.runs)
+                if runs:
+                    runs[0].text = cleaned
+                    for r in runs[1:]:
+                        r.text = ""
+                else:
+                    para.text = cleaned
+
+
 def _normalize_filled_docx_layout(doc, profile: str = "legacy") -> None:
     """Post-fill layout pass so Word/LibreOffice PDF match readable formatting.
 
@@ -5095,6 +5302,7 @@ def _normalize_filled_docx_layout(doc, profile: str = "legacy") -> None:
     profile='neq' keeps the same baseline; both convert header/footer pct→dxa
     so requal/reval letterheads stay full-width in LibreOffice PDF (same as NEQ).
     """
+    _dedupe_all_colon_paragraphs(doc)
     _fix_broken_hanging_indents(doc)
     _defloat_body_tables(doc)
     # Letterhead tblW type=pct is drawn narrow by LibreOffice; always use grid dxa.
@@ -5382,6 +5590,19 @@ def _is_tight_gap_section_heading(text: str) -> bool:
         "ABBREVIATIONS",
         "REVISION HISTORY",
         "POST APPROVAL",
+        "POST-APPROVAL",
+        "POST-APPROVAL SIGNATURE",
+        "PREVENTIVE MAINTENANCE DETAILS",
+        "CALIBRATIONS OF INSTRUMENTS",
+        "CALIBRATION OF INSTRUMENTS",
+        "VERIFICATION WITH THE CURRENT P & ID",
+        "VERIFICATION WITH CURRENT P & ID",
+        "ANY OTHER SPECIFIC TESTS",
+        "ANY OTHER SPECIFIC TEST",
+        "HISTORY OF EQUIPMENT / SYSTEM",
+        "HISTORY OF EQUIPMENT /SYSTEM",
+        "REVIEW OF CHANGE CONTROLS",
+        "REVIEW OF CHANGE CONTROLS RELATED TO THE EQUIPMENT / SYSTEM",
     }
     if t in bare:
         return True
@@ -5390,9 +5611,13 @@ def _is_tight_gap_section_heading(text: str) -> bool:
         r"EQUIPMENT|PRE-REQUISITE|APPLICABLE STANDARD|PRE-QUALIFICATION|"
         r"REQUALIFICATION|DEVIATION|METHODOLOGY|OBSERVATION|SUMMARY|"
         r"LIST OF ATTACH|REFERENCE|ABBREVIATION|REVISION HISTORY|POST APPROVAL|"
-        r"INSTALLATION CHECKS|OPERATIONAL CHECKS|TRAINING|ATTACHMENTS)",
+        r"INSTALLATION CHECKS|OPERATIONAL CHECKS|TRAINING|ATTACHMENTS|"
+        r"PREVENTIVE MAINTENANCE|CALIBRATION|VERIFICATION|ANY OTHER SPECIFIC|"
+        r"HISTORY OF EQUIPMENT|REVIEW OF CHANGE CONTROLS)",
         t,
     ):
+        return True
+    if re.match(r"^\d+(\.\d+)+\.?\s+[A-Za-z]", t):
         return True
     return False
 
@@ -5613,12 +5838,16 @@ def _trim_empty_paras_before_attachment_heading(doc, *, keep: int = 2) -> int:
         for idx, el in enumerate(children):
             if el.tag != qn("w:p"):
                 continue
-            if not _is_tight_gap_section_heading(_para_plain_text(el)):
+            is_heading = _is_tight_gap_section_heading(_para_plain_text(el))
+            empty_idxs, prev_j = _collect_empty_idxs_before(children, idx)
+            precedes_table = prev_j >= 0 and children[prev_j].tag == qn("w:tbl")
+            local_keep = 1 if precedes_table else keep
+            # Trim if target heading OR if any element is preceded by an excessive stack (> 2) of empty lines
+            if not is_heading and len(empty_idxs) <= 2:
                 continue
-            empty_idxs, _prev_j = _collect_empty_idxs_before(children, idx)
-            if len(empty_idxs) <= keep:
+            if len(empty_idxs) <= local_keep:
                 continue
-            for drop_i in sorted(empty_idxs[keep:]):
+            for drop_i in sorted(empty_idxs[local_keep:]):
                 node = children[drop_i]
                 parent = node.getparent()
                 if parent is not None:
@@ -5635,8 +5864,7 @@ def _trim_empty_paras_before_attachment_heading(doc, *, keep: int = 2) -> int:
     for el in list(children):
         if el.tag != qn("w:p"):
             continue
-        if not _is_tight_gap_section_heading(_para_plain_text(el)):
-            continue
+        is_heading = _is_tight_gap_section_heading(_para_plain_text(el))
         children = list(body)
         try:
             idx = children.index(el)
@@ -5645,6 +5873,8 @@ def _trim_empty_paras_before_attachment_heading(doc, *, keep: int = 2) -> int:
         empty_idxs, prev_j = _collect_empty_idxs_before(children, idx)
         precedes_table = prev_j >= 0 and children[prev_j].tag == qn("w:tbl")
         local_keep = 1 if precedes_table else keep
+        if not is_heading and len(empty_idxs) <= 2:
+            continue
         if len(empty_idxs) > local_keep:
             for drop_i in sorted(empty_idxs[local_keep:]):
                 node = children[drop_i]

@@ -36,6 +36,7 @@ from doc_parser import (
     is_toc_list_table,
     is_toc_entry_text,
     is_equipment_section_banner_row,
+    is_approval_page_table,
     is_verified_by_sign_row,
     is_safety_by_sign_row,
     is_repeated_column_header_row,
@@ -1844,7 +1845,10 @@ def _parse_toc_line_title_page(line: str) -> tuple[str, str]:
         return m.group(1).strip(), m.group(2).strip()
     m2 = re.search(r"^(.*?)[ \t\.\u2026\u22ef]+\s*(\d+)\s*$", line)
     if m2:
-        return m2.group(1).strip(), m2.group(2).strip()
+        title_cand = m2.group(1).strip()
+        # Must have letters in the title (e.g. "1.0 OBJECTIVE", not a bare number like "1.0")
+        if re.search(r"[A-Za-z]", title_cand):
+            return title_cand, m2.group(2).strip()
     # Stuck page: "1.0 OBJECTIVE2" / "OBJECTIVE2" (tab lost in HTML/plain extract)
     m3 = re.match(r"^(\d+(?:\.\d+)*\s+.+?)(\d+)\s*$", line)
     if m3 and not re.search(r"\d$", m3.group(1).rstrip()):
@@ -1971,6 +1975,53 @@ def _is_word_toc_body_line(p_element, para_text: str = "") -> bool:
         return True
     raw = para_text or ""
     return ("\t" in raw) or bool(re.search(r"[\.\u2026]{3,}", raw)) or is_toc_entry_text(raw)
+
+
+def _is_followed_by_toc_card(child) -> bool:
+    """
+    True if this element is immediately followed by Word TOC body lines
+    or an Att14-style TOC list table that opens its own TOC card.
+    """
+    curr = child.getnext()
+    while curr is not None:
+        tag = curr.tag.split("}")[-1] if "}" in curr.tag else curr.tag
+        if tag == "p":
+            txt = _para_text_from_element(curr, exclude_textboxes=True)
+            if not txt.strip():
+                curr = curr.getnext()
+                continue
+            return _is_word_toc_body_line(curr, txt)
+        elif tag == "tbl":
+            try:
+                cells_text = "".join(curr.itertext()).strip()
+                lines = _split_toc_entry_lines(cells_text)
+                if len(lines) >= 3 and any(_parse_toc_line_title_page(ln)[0] for ln in lines):
+                    return True
+            except Exception:
+                pass
+            return False
+        else:
+            curr = curr.getnext()
+    return False
+
+
+def _is_table_of_contents_grid(table) -> bool:
+    """
+    True for a 2-column Table of Contents table (e.g. Sl. No. | Description)
+    where cells contain section titles like Objective, Methodology, etc.
+    """
+    if not table.rows or len(table.rows) < 2:
+        return False
+    hdr_cells = [c.text.strip().lower() for c in table.rows[0].cells]
+    if len(hdr_cells) != 2:
+        return False
+    col0_hdr, col1_hdr = hdr_cells[0], hdr_cells[1]
+    is_col0_sl = bool(re.search(r"\b(s|sl|sr)\.?\s*no\b", col0_hdr))
+    is_col1_desc = "description" in col1_hdr
+    if not (is_col0_sl and is_col1_desc):
+        return False
+    sample_text = " ".join((r.cells[1].text if len(r.cells) > 1 else "") for r in table.rows[1:8]).lower()
+    return any(k in sample_text for k in ("objective", "methodology", "observation", "report approval"))
 
 
 def _parse_toc_entry_element(p_element) -> tuple[str, str]:
@@ -2808,7 +2859,7 @@ def _render_paragraph(
         if _is_readonly_mode(mode) or mode != "pre_approval" or _is_field_locked(field):
             h_cls = " docx-heading-target" if (val and (is_section_heading_paragraph(val_prefixed) or is_locked_section_title(val_prefixed))) else ""
             h_attr = f' data-heading-text="{_escape_html(val_prefixed.upper().strip())}"' if h_cls else ""
-            h_style = ' style="font-weight:700;"' if h_cls else ""
+            h_style = ' style="font-weight:700;"' if h_cls else (' style="min-height: 48px; margin: 8px 0;"' if not val else "")
             h_pref = _num_prefix_span(val_prefix, is_bullet, bold=bool(h_cls))
             return f'<p class="docx-para{h_cls}"{h_style}{h_attr}>{h_pref}{_escape_html(val)}</p>'
         else:
@@ -3102,8 +3153,8 @@ def _table_sl_no_col_index(table) -> int | None:
     return resolve_sl_no_column_index(col_headers, header_row)
 
 
-# Integer serials only — Word outline "10.0" must not be treated as Sl. No.
-_SL_NO_VALUE_RE = re.compile(r"^\d+[\.\)]?$")
+# Serials (1, 1., 2), 1.0, 10.0) — allows section-table numbering.
+_SL_NO_VALUE_RE = re.compile(r"^\d+(\.\d+)*[\.\)]?$")
 
 
 def _looks_like_sl_no_value(value: str) -> bool:
@@ -3387,6 +3438,8 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
     readonly = _is_readonly_mode(mode)
     sl_no_col = _table_sl_no_col_index(table)
     toc_table = is_toc_table(table) or is_toc_list_table(table)
+    is_toc_grid = _is_table_of_contents_grid(table)
+    is_approval_table = is_approval_page_table(table)
     col_headers = get_table_column_headers(table, is_report_approval_block_table(table))
     # Track vertically merged cells so Sr. No. (and other merges) render once with rowspan.
     # Hold the tc element objects themselves — id() integers are unsafe across rows (GC reuse).
@@ -3499,7 +3552,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
 
         cells = row.cells
         # Att07 / Att3: "Verified by sign and date :" is an e-sign line, not a section banner.
-        if is_verified_by_sign_row(row):
+        if r_idx > 0 and not is_approval_table and is_verified_by_sign_row(row):
             colspan = len(cells) or 1
             colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
             loc = f"table_{t_idx}_row_{r_idx}_col_0"
@@ -3546,7 +3599,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
             html.append("</tr>")
             continue
         # Att10: "Safety Checks By (Sign./Date)" is an e-sign line, not a section banner.
-        if is_safety_by_sign_row(row):
+        if r_idx > 0 and not is_approval_table and is_safety_by_sign_row(row):
             colspan = len(cells) or 1
             colspan_attr = f' colspan="{colspan}"' if colspan > 1 else ""
             loc = f"table_{t_idx}_row_{r_idx}_col_0"
@@ -3772,6 +3825,7 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 and r_idx > 0
                 and not _is_readonly_mode(mode)
                 and mode in ("pre_approval", "edit")
+                and not is_toc_grid
             ):
                 _hdr = (
                     col_headers[col_idx].strip().lower()
@@ -3797,6 +3851,20 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                 ):
                     field = dict(field)
                     field["locked"] = False
+
+            if is_toc_grid and col_idx == 1 and r_idx > 0:
+                if field:
+                    field = dict(field)
+                    field["locked"] = True
+                else:
+                    field = {
+                        "location": f"table_{t_idx}_row_{r_idx}_col_1",
+                        "label": "Description",
+                        "value": text,
+                        "locked": True,
+                        "type": "table_multicol",
+                        "widget": "text",
+                    }
 
             # Sl. No. / Sr. No.: editable during fill / pre-approval.
             word_has_serial = bool((text or "").strip() and _looks_like_sl_no_value(text))
@@ -3978,8 +4046,8 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                     if table.rows and len(table.rows[0].cells) > 1
                     else ""
                 )
-                # DESCRIPTION stays editable during fill; locked only in readonly.
-                if readonly:
+                # DESCRIPTION stays editable during fill; locked only in readonly or TOC grid.
+                if readonly or is_toc_grid:
                     display = _render_readonly_span(col1_val, None, col1_loc)
                     html.append(
                         _readonly_td(
@@ -4158,9 +4226,15 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
                     )
                 else:
                     locked_html = "<br>".join(_escape_html(ln) for ln in locked_val.split("\n"))
+                    loc_attr = field.get("location") or ""
+                    hidden_inp = (
+                        f'<input type="hidden" name="fields[{_escape_html(loc_attr)}]" value="{_escape_html(locked_val)}">'
+                        if loc_attr
+                        else ""
+                    )
                     html.append(
                         f'<td class="docx-cell locked" style="{style}{locked_bg}"{rowspan_attr}{colspan_attr}>'
-                        f"{locked_html}</td>"
+                        f"{locked_html}{hidden_inp}</td>"
                     )
             elif not readonly and r_idx > 0 and not is_header:
                 if mode != "pre_approval" and text.strip() != "":
@@ -4590,7 +4664,7 @@ def build_fill_html(
                 r"REVIEW\s+OF\s+CHANGE\s+CONTROLS|"
                 r"LIST\s+OF\s+ATTACHMENT|"
                 r"DEVIATIONS?\s*\(IF ANY\)|SUMMARY\s*&\s*CONCLUSION|"
-                r"REFERENCES|ABBREVIATIONS|REVISION\s+HISTORY|POST-APPROVAL"
+                r"REVISION\s+HISTORY|POST-APPROVAL"
                 r")\b",
                 combined,
             )
@@ -4719,6 +4793,15 @@ def build_fill_html(
             if para_index is None:
                 para_text = _para_text_from_element(child)
                 if para_text and _is_toc_title_text(para_text):
+                    if _is_followed_by_toc_card(child):
+                        continue
+                    if has_content_on_page and _element_has_page_break(child, hard_only=hard_page_breaks_only):
+                        _force_new_page()
+                    html_parts.append(
+                        '<p class="docx-para docx-heading-target" style="font-weight:700; text-align:center; font-size:14px; margin: 16px 0 10px 0; text-transform:uppercase; letter-spacing:0.5px;" '
+                        'data-heading-text="TABLE OF CONTENTS">TABLE OF CONTENTS</p>'
+                    )
+                    has_content_on_page = True
                     continue
                 if _is_word_toc_body_line(child, para_text or ""):
                     if _emit_body_toc_line(child, para_text or ""):
@@ -4757,6 +4840,15 @@ def build_fill_html(
                 para_index, _para_text_from_element(child, exclude_textboxes=True)
             )
             if _peek_text and _is_toc_title_text(_peek_text):
+                if _is_followed_by_toc_card(child):
+                    continue
+                if has_content_on_page and _element_has_page_break(child, hard_only=hard_page_breaks_only):
+                    _force_new_page()
+                html_parts.append(
+                    '<p class="docx-para docx-heading-target" style="font-weight:700; text-align:center; font-size:14px; margin: 16px 0 10px 0; text-transform:uppercase; letter-spacing:0.5px;" '
+                    'data-heading-text="TABLE OF CONTENTS">TABLE OF CONTENTS</p>'
+                )
+                has_content_on_page = True
                 continue
             if _is_word_toc_body_line(child, _peek_text or ""):
                 # Still advance list counters for ghost numPr on TOC rows.

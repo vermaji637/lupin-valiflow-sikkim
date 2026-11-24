@@ -3246,16 +3246,22 @@ class DocxImportController extends Controller
      */
     private function isHeaderEchoFieldValue(array $field): bool
     {
+        $type = strtolower(trim((string) ($field['type'] ?? '')));
+        if ($type === 'table_2col_label') {
+            return false;
+        }
+
         $label = strtolower(trim(preg_replace('/\s+/u', ' ', (string) ($field['label'] ?? ''))));
         $value = strtolower(trim(preg_replace('/\s+/u', ' ', (string) ($field['value'] ?? ''))));
         if ($label === '' || $value === '') {
             return false;
         }
-        if ($value === $label) {
+        $knownHeaders = ['sl. no.', 'sl no', 'sr. no.', 'sr no', 'list of attachment', 'list of attachments', 'attachment no.', 'attachment no'];
+        if (in_array($label, $knownHeaders, true) && ($value === $label || preg_match('/^\d+\.?\s*' . preg_quote($label, '/') . '$/i', (string) ($field['value'] ?? '')))) {
             return true;
         }
-        // e.g. "1. Sl. No."
-        return (bool) preg_match('/^\d+\.?\s*' . preg_quote($label, '/') . '$/i', (string) ($field['value'] ?? ''));
+
+        return false;
     }
 
     /**
@@ -3272,6 +3278,10 @@ class DocxImportController extends Controller
         }
         $type = strtolower(trim((string) ($field['type'] ?? '')));
         if ($type === 'table_sl_no') {
+            return true;
+        }
+        // Template static paragraph content fields that are locked must never overwrite document template paragraphs.
+        if ($type === 'paragraph_content' && ! empty($field['locked'])) {
             return true;
         }
         if ($this->isLockedSectionHeadingText((string) ($field['label'] ?? ''))) {
@@ -4995,8 +5005,13 @@ PY;
             $byTable[$m[1]][(int) $m[2]][(int) $m[3]] = $idx;
         }
 
+        $approvalTables = $this->approvalPageTableNumbersFromNameSignatureDate($fields);
+
         $out = [];
         foreach ($byTable as $tableNum => $rows) {
+            if (isset($approvalTables[(string) $tableNum])) {
+                continue;
+            }
             if ($this->neqApprovalTableTitle($fields, $rows) !== '') {
                 $out[(string) $tableNum] = true;
             }
@@ -5026,7 +5041,12 @@ PY;
             $byTable[$m[1]][(int) $m[2]][(int) $m[3]] = $idx;
         }
 
+        $approvalTables = $this->approvalPageTableNumbersFromNameSignatureDate($fields);
+
         foreach ($byTable as $tableNum => $rows) {
+            if (isset($approvalTables[(string) $tableNum])) {
+                continue;
+            }
             $title = $this->neqApprovalTableTitle($fields, $rows);
             if ($title === '') {
                 continue;
@@ -5149,7 +5169,25 @@ PY;
             }
         }
 
-        // Department tables often omit row-0 headers from fillable fields — infer by size.
+        // Department tables often omit row-0 headers from fillable fields — infer by size only if signature/date fields exist.
+        $hasSigDate = false;
+        foreach ($rows as $cols) {
+            foreach ($cols as $idx) {
+                if (! is_array($fields[$idx] ?? null)) {
+                    continue;
+                }
+                $lbl = strtolower(trim((string) ($fields[$idx]['label'] ?? '')));
+                $t = strtolower(trim((string) ($fields[$idx]['type'] ?? '')));
+                if (str_contains($lbl, 'signature') || str_contains($lbl, 'sign') || $lbl === 'date' || str_starts_with($t, 'approval_stamp_')) {
+                    $hasSigDate = true;
+                    break 2;
+                }
+            }
+        }
+        if (! $hasSigDate) {
+            return '';
+        }
+
         $nameRows = 0;
         foreach ($rows as $rowNum => $_cols) {
             if ($rowNum >= 1) {
@@ -6505,6 +6543,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             : 'report.docx';
 
         $attachmentLinks = $this->buildAttachmentLinksMap($report, []);
+        $tableOps = $this->normalizeTableOpsPayload($report->data['table_ops'] ?? []);
 
         try {
             // [API] POST {PYTHON_NLP_URL}/fill  (default http://127.0.0.1:8001/fill)
@@ -6516,6 +6555,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     'original_filename' => $originalFilename,
                     'fields'            => $fieldsToPython,
                     'attachment_links'  => $this->formatAttachmentLinksForPython($attachmentLinks),
+                    'table_ops'         => $tableOps,
                     'equipment_id'      => in_array($report->import_source, ['requalification', 'revalidation'], true)
                         ? (string) ($report->equipment_id ?? '')
                         : '',
@@ -6860,6 +6900,13 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 )
             )
         );
+        $fields = $this->stripStaleTableTocFields($fields);
+        $fields = $this->lockTocTableDescriptionFields($fields);
+        if (count($fields) !== count($report->docx_import_fields ?? [])) {
+            $report->docx_import_fields = $fields;
+            $report->save();
+        }
+
         // Att6: restore VERSION "0.2" (etc.) from Word when stored value was "." / cleared.
         if (($report->import_source ?? '') === 'new_equipment_qualification') {
             $fields = $this->restoreAtt6LetterheadFromWordIfNeeded($report, $fields);
@@ -7821,6 +7868,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
         }
 
+        $updatedFields = $this->stripStaleTableTocFields($updatedFields);
+        $updatedFields = $this->lockTocTableDescriptionFields($updatedFields);
         $report->docx_import_fields = $updatedFields;
         $report->data = $data;
         if ($report->docx_import_status !== 'completed') {
@@ -8926,6 +8975,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                     $fieldsToPython[$idx]['locked'] = false;
                 }
             }
+            $fieldsToPython = $this->stripStaleTableTocFields($fieldsToPython);
+            $updatedFields = $this->stripStaleTableTocFields($updatedFields);
+        $updatedFields = $this->lockTocTableDescriptionFields($updatedFields);
 
             Log::info('Fields being sent to Python', [
                 'count'  => count($fieldsToPython),
@@ -9339,10 +9391,11 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     {
         $this->extendPythonExecutionTime();
 
-        if (! $this->isNeqImportSource($report->import_source ?? null)) {
+        $source = strtolower(trim((string) ($report->import_source ?? '')));
+        if (! in_array($source, ['new_equipment_qualification', 'requalification', 'revalidation'], true)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Word preview is only available for New Equipment Qualification.',
+                'message' => 'Word preview is not available for this protocol type.',
             ], 404);
         }
 
@@ -9390,6 +9443,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         $report->refresh();
         $fields = is_array($report->docx_import_fields) ? $report->docx_import_fields : [];
+        $fields = $this->stripStaleTableTocFields($fields);
+        $fields = $this->lockTocTableDescriptionFields($fields);
         if ($fields === []) {
             return response()->json([
                 'success' => false,
@@ -9426,6 +9481,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
         }
 
+        if ($this->requalificationPreApprovalIsComplete($report)) {
+            $stampedFields = $this->fieldsWithApprovalStamps($report);
+            if ($stampedFields !== []) {
+                $fields = $this->mergeDocxImportFieldsPreservingBaseline($fields, $stampedFields, $report->id);
+            }
+        }
         $fields = $this->applyRequalificationPreApproverNames($report, $fields);
         $result = $this->regenerateFilledDocxAttachment($report, $fields, true);
         if ($result === null) {
@@ -9484,7 +9545,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     {
         $this->extendPythonExecutionTime();
 
-        if (! $this->isNeqImportSource($report->import_source ?? null)) {
+        $source = strtolower(trim((string) ($report->import_source ?? '')));
+        if (! in_array($source, ['new_equipment_qualification', 'requalification', 'revalidation'], true)) {
             abort(404);
         }
 
@@ -10034,8 +10096,96 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         }
 
         $normalized = $this->lockPrefilledImportFields($normalized);
+        $normalized = $this->stripStaleTableTocFields($normalized);
+        $normalized = $this->lockTocTableDescriptionFields($normalized);
 
         return array_values($normalized);
+    }
+
+    /**
+     * Lock the Description column (col 1) of Table of Contents tables (e.g. Sl. No. | Description)
+     * so section titles (Objective, Methodology, etc.) remain fixed and cannot be edited.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    public function lockTocTableDescriptionFields(array $fields): array
+    {
+        $tableHasTocKeywords = [];
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if (preg_match('/^table_(\d+)_row_(\d+)_col_(\d+)$/', $loc, $m) !== 1) {
+                continue;
+            }
+            $tIdx = (int) $m[1];
+            $cIdx = (int) $m[3];
+            $val = strtolower(trim((string) ($field['value'] ?? ($field['label'] ?? ''))));
+
+            if ($cIdx === 1 && in_array($val, ['objective', 'methodology', 'observation / results and evaluation', 'report approval'], true)) {
+                $tableHasTocKeywords[$tIdx] = true;
+            }
+        }
+
+        if (empty($tableHasTocKeywords)) {
+            return $fields;
+        }
+
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if (preg_match('/^table_(\d+)_row_[1-9]\d*_col_1$/', $loc, $m) === 1) {
+                $tIdx = (int) $m[1];
+                if (isset($tableHasTocKeywords[$tIdx])) {
+                    $fields[$idx]['locked'] = true;
+                    $fields[$idx]['draft_editable'] = false;
+                    $fields[$idx]['user_filled'] = false;
+                }
+            }
+        }
+
+        return $fields;
+    }
+
+    /**
+     * Remove spurious table_X_row_Y_toc_Z fields if the table has regular table_X_row_Y_col_Z fields.
+     * Prevents regular 2-column section tables (Sl. No. + Description) from being corrupted into TOC page lines.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @return array<int, array<string, mixed>>
+     */
+    public function stripStaleTableTocFields(array $fields): array
+    {
+        $tablesWithColFields = [];
+        foreach ($fields as $f) {
+            if (!is_array($f)) {
+                continue;
+            }
+            $loc = (string) ($f['location'] ?? '');
+            if (preg_match('/^table_(\d+)_row_\d+_col_\d+/', $loc, $m)) {
+                $tablesWithColFields[(int) $m[1]] = true;
+            }
+        }
+        if (empty($tablesWithColFields)) {
+            return $fields;
+        }
+
+        return array_values(array_filter($fields, function ($f) use ($tablesWithColFields) {
+            if (!is_array($f)) {
+                return false;
+            }
+            $loc = (string) ($f['location'] ?? '');
+            if (preg_match('/^table_(\d+)_row_\d+_toc_/', $loc, $m)) {
+                if (isset($tablesWithColFields[(int) $m[1]])) {
+                    return false;
+                }
+            }
+            return true;
+        }));
     }
 
     /**
@@ -10740,6 +10890,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     {
         $fields = $this->lockConnectedAccessoriesDescriptions($fields);
         $fields = $this->lockRequalificationTemplateFilledColumns($fields);
+        $fields = $this->lockTocTableDescriptionFields($fields);
 
         $lockedCount = 0;
         $unlockedCount = 0;

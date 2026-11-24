@@ -242,8 +242,15 @@
 
 {{-- ================= PRE APPROVED MESSAGE ================= --}}
     @if($isPreApproved)
-        <div class="alert alert-success">
-            ✅ This Protocol is Pre Approved
+        <div class="alert alert-success d-flex justify-content-between align-items-center flex-wrap">
+            <div>
+                <strong><i class="fas fa-check-circle mr-1"></i> This Protocol is Pre Approved.</strong> Protocol structure is locked. You can now fill observed execution values and submit for Post Approval.
+            </div>
+            @if($isCreator && !empty($report->docx_import_path))
+                <a href="{{ route('reports.docx-import.fill-form', $report) }}" class="btn btn-success shadow-sm font-weight-bold ml-auto">
+                    <i class="fas fa-edit mr-1"></i> Fill Execution &amp; Submit
+                </a>
+            @endif
         </div>
     @endif
 

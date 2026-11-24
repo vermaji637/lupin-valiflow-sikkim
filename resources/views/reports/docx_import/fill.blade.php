@@ -946,11 +946,17 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
     @endif
 
     @if(empty($requalFillLocked) && in_array(($importSource ?? ''), ['requalification', 'revalidation', 'new_equipment_qualification'], true))
-        <div id="docxEsignDock" aria-label="E-Sign">
-            <button type="button" class="btn btn-light" id="btnEsignStamp"
-                    title="Click a cell, then stamp your name and today's date">
-                <i class="fas fa-signature mr-1"></i> E-Sign
-            </button>
+        <div id="docxEsignDock" aria-label="E-Sign and Preview Actions">
+            <div class="btn-group shadow" role="group">
+                <button type="button" class="btn btn-outline-primary bg-white shadow-sm font-weight-bold" id="btnWordPreviewFloating"
+                        title="Open Word draft preview in a new tab (real TOC page numbers)">
+                    <i class="fas fa-file-word mr-1"></i> Word Preview
+                </button>
+                <button type="button" class="btn btn-light font-weight-bold" id="btnEsignStamp"
+                        title="Click a cell, then stamp your name and today's date">
+                    <i class="fas fa-signature mr-1"></i> E-Sign
+                </button>
+            </div>
             <span id="docxEsignStatus" class="badge badge-light text-secondary px-3 py-2" style="display:none;"></span>
         </div>
     @endif
@@ -1004,6 +1010,14 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                             </p>
                         </div>
                         <div class="d-flex align-items-center">
+                            @if(in_array(($importSource ?? ''), ['new_equipment_qualification', 'requalification', 'revalidation'], true)
+                                && empty($requalFillLocked)
+                                && count($fields) > 0)
+                                <button type="button" class="btn btn-sm btn-light text-primary shadow-sm font-weight-bold mr-2" id="btnWordPreviewTop"
+                                        title="Open Word draft preview in a new tab">
+                                    <i class="fas fa-file-word mr-1"></i> Word Preview
+                                </button>
+                            @endif
                             <span id="docxDraftStatus" class="badge badge-light text-secondary shadow-sm mr-2 px-3 py-2"
                                   @if(empty($draftSavedAt)) style="display:none;" @endif>
                                 @if(!empty($draftSavedAt))
@@ -1489,12 +1503,11 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                 <i class="fas fa-times mr-1"></i> Cancel
                             </a>
                         --}}
-                        {{-- NEQ-only: Word preview with real TOC pages (Word/LO) before submit. --}}
-                        @if(($importSource ?? '') === 'new_equipment_qualification'
+                        {{-- Word preview with real TOC pages (Word/LO) before submit. --}}
+                        @if(in_array(($importSource ?? ''), ['new_equipment_qualification', 'requalification', 'revalidation'], true)
                             && empty($requalFillLocked)
-                            && count($fields) > 0
-                            && (int)($report->created_by ?? 0) === (int)auth()->id())
-                            <button type="button" class="btn btn-outline-primary shadow-sm" id="btnWordPreview"
+                            && count($fields) > 0)
+                            <button type="button" class="btn btn-outline-primary shadow-sm font-weight-bold" id="btnWordPreview"
                                     title="Open Word draft preview in a new tab (real TOC page numbers)">
                                 <i class="fas fa-file-word mr-1"></i>
                                 <span id="btnWordPreviewText">Word Preview</span>
@@ -7634,14 +7647,44 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (e) {}
     };
 
-    if (btnWordPreview && form && form.classList.contains('docx-import-neq')) {
+    const btnWordPreviewFloating = document.getElementById('btnWordPreviewFloating');
+    const btnWordPreviewTop = document.getElementById('btnWordPreviewTop');
+
+    const updateWordPreviewButtons = function (busy, text) {
+        if (btnWordPreview) {
+            btnWordPreview.disabled = !!busy;
+            if (btnWordPreviewText) btnWordPreviewText.textContent = text;
+        }
+        if (btnWordPreviewFloating) {
+            btnWordPreviewFloating.disabled = !!busy;
+            btnWordPreviewFloating.innerHTML = busy
+                ? '<i class="fas fa-spinner fa-spin mr-1"></i> Previewing…'
+                : '<i class="fas fa-file-word mr-1"></i> Word Preview';
+        }
+        if (btnWordPreviewTop) {
+            btnWordPreviewTop.disabled = !!busy;
+            btnWordPreviewTop.innerHTML = busy
+                ? '<i class="fas fa-spinner fa-spin mr-1"></i> Previewing…'
+                : '<i class="fas fa-file-word mr-1"></i> Word Preview';
+        }
+    };
+
+    if (btnWordPreviewFloating && btnWordPreview) {
+        btnWordPreviewFloating.addEventListener('click', function () {
+            btnWordPreview.click();
+        });
+    }
+    if (btnWordPreviewTop && btnWordPreview) {
+        btnWordPreviewTop.addEventListener('click', function () {
+            btnWordPreview.click();
+        });
+    }
+
+    if (btnWordPreview && form) {
         btnWordPreview.addEventListener('click', function () {
             if (wordPreviewBusy || finalSubmitting) return;
             wordPreviewBusy = true;
-            btnWordPreview.disabled = true;
-            if (btnWordPreviewText) {
-                btnWordPreviewText.textContent = 'Generating Word…';
-            }
+            updateWordPreviewButtons(true, 'Generating Word…');
             setDraftStatus('<i class="fas fa-spinner fa-spin mr-1"></i> Building Word preview…', 'saving');
 
             // Open tab immediately (same click) so popup blockers do not block after async fetch.
@@ -7676,8 +7719,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     try { previewTab.close(); } catch (e) {}
                 }
                 wordPreviewBusy = false;
-                btnWordPreview.disabled = false;
-                if (btnWordPreviewText) btnWordPreviewText.textContent = 'Word Preview';
+                updateWordPreviewButtons(false, 'Word Preview');
                 setDraftStatus('<i class="fas fa-exclamation-triangle mr-1"></i> Could not collect form for Word preview.', 'danger');
                 return;
             }
@@ -7742,8 +7784,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 })
                 .finally(function () {
                     wordPreviewBusy = false;
-                    btnWordPreview.disabled = false;
-                    if (btnWordPreviewText) btnWordPreviewText.textContent = 'Word Preview';
+                    updateWordPreviewButtons(false, 'Word Preview');
                 });
         });
     }
