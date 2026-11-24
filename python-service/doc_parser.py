@@ -1016,7 +1016,7 @@ def is_approval_page_table(table) -> bool:
     header = [c.text.strip().lower() for c in table.rows[0].cells]
     if len(header) < 4:
         return False
-    if header[0] != "role":
+    if header[0] not in ("role", "", "role / description", "sign-off", "designation"):
         return False
     if "name" not in header[1]:
         return False

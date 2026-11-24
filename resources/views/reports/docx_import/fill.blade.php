@@ -5936,9 +5936,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (idx < 0) return '';
         if (title.includes('checked by')) {
             const roles = [
-                'post_checked_by_engineering_name',
-                'post_checked_by_production_name',
                 'post_checked_by_validation_name',
+                'post_checked_by_production_name',
+                'post_checked_by_engineering_name',
                 'post_checked_by_quality_name',
             ];
             return roles[idx] || '';
@@ -5964,7 +5964,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const row = sel.closest('tr');
         if (!row) return '';
         const loc = sel.dataset.fieldLocation || '';
-        if (/^table_[123]_row_\d+_col_\d+$/.test(loc) || sel.dataset.isPreApprover === '1') {
+        if (sel.dataset.isPreApprover === '1') {
             return '';
         }
         const table = sel.closest('table');
@@ -5984,20 +5984,20 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             return 'post_approved_by_quality_name';
         }
-        if (text.includes('reviewed')) {
-            return 'post_checked_by_engineering_name';
-        }
-        if (text.includes('engineering') || text.includes('checked')) {
-            return 'post_checked_by_engineering_name';
-        }
-        if (text.includes('production')) {
-            return 'post_checked_by_production_name';
-        }
         if (text.includes('validation') || text.includes('user/validation') || text.includes('user / validation')) {
             if (isApprovedBy) {
                 return 'post_approved_by_user_name';
             }
             return 'post_checked_by_validation_name';
+        }
+        if (text.includes('production')) {
+            return 'post_checked_by_production_name';
+        }
+        if (text.includes('engineering') || text.includes('reviewed')) {
+            return 'post_checked_by_engineering_name';
+        }
+        if (text.includes('checked')) {
+            return 'post_checked_by_engineering_name';
         }
         if (text.includes('performed') || text.includes('recorded') || text.includes('complied')) {
             return 'post_prepared_by_name';
@@ -6281,7 +6281,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         return (c.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
                     })
                     : [];
-                const isApprovalPage = headers[0] === 'role'
+                const isApprovalPage = (headers[0] === 'role' || headers[0] === '' || headers[0] === 'role / description' || headers[0] === 'sign-off' || headers[0] === 'designation')
                     && (headers[1] || '').indexOf('name') >= 0
                     && (headers[2] || '').indexOf('signature') >= 0;
                 if (isApprovalPage || !role) return;

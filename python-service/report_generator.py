@@ -1,8 +1,8 @@
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import qn, nsdecls
 from doc_parser import (
     PARA_BLANK_RE,
     PARA_COLON_BLANK_RE,
@@ -736,7 +736,10 @@ def _fill_colon_label_cell(cell, value: str) -> None:
         if PARA_COLON_BLANK_RE.search(text) or re.search(r"EFFECTIVE\s+DATE\s*:", text, re.I):
             _clear_text_runs(para)
             label = re.sub(r":\s*$", "", text).strip()
-            para.add_run(f"{label}: {value}")
+            if re.match(re.escape(label) + r"\s*:\s*", value, re.I):
+                para.add_run(value)
+            else:
+                para.add_run(f"{label}: {value}")
             filled = True
             break
     if filled:
@@ -1213,6 +1216,9 @@ def _is_equipment_section_banner_row(row) -> bool:
     if len(text) > 220:
         return False
     lower = text.lower()
+    # Signature / verification / approval / date cells are fillable fields, never section banners.
+    if any(k in lower for k in ("verified", "sign and date", "signature", "signed", "date", "performed", "checked", "approved", "complied")):
+        return False
     if re.match(
         r"^(ahu|dust\s*extractor|equipment|area|room|system)\b",
         lower,
@@ -1228,6 +1234,10 @@ def _is_structural_table_row(doc, table_index: int, row_index: int) -> bool:
         table = doc.tables[table_index]
         row = table.rows[row_index]
     except (IndexError, ValueError, KeyError):
+        return False
+    # Verification and signature rows must always receive fill values.
+    row_text = " ".join(c.text for c in row.cells).lower()
+    if any(k in row_text for k in ("verified", "sign and date", "signature", "signed by", "sign & date")):
         return False
     if row_index == 0:
         if len(row.cells) == 2 and not is_two_col_grid_table(table) and not is_two_col_header_row(row.cells, table.rows):
@@ -1391,6 +1401,36 @@ def _paragraph_style_id(p_el) -> str:
     return (ps.get(qn("w:val")) or "").strip()
 
 
+def _get_sdt_toc_paragraphs(doc) -> list:
+    """Return paragraphs inside a real TOC SDT (content control containing TOC lines)."""
+    try:
+        sdts = doc._element.xpath("//w:sdt")
+    except Exception:
+        return []
+    for sdt in sdts:
+        sdt_pr = sdt.find(qn("w:sdtPr"))
+        is_toc = False
+        if sdt_pr is not None:
+            gallery = sdt_pr.find(f".//{qn('w:docPartGallery')}")
+            if gallery is not None and "toc" in (gallery.get(qn("w:val")) or "").lower():
+                is_toc = True
+            tag = sdt_pr.find(qn("w:tag"))
+            if tag is not None and "toc" in (tag.get(qn("w:val")) or "").lower():
+                is_toc = True
+        paras = sdt.findall(f".//{qn('w:p')}")
+        if is_toc and paras:
+            return paras
+        # If no explicit tag/gallery, check if it contains multiple TOC paragraphs (>= 3)
+        if len(paras) >= 3:
+            for p in paras:
+                p_pr = p.find(qn("w:pPr"))
+                if p_pr is not None:
+                    p_style = p_pr.find(qn("w:pStyle"))
+                    if p_style is not None and "toc" in (p_style.get(qn("w:val")) or "").lower():
+                        return paras
+    return []
+
+
 def _body_toc_paragraph_elements(doc) -> list:
     """
     Body TOC lines in fill-form order (toc_sdt_0, toc_sdt_1, ...).
@@ -1400,13 +1440,10 @@ def _body_toc_paragraph_elements(doc) -> list:
     those rows toc_sdt_N. Updating only w:sdt paragraphs left the typed
     page numbers in the database and the old digits in the document.
     """
-    try:
-        sdt_paras = doc._element.xpath("//w:sdt//w:p")
-    except Exception:
-        sdt_paras = []
+    sdt_paras = _get_sdt_toc_paragraphs(doc)
     # If the document has content-control TOC entries (like Requalification),
     # body paragraphs are never TOC rows!
-    if len(sdt_paras) >= 4:
+    if sdt_paras:
         return []
 
     found = []
@@ -1445,11 +1482,8 @@ def _body_toc_paragraph_elements(doc) -> list:
 
 def _toc_sdt_target_paragraph(doc, index: int):
     """Paragraph for toc_sdt_{index}: content-control row first, body TOC row otherwise."""
-    try:
-        sdt_paras = doc._element.xpath("//w:sdt//w:p")
-    except Exception:
-        sdt_paras = []
-    if 0 <= index < len(sdt_paras):
+    sdt_paras = _get_sdt_toc_paragraphs(doc)
+    if sdt_paras and 0 <= index < len(sdt_paras):
         return sdt_paras[index]
     body = _body_toc_paragraph_elements(doc)
     if 0 <= index < len(body):
@@ -1739,7 +1773,7 @@ def _apply_single_field(
                 return
             if str(value).lower() in ("yes", "no"):
                 _fill_yes_no_cell(cell, value)
-            elif len(row.cells) == 1:
+            elif len(row.cells) == 1 or len(set(c._tc for c in row.cells)) == 1 or PARA_COLON_BLANK_RE.search((cell.text or "").strip()):
                 _fill_colon_label_cell(cell, value)
             elif field_type == "table_sl_no":
                 _set_sl_no_cell_text(cell, value)
@@ -3126,7 +3160,7 @@ def _fill_docx_inner(
             for index, row in enumerate(rows):
                 tr_pr = row._tr.get_or_add_trPr()
                 headers = tr_pr.findall(qn("w:tblHeader"))
-                if index < header_n:
+                if header_n > 0 and index < header_n:
                     if not headers:
                         tr_pr.append(OxmlElement("w:tblHeader"))
                     continue
@@ -3519,10 +3553,7 @@ def _collect_toc_entries_from_doc(doc) -> list[dict]:
         seen.add(sec)
         entries.append({"sec": sec, "title": rest[:90], "query": query})
 
-    try:
-        sdt_paras = doc._element.xpath("//w:sdt//w:p")
-    except Exception:
-        sdt_paras = []
+    sdt_paras = _get_sdt_toc_paragraphs(doc)
     for p_el in sdt_paras:
         title, _old = _parse_toc_title_from_element(p_el)
         push(title)
@@ -4135,10 +4166,7 @@ def _rewrite_toc_paragraph_element(p_el, title: str, page_value: str) -> bool:
 
 def _iter_toc_paragraph_elements(doc):
     """Yield OOXML paragraph elements that belong to the document TOC."""
-    try:
-        sdt_paras = doc._element.xpath("//w:sdt//w:p")
-    except Exception:
-        sdt_paras = []
+    sdt_paras = _get_sdt_toc_paragraphs(doc)
     for p_el in sdt_paras:
         yield p_el
     if not sdt_paras:
@@ -4725,7 +4753,12 @@ def _normalize_header_table_fonts(doc, font_name: str = "Arial", font_size_pt: f
             headers.append(section.even_page_header)
         for hdr in headers:
             for table in hdr.tables:
-                for row in table.rows:
+                for r_idx, row in enumerate(table.rows):
+                    # Multi-row letterheads: top rows (Annex, Company, Title) are 11-12pt.
+                    # Lower grid rows (Facility, Equipment Name, Ref Doc, Version, etc.)
+                    # have narrow cells designed for 10pt. 12pt causes awkward wrapping
+                    # ("PRODUCTIO\nN") and inflates header height across all pages.
+                    effective_pt = 10.0 if (len(table.rows) >= 4 and r_idx >= 3) else font_size_pt
                     for cell in row.cells:
                         for para in cell.paragraphs:
                             if any(_run_has_image(r) for r in para.runs):
@@ -4733,7 +4766,7 @@ def _normalize_header_table_fonts(doc, font_name: str = "Arial", font_size_pt: f
                             for run in para.runs:
                                 if (run.text or "").strip():
                                     run.font.name = font_name
-                                    run.font.size = Pt(font_size_pt)
+                                    run.font.size = Pt(effective_pt)
 
 
 def _fix_broken_hanging_indents(doc) -> int:
@@ -5006,6 +5039,18 @@ def _ensure_body_cell_margins(
     return changed
 
 
+def _is_comments_or_signature_table(table) -> bool:
+    rows = list(table.rows)
+    if not rows:
+        return False
+    txt = " ".join((c.text or "").strip().lower() for c in rows[0].cells)
+    if any(k in txt for k in ("comment", "remark", "note")):
+        return True
+    if any(k in txt for k in ("complied by", "checked by", "approved by", "prepared by", "reviewed by")):
+        return True
+    return False
+
+
 def _leading_header_row_count(table) -> int:
     """
     How many leading rows Word/LibreOffice should repeat across pages.
@@ -5021,6 +5066,9 @@ def _leading_header_row_count(table) -> int:
         return 0
     if len(rows) == 1:
         return 1
+
+    if _is_comments_or_signature_table(table):
+        return 0
 
     max_span = 1
     row0 = rows[0]
@@ -5070,7 +5118,7 @@ def _normalize_table_page_breaks(doc) -> int:
         for index, row in enumerate(rows):
             tr_pr = row._tr.get_or_add_trPr()
             headers = tr_pr.findall(qn("w:tblHeader"))
-            if index < header_n:
+            if header_n > 0 and index < header_n:
                 if not headers:
                     tr_pr.append(OxmlElement("w:tblHeader"))
                     changed += 1
@@ -5295,6 +5343,60 @@ def _dedupe_all_colon_paragraphs(doc) -> None:
                     para.text = cleaned
 
 
+def _trim_trailing_empty_paras_in_table_cells(doc) -> int:
+    """
+    Remove empty trailing paragraphs inside table cells.
+    Template authors often type Enter repeatedly to make empty cells taller.
+    When cells are filled, those trailing empty paragraphs blow up the row
+    height and force page splits.
+    """
+    changed = 0
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                tc = cell._tc
+                paras = tc.findall(qn("w:p"))
+                while len(paras) > 1:
+                    last_p = paras[-1]
+                    txt = "".join(last_p.itertext()).strip()
+                    if not txt and not list(last_p.iter(qn("w:drawing"))) and not list(last_p.iter(qn("w:pict"))):
+                        tc.remove(last_p)
+                        paras = tc.findall(qn("w:p"))
+                        changed += 1
+                    else:
+                        break
+    return changed
+
+
+def _separate_adjacent_tables(doc) -> int:
+    """
+    Ensure every adjacent pair of body tables has an intervening paragraph.
+    Without an intervening <w:p>, Word and LibreOffice merge consecutive tables
+    into one contiguous table, repeating table headers across all following tables.
+    """
+    body = doc.element.body
+    changed = 0
+    tables = list(body.findall(qn("w:tbl")))
+    for tbl in tables:
+        parent = tbl.getparent()
+        if parent is None:
+            continue
+        try:
+            idx = parent.index(tbl)
+        except ValueError:
+            continue
+        if idx + 1 < len(parent):
+            nxt = parent[idx + 1]
+            if nxt.tag == qn("w:tbl"):
+                sep_p = parse_xml(
+                    f'<w:p {nsdecls("w")}><w:pPr><w:spacing w:before="60" w:after="60"/>'
+                    f'<w:rPr><w:sz w:val="4"/><w:szCs w:val="4"/></w:rPr></w:pPr></w:p>'
+                )
+                parent.insert(idx + 1, sep_p)
+                changed += 1
+    return changed
+
+
 def _normalize_filled_docx_layout(doc, profile: str = "legacy") -> None:
     """Post-fill layout pass so Word/LibreOffice PDF match readable formatting.
 
@@ -5313,6 +5415,8 @@ def _normalize_filled_docx_layout(doc, profile: str = "legacy") -> None:
         _clamp_body_tables_inside_page_border(doc)
     except Exception:
         pass
+    _trim_trailing_empty_paras_in_table_cells(doc)
+    _separate_adjacent_tables(doc)
     _strip_stale_soft_page_breaks(doc)
     _normalize_table_page_breaks(doc)
     _ensure_body_cell_margins(doc)

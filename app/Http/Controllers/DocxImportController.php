@@ -1789,12 +1789,12 @@ class DocxImportController extends Controller
      *
      * @param  array<string, int>  $indexByLocation
      */
-    /** Canonical POST approver keys — Word table order (Checked By: Eng → Production → Validation → QA). */
+    /** Canonical POST approver keys — Word table order (Checked By: Validation → Production → Eng → QA). */
     private const POST_APPROVER_FIELD_ORDER = [
         'post_prepared_by_name',
-        'post_checked_by_engineering_name',
-        'post_checked_by_production_name',
         'post_checked_by_validation_name',
+        'post_checked_by_production_name',
+        'post_checked_by_engineering_name',
         'post_checked_by_quality_name',
         'post_approved_by_user_name',
         'post_approved_by_quality_name',
@@ -1803,9 +1803,9 @@ class DocxImportController extends Controller
     /** @var array<string, string> */
     private const POST_APPROVER_STEP_LABELS = [
         'post_prepared_by_name'            => 'POST_PREPARED',
-        'post_checked_by_engineering_name' => 'POST_ENGINEERING',
-        'post_checked_by_production_name'  => 'POST_PRODUCTION',
         'post_checked_by_validation_name'  => 'POST_VALIDATION',
+        'post_checked_by_production_name'  => 'POST_PRODUCTION',
+        'post_checked_by_engineering_name' => 'POST_ENGINEERING',
         'post_checked_by_quality_name'     => 'POST_CHECKED_QA',
         'post_approved_by_user_name'       => 'POST_APPROVED_USER',
         'post_approved_by_quality_name'    => 'POST_APPROVED_QA',
@@ -1863,6 +1863,38 @@ class DocxImportController extends Controller
     }
 
     /**
+     * True if a table is an Attachments / Annexures list table.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @param  string|int  $tableNum
+     */
+    private function isAttachmentOrAnnexureTable(array $fields, string|int $tableNum): bool
+    {
+        $prefix = "table_{$tableNum}_";
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if (! str_starts_with($loc, $prefix)) {
+                continue;
+            }
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $val = trim((string) ($field['value'] ?? ''));
+            if (
+                str_contains($label, 'annexure')
+                || str_contains($label, 'attachment no')
+                || str_contains($label, 'attachment type')
+                || preg_match('/^ANNEX_/i', $val) === 1
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * True if a table in docx_import_fields is a training personnel log table.
      *
      * @param  array<int, array<string, mixed>>  $fields
@@ -1870,6 +1902,11 @@ class DocxImportController extends Controller
      */
     private function isTrainingPersonnelTableNum(array $fields, string|int $tableNum): bool
     {
+        // Attachment / Annexure list tables are never training personnel tables.
+        if ($this->isAttachmentOrAnnexureTable($fields, $tableNum)) {
+            return false;
+        }
+
         $prefix = "table_{$tableNum}_";
         $hasName = false;
         $hasTraining = false;
@@ -1888,12 +1925,9 @@ class DocxImportController extends Controller
                 return true;
             }
             $label = strtolower(trim((string) ($field['label'] ?? '')));
-            $val = strtolower(trim((string) ($field['value'] ?? '')));
             if (
                 str_contains($label, 'training imparted')
-                || str_contains($val, 'training imparted')
                 || str_contains($label, 'identification of personnel')
-                || str_contains($val, 'identification of personnel')
             ) {
                 return true;
             }
@@ -4414,9 +4448,8 @@ class DocxImportController extends Controller
                 $nameCol = $this->resolveNeqApprovalNameCol($fields, $rows);
                 $dataRowNums = [];
                 foreach ($rows as $rowNum => $cols) {
-                    // row 0 = title, row 1 = Name/Signature/Date headers, row 2+ = signers.
-                    // Counting row 1 invents a fake 2nd Approved By (Quality) on Att14.
-                    if ((int) $rowNum < 2 || ! is_array($cols)) {
+                    // Row 0 is title or table-top header. Header rows are skipped via isNeqApprovalColumnHeaderRow.
+                    if ((int) $rowNum === 0 || ! is_array($cols)) {
                         continue;
                     }
                     if ($this->isNeqApprovalColumnHeaderRow($fields, $cols)) {
@@ -4592,10 +4625,29 @@ class DocxImportController extends Controller
             }
             $type = strtolower(trim((string) ($field['type'] ?? '')));
             $widget = strtolower(trim((string) ($field['widget'] ?? '')));
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $val = trim((string) ($field['value'] ?? ''));
+
+            $isAnnexure = str_contains($label, 'annexure')
+                || (str_contains($label, 'attachment') && (str_contains($label, 'no') || str_contains($label, 'type')))
+                || preg_match('/^ANNEX_/i', $val) === 1;
+
+            if ($isAnnexure) {
+                if ($type === 'approver' || $widget === 'approver') {
+                    $fields[$idx]['type'] = 'table_multicol';
+                    $fields[$idx]['widget'] = 'text';
+                    $fields[$idx]['locked'] = true;
+                    unset($fields[$idx]['approver_role'], $fields[$idx]['stamp_eligible'], $fields[$idx]['draft_editable']);
+                }
+                if (isset($fields[$idx]['auto_from_name'])) {
+                    unset($fields[$idx]['auto_from_name']);
+                }
+                continue;
+            }
+
             if ($type !== 'approver' && $widget !== 'approver') {
                 continue;
             }
-            $label = strtolower(trim((string) ($field['label'] ?? '')));
             $isSignature = str_contains($label, 'signature');
             $isDate = $label === 'date' || preg_match('/^\s*date\b/i', (string) ($field['label'] ?? '')) === 1;
             if (! $isSignature && ! $isDate) {
@@ -4605,6 +4657,20 @@ class DocxImportController extends Controller
             $fields[$idx]['widget'] = $isDate ? 'date' : 'text';
             $fields[$idx]['locked'] = true;
             unset($fields[$idx]['draft_editable']);
+        }
+
+        // Strip auto_from_name on any cells inside an Annexure / Attachment table.
+        foreach ($fields as $idx => $field) {
+            if (! is_array($field) || ! isset($field['auto_from_name'])) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if (preg_match('/^table_(\d+)_/', $loc, $m)) {
+                $lbl = strtolower(trim((string) ($field['label'] ?? '')));
+                if (str_contains($lbl, 'attachment') || str_contains($lbl, 'applicable') || str_contains($lbl, 'annexure')) {
+                    unset($fields[$idx]['auto_from_name']);
+                }
+            }
         }
 
         // Drop Veeva-invented col_3 / header "Name" dropdowns on Att14 Prepared/Checked/Approved tables.
@@ -4631,12 +4697,23 @@ class DocxImportController extends Controller
                     continue;
                 }
                 foreach ($rows as $rowNum => $cols) {
-                    // Invented 4th column (Word Att14 is 3-col).
-                    if (isset($cols[3])) {
-                        $drop[$cols[3]] = true;
+                    // Invented 4th column (Word Att14 is 3-col). Never drop real columns like Observation/Result.
+                    if (isset($cols[3]) && ! isset($cols[4])) {
+                        $col3Field = $fields[$cols[3]] ?? null;
+                        $lbl = strtolower(trim((string) ($col3Field['label'] ?? '')));
+                        if (
+                            ! str_contains($lbl, 'observation')
+                            && ! str_contains($lbl, 'result')
+                            && ! str_contains($lbl, 'criteria')
+                            && ! str_contains($lbl, 'method')
+                            && ! str_contains($lbl, 'check')
+                            && ! str_contains($lbl, 'remark')
+                        ) {
+                            $drop[$cols[3]] = true;
+                        }
                     }
-                    // Only scrub column-header row (row 1), never signer rows.
-                    if ((int) $rowNum !== 1) {
+                    // Only scrub actual column-header rows, never signer rows.
+                    if (! $this->isNeqApprovalColumnHeaderRow($fields, $cols)) {
                         continue;
                     }
                     foreach ($cols as $colIdx) {
@@ -4772,7 +4849,7 @@ PY;
             return;
         }
         $type = strtolower((string) ($col['type'] ?? ''));
-        if ($type !== 'approver' && $type !== 'approval_stamp_name') {
+        if (! in_array($type, ['approver', 'approval_stamp_name', 'table_multicol', 'text', ''], true)) {
             return;
         }
         $fields[$col['idx']]['approver_role'] = $role;
@@ -4809,6 +4886,12 @@ PY;
                 continue;
             }
             $fields[$idx]['approver_role'] = $role;
+            if (str_contains($label, 'signature')) {
+                $fields[$idx]['type'] = 'approval_stamp_signature';
+                $fields[$idx]['widget'] = 'text';
+                $fields[$idx]['locked'] = true;
+                unset($fields[$idx]['draft_editable']);
+            }
         }
     }
 
@@ -5126,8 +5209,8 @@ PY;
 
             $dataRows = [];
             foreach ($rows as $rowNum => $cols) {
-                // row 0 title, row 1 column headers — signers start at row 2.
-                if ($rowNum < 2 || ! isset($cols[$nameCol])) {
+                // Row 0 is title or table-top header. Header rows are skipped via isNeqApprovalColumnHeaderRow.
+                if ($rowNum === 0 || ! isset($cols[$nameCol])) {
                     continue;
                 }
                 if ($this->isNeqApprovalColumnHeaderRow($fields, $cols)) {
@@ -5246,6 +5329,33 @@ PY;
             }
         }
 
+        // Checklist, verification, test, utility, or data tables are NOT department signature blocks.
+        foreach ($rows as $cols) {
+            foreach ($cols as $idx) {
+                if (! is_array($fields[$idx] ?? null)) {
+                    continue;
+                }
+                $lbl = strtolower(trim((string) ($fields[$idx]['label'] ?? '')));
+                if (
+                    str_contains($lbl, 'check')
+                    || str_contains($lbl, 'method')
+                    || str_contains($lbl, 'acceptance')
+                    || str_contains($lbl, 'observation')
+                    || str_contains($lbl, 'result')
+                    || str_contains($lbl, 'criteria')
+                    || str_contains($lbl, 'parameter')
+                    || str_contains($lbl, 'specification')
+                    || str_contains($lbl, 'deviation')
+                    || str_contains($lbl, 'requirement')
+                    || str_contains($lbl, 'component')
+                    || str_contains($lbl, 'instrument')
+                    || str_contains($lbl, 'calibration')
+                ) {
+                    return '';
+                }
+            }
+        }
+
         // Department tables often omit row-0 headers from fillable fields — infer by size only if signature/date fields exist.
         $hasSigDate = false;
         foreach ($rows as $cols) {
@@ -5347,15 +5457,15 @@ PY;
                 return 'post_checked_by_validation_name';
             }
             // Blank Att14 rows have no department label. Top to bottom matches
-            // the approval sequence: Engineering, Production, Validation, QA.
+            // the approval sequence: Validation, Production, Engineering, QA.
             $byOffset = [
-                0 => 'post_checked_by_engineering_name',
+                0 => 'post_checked_by_validation_name',
                 1 => 'post_checked_by_production_name',
-                2 => 'post_checked_by_validation_name',
+                2 => 'post_checked_by_engineering_name',
                 3 => 'post_checked_by_quality_name',
             ];
 
-            return $byOffset[$offset] ?? 'post_checked_by_engineering_name';
+            return $byOffset[$offset] ?? 'post_checked_by_validation_name';
         }
 
         return '';
@@ -5442,7 +5552,12 @@ for ti, table in enumerate(doc.tables):
     if not table.rows:
         continue
     header = " ".join(c.text.strip().lower() for c in table.rows[0].cells)
-    if "role" not in header or "name" not in header or "signature" not in header:
+    cells = [c.text.strip().lower() for c in table.rows[0].cells]
+    if len(cells) < 4:
+        continue
+    if cells[0] not in ("role", "", "role / description", "sign-off", "designation"):
+        continue
+    if "name" not in cells[1] or "signature" not in cells[2]:
         continue
     # data rows = total - header
     out[str(ti)] = max(0, len(table.rows) - 1)
@@ -6477,6 +6592,15 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
                 // Table cells get a readonly span wrapper; inline spans are updated in place.
                 if ($node->tagName === 'td') {
+                    // Interactive form cells with inputs/textareas/selects must stay editable so users can re-sign or edit values.
+                    if (
+                        $node->getElementsByTagName('input')->length > 0
+                        || $node->getElementsByTagName('textarea')->length > 0
+                        || $node->getElementsByTagName('select')->length > 0
+                    ) {
+                        continue;
+                    }
+
                     $span = $doc->createElement('span');
                     $span->setAttribute('class', 'docx-readonly-value');
                     foreach (preg_split('/\r\n|\r|\n/', $value) as $line) {
@@ -6979,7 +7103,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         );
         $fields = $this->stripStaleTableTocFields($fields);
         $fields = $this->lockTocTableDescriptionFields($fields);
-        if (count($fields) !== count($report->docx_import_fields ?? [])) {
+        if ($fields !== ($report->docx_import_fields ?? [])) {
             $report->docx_import_fields = $fields;
             $report->save();
         }
@@ -7041,49 +7165,66 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             && ! empty($report->docx_import_path)
             && in_array($report->status, ['post_setup', 'post_returned', 'draft', 'pre_setup'], true)
         ) {
-            $hasSafetyBySignField = collect($fields)->contains(function ($f) {
-                if (! is_array($f)) {
-                    return false;
-                }
-                $label = (string) ($f['label'] ?? '');
-                $value = (string) ($f['value'] ?? '');
+            $reportPath = strtolower((string) ($report->docx_import_path ?? ''));
+            $reportTitle = strtolower((string) ($report->title ?? $report->document_title ?? ''));
+            $isAtt10Doc = str_contains($reportPath, 'attachment 10')
+                || str_contains($reportPath, 'attachment_10')
+                || str_contains($reportTitle, 'attachment 10')
+                || str_contains($reportPath, 'safety')
+                || str_contains($reportTitle, 'safety');
 
-                return preg_match('/^safety\s*(?:checks?\s*)?s?\s*by\b/i', $label) === 1
-                    || preg_match('/^safety\s*(?:checks?\s*)?s?\s*by\b/i', $value) === 1;
-            });
-            if (! $hasSafetyBySignField) {
-                $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
-                $reparsed = $this->reparseDocxForReport($report);
-                if (! empty($reparsed)) {
-                    $fields = $reparsed;
-                    $report->docx_import_fields = $fields;
-                    $report->save();
+            if ($isAtt10Doc) {
+                $hasSafetyBySignField = collect($fields)->contains(function ($f) {
+                    if (! is_array($f)) {
+                        return false;
+                    }
+                    $label = (string) ($f['label'] ?? '');
+                    $value = (string) ($f['value'] ?? '');
+
+                    return preg_match('/^safety\s*(?:checks?\s*)?s?\s*by\b/i', $label) === 1
+                        || preg_match('/^safety\s*(?:checks?\s*)?s?\s*by\b/i', $value) === 1;
+                });
+                if (! $hasSafetyBySignField) {
+                    $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
+                    $reparsed = $this->reparseDocxForReport($report);
+                    if (! empty($reparsed)) {
+                        $fields = $reparsed;
+                        $report->docx_import_fields = $fields;
+                        $report->save();
+                    }
                 }
             }
 
             // Att14 IOQ: "(IOQ) REPORT FOR OF ……….. MACHINE" was skipped as ALL-CAPS
             // heading — reparse once so the ellipsis blank is fillable.
-            $hasIoqMachineBlank = collect($fields)->contains(function ($f) {
-                if (! is_array($f)) {
-                    return false;
-                }
-                $label = strtolower((string) ($f['label'] ?? ''));
-                $type = (string) ($f['type'] ?? '');
-                $isBlank = in_array($type, ['paragraph_blank', 'paragraph_blank_part'], true);
+            $isAtt14Doc = str_contains($reportPath, 'attachment 14')
+                || str_contains($reportPath, 'attachment_14')
+                || str_contains($reportTitle, 'attachment 14')
+                || str_contains($reportTitle, 'ioq');
 
-                return $isBlank && (
-                    str_contains($label, 'report for of')
-                    || (str_contains($label, '(ioq)') && str_contains($label, 'machine'))
-                );
-            });
-            if (! $hasIoqMachineBlank) {
-                $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
-                $existingBeforeReparse = is_array($fields) ? $fields : [];
-                $reparsed = $this->reparseDocxForReport($report);
-                if (! empty($reparsed)) {
-                    $fields = $this->mergeDraftOnlyFieldsAfterReparse($existingBeforeReparse, $reparsed);
-                    $report->docx_import_fields = $fields;
-                    $report->save();
+            if ($isAtt14Doc) {
+                $hasIoqMachineBlank = collect($fields)->contains(function ($f) {
+                    if (! is_array($f)) {
+                        return false;
+                    }
+                    $label = strtolower((string) ($f['label'] ?? ''));
+                    $type = (string) ($f['type'] ?? '');
+                    $isBlank = in_array($type, ['paragraph_blank', 'paragraph_blank_part'], true);
+
+                    return $isBlank && (
+                        str_contains($label, 'report for of')
+                        || (str_contains($label, '(ioq)') && str_contains($label, 'machine'))
+                    );
+                });
+                if (! $hasIoqMachineBlank) {
+                    $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
+                    $existingBeforeReparse = is_array($fields) ? $fields : [];
+                    $reparsed = $this->reparseDocxForReport($report);
+                    if (! empty($reparsed)) {
+                        $fields = $this->mergeDraftOnlyFieldsAfterReparse($existingBeforeReparse, $reparsed);
+                        $report->docx_import_fields = $fields;
+                        $report->save();
+                    }
                 }
             }
         }
@@ -10410,6 +10551,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         }
 
         foreach ($byTable as $tableNum => $rows) {
+            if ($this->isAttachmentOrAnnexureTable($fields, $tableNum)) {
+                continue;
+            }
             $isTraining = $this->isTrainingPersonnelTableNum($fields, $tableNum);
             if (! $isTraining) {
                 if (! isset($rows[1][0], $rows[1][1], $rows[1][2], $rows[1][3])) {
@@ -10431,6 +10575,18 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 }
             }
 
+            // An Annexure / Attachment list table is NEVER a training personnel table.
+            $row1Col0 = $fields[$rows[1][0] ?? null] ?? null;
+            $col0Label = strtolower(trim((string) ($row1Col0['label'] ?? '')));
+            $col0Val = trim((string) ($row1Col0['value'] ?? ''));
+            if (
+                str_contains($col0Label, 'annexure')
+                || str_contains($col0Label, 'attachment')
+                || preg_match('/^ANNEX_/i', $col0Val) === 1
+            ) {
+                continue;
+            }
+
             ksort($rows);
             foreach ($rows as $rowNum => $cols) {
                 if ($rowNum < 1) {
@@ -10441,6 +10597,16 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 $sigIdx = $cols[2] ?? null;
                 $trainIdx = $cols[3] ?? null;
                 if ($nameIdx === null || ! is_array($fields[$nameIdx] ?? null)) {
+                    continue;
+                }
+
+                $nameLabel = strtolower(trim((string) ($fields[$nameIdx]['label'] ?? '')));
+                $nameVal = trim((string) ($fields[$nameIdx]['value'] ?? ''));
+                if (
+                    str_contains($nameLabel, 'annexure')
+                    || str_contains($nameLabel, 'attachment')
+                    || preg_match('/^ANNEX_/i', $nameVal) === 1
+                ) {
                     continue;
                 }
 
