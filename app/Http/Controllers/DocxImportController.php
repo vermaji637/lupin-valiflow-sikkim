@@ -1841,6 +1841,16 @@ class DocxImportController extends Controller
                 continue;
             }
             $role = trim((string) ($field['approver_role'] ?? ''));
+            // Training personnel or training imparted by must never become post-approvers.
+            if (in_array($role, ['training_personnel_name', 'training_imparted_by_name'], true)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if (preg_match('/^table_(\d+)_/', $loc, $m)) {
+                if ($this->isTrainingPersonnelTableNum($fields, $m[1])) {
+                    continue;
+                }
+            }
             if ($role !== '' && in_array($role, self::POST_APPROVER_FIELD_ORDER, true)) {
                 $present[$role] = true;
             }
@@ -1850,6 +1860,55 @@ class DocxImportController extends Controller
             self::POST_APPROVER_FIELD_ORDER,
             fn (string $role) => isset($present[$role])
         ));
+    }
+
+    /**
+     * True if a table in docx_import_fields is a training personnel log table.
+     *
+     * @param  array<int, array<string, mixed>>  $fields
+     * @param  string|int  $tableNum
+     */
+    private function isTrainingPersonnelTableNum(array $fields, string|int $tableNum): bool
+    {
+        $prefix = "table_{$tableNum}_";
+        $hasName = false;
+        $hasTraining = false;
+        $hasDepartment = false;
+
+        foreach ($fields as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = (string) ($field['location'] ?? '');
+            if (! str_starts_with($loc, $prefix)) {
+                continue;
+            }
+            $role = (string) ($field['approver_role'] ?? '');
+            if (in_array($role, ['training_personnel_name', 'training_imparted_by_name'], true)) {
+                return true;
+            }
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            $val = strtolower(trim((string) ($field['value'] ?? '')));
+            if (
+                str_contains($label, 'training imparted')
+                || str_contains($val, 'training imparted')
+                || str_contains($label, 'identification of personnel')
+                || str_contains($val, 'identification of personnel')
+            ) {
+                return true;
+            }
+            if (str_contains($label, 'name')) {
+                $hasName = true;
+            }
+            if (str_contains($label, 'training')) {
+                $hasTraining = true;
+            }
+            if (str_contains($label, 'department')) {
+                $hasDepartment = true;
+            }
+        }
+
+        return ($hasName && $hasTraining) || ($hasDepartment && $hasTraining);
     }
 
     /**
@@ -4327,6 +4386,9 @@ class DocxImportController extends Controller
         $docxDeptMap = $fileId !== '' ? $this->loadSignatureTableDeptMapFromDocx($fileId) : [];
 
         foreach ($byTable as $tableNum => $rows) {
+            if ($this->isTrainingPersonnelTableNum($fields, $tableNum)) {
+                continue;
+            }
             $title = '';
             foreach ($rows[0] ?? [] as $col) {
                 $title .= ' ' . strtolower($col['value'] ?? '');
@@ -4565,6 +4627,9 @@ class DocxImportController extends Controller
 
             $drop = [];
             foreach ($byTable as $tableNum => $rows) {
+                if ($this->isTrainingPersonnelTableNum($fields, $tableNum)) {
+                    continue;
+                }
                 foreach ($rows as $rowNum => $cols) {
                     // Invented 4th column (Word Att14 is 3-col).
                     if (isset($cols[3])) {
@@ -4928,6 +4993,7 @@ PY;
         }
 
         // ── NEQ-only: scrub false positives + scope stamps to real approval tables ──
+        $fields = $this->upgradeNeqTrainingPersonnelFields($fields);
         $fields = $this->scrubFalseApprovalStampFields($fields);
         $approvalTableNums = $this->approvalPageTableNumbers($fields);
         // Att14 Prepared/Checked/Approved By blocks are NOT the Veeva 3-row APPROVAL PAGE —
@@ -4950,7 +5016,7 @@ PY;
                 }
 
                 $tableNum = $m[1];
-                if (isset($deptSigTables[$tableNum])) {
+                if (isset($deptSigTables[$tableNum]) || $this->isTrainingPersonnelTableNum($fields, $tableNum)) {
                     continue;
                 }
                 if ($approvalTableNums !== [] && ! isset($approvalTableNums[$tableNum])) {
@@ -5009,7 +5075,7 @@ PY;
 
         $out = [];
         foreach ($byTable as $tableNum => $rows) {
-            if (isset($approvalTables[(string) $tableNum])) {
+            if (isset($approvalTables[(string) $tableNum]) || $this->isTrainingPersonnelTableNum($fields, $tableNum)) {
                 continue;
             }
             if ($this->neqApprovalTableTitle($fields, $rows) !== '') {
@@ -5044,7 +5110,7 @@ PY;
         $approvalTables = $this->approvalPageTableNumbersFromNameSignatureDate($fields);
 
         foreach ($byTable as $tableNum => $rows) {
-            if (isset($approvalTables[(string) $tableNum])) {
+            if (isset($approvalTables[(string) $tableNum]) || $this->isTrainingPersonnelTableNum($fields, $tableNum)) {
                 continue;
             }
             $title = $this->neqApprovalTableTitle($fields, $rows);
@@ -5155,6 +5221,17 @@ PY;
      */
     private function neqApprovalTableTitle(array $fields, array $rows): string
     {
+        foreach ($rows as $cols) {
+            foreach ($cols as $idx) {
+                if (isset($fields[$idx]['location']) && preg_match('/^table_(\d+)_/', (string) $fields[$idx]['location'], $m)) {
+                    if ($this->isTrainingPersonnelTableNum($fields, $m[1])) {
+                        return '';
+                    }
+                    break 2;
+                }
+            }
+        }
+
         foreach ($rows[0] ?? [] as $idx) {
             if (! is_array($fields[$idx] ?? null)) {
                 continue;
@@ -10333,22 +10410,25 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         }
 
         foreach ($byTable as $tableNum => $rows) {
-            if (! isset($rows[1][0], $rows[1][1], $rows[1][2], $rows[1][3])) {
-                continue;
-            }
-            $labels = [];
-            foreach ([0, 1, 2, 3, 4] as $col) {
-                $idx = $rows[1][$col] ?? null;
-                $labels[$col] = strtolower(trim((string) (($idx !== null ? ($fields[$idx]['label'] ?? '') : ''))));
-            }
-            // Fingerprint Att01 grid: Name | Department | Signature | Training Imparted by | Date
-            if (
-                ! str_contains($labels[0], 'name')
-                || ! str_contains($labels[1], 'department')
-                || ! str_contains($labels[2], 'signature')
-                || ! str_contains($labels[3], 'training')
-            ) {
-                continue;
+            $isTraining = $this->isTrainingPersonnelTableNum($fields, $tableNum);
+            if (! $isTraining) {
+                if (! isset($rows[1][0], $rows[1][1], $rows[1][2], $rows[1][3])) {
+                    continue;
+                }
+                $labels = [];
+                foreach ([0, 1, 2, 3, 4] as $col) {
+                    $idx = $rows[1][$col] ?? null;
+                    $labels[$col] = strtolower(trim((string) (($idx !== null ? ($fields[$idx]['label'] ?? '') : ''))));
+                }
+                // Fingerprint Att01 grid: Name | Department | Signature | Training Imparted by | Date
+                if (
+                    ! str_contains($labels[0], 'name')
+                    || ! str_contains($labels[1], 'department')
+                    || ! str_contains($labels[2], 'signature')
+                    || ! str_contains($labels[3], 'training')
+                ) {
+                    continue;
+                }
             }
 
             ksort($rows);
@@ -10431,7 +10511,11 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         // Validation /Quality Assurance: — sole POST approval assignee for Att01.
         $att01Detected = false;
-        foreach ($byTable as $rows) {
+        foreach ($byTable as $tableNum => $rows) {
+            if ($this->isTrainingPersonnelTableNum($fields, $tableNum)) {
+                $att01Detected = true;
+                break;
+            }
             if (! isset($rows[1][0], $rows[1][1], $rows[1][2], $rows[1][3])) {
                 continue;
             }
