@@ -7761,14 +7761,18 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (!result.data.toc_preserved) {
                         applyWordPreviewToc(result.data.toc_field_values || {});
                     }
-                    if (previewTab) {
-                        previewTab.location.href = previewUrl;
+                    if (previewTab && !previewTab.closed) {
+                        try {
+                            previewTab.location.replace(previewUrl);
+                        } catch (locErr) {
+                            previewTab.location.href = previewUrl;
+                        }
                     } else {
                         // Fallback if popup was blocked.
                         window.open(previewUrl, '_blank', 'noopener');
                     }
                     setDraftStatus(
-                        '<i class="fas fa-file-word mr-1"></i> Word preview opened. TOC page numbers are the ones you entered.',
+                        '<i class="fas fa-file-word mr-1"></i> Word preview ready. <a href="' + previewUrl + '" target="_blank" class="text-primary font-weight-bold ml-1" style="text-decoration:underline;"><i class="fas fa-external-link-alt mr-1"></i>Open Preview</a>',
                         'ok'
                     );
                 })

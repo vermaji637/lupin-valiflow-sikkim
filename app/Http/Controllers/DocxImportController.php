@@ -9452,8 +9452,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ], 422);
         }
 
-        // Preview must use the TOC digits on this request even if an older
-        // autosave won the draft race. Overlay request fields[...] on top.
+        // Preview must use the live form values on this request even if an older
+        // autosave won the draft race. Overlay all submitted request fields[...] on top.
         $requestFields = $request->input('fields', []);
         if (is_array($requestFields) && $requestFields !== []) {
             foreach ($fields as $idx => $field) {
@@ -9464,20 +9464,29 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 if ($location === '' || ! array_key_exists($location, $requestFields)) {
                     continue;
                 }
+                if ($this->isLockedSectionHeadingText((string) ($field['label'] ?? ''))) {
+                    continue;
+                }
                 $isTocPage = (
                     (str_contains($location, '_toc_') || str_starts_with($location, 'toc_sdt_'))
                     && ! str_ends_with($location, '_title')
                 );
-                if (! $isTocPage) {
+                if ($isTocPage) {
+                    $page = trim((string) $requestFields[$location]);
+                    if ($page !== '' && preg_match('/^\d+$/', $page)) {
+                        $fields[$idx]['value'] = $page;
+                        $fields[$idx]['locked'] = false;
+                        $fields[$idx]['user_filled'] = true;
+                    }
                     continue;
                 }
-                $page = trim((string) $requestFields[$location]);
-                if ($page === '' || ! preg_match('/^\d+$/', $page)) {
-                    continue;
-                }
-                $fields[$idx]['value'] = $page;
-                $fields[$idx]['locked'] = false;
+                $submittedVal = (string) $requestFields[$location];
+                $fields[$idx]['value'] = $submittedVal;
                 $fields[$idx]['user_filled'] = true;
+                $fields[$idx]['draft_editable'] = true;
+                if (! empty($field['locked']) && ! $this->isLockedSectionHeadingText((string) ($field['label'] ?? ''))) {
+                    $fields[$idx]['locked'] = false;
+                }
             }
         }
 
@@ -9500,7 +9509,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ? $result['fields']
             : $fields;
 
-        // Keep the draft the user just saved, including the TOC page numbers they typed.
+        // Keep the draft the user just saved, including the live values they typed.
         $report->docx_import_fields = $syncedFields;
         $report->save();
 
@@ -9525,7 +9534,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ], 500);
         }
 
-        $previewUrl = route('reports.docx-import.preview-word-download', $report);
+        $cacheBuster = time() . '_' . mt_rand(1000, 9999);
+        $previewUrl = route('reports.docx-import.preview-word-download', $report) . '?v=' . $cacheBuster;
 
         return response()->json([
             'success'           => true,
@@ -9559,6 +9569,30 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             abort(404);
         }
 
+        // Always ensure the preview DOCX reflects the latest saved form fields
+        $fields = is_array($report->docx_import_fields) ? $report->docx_import_fields : [];
+        if ($fields !== []) {
+            $fields = $this->stripStaleTableTocFields($fields);
+            $fields = $this->lockTocTableDescriptionFields($fields);
+            if ($this->requalificationPreApprovalIsComplete($report)) {
+                $stampedFields = $this->fieldsWithApprovalStamps($report);
+                if ($stampedFields !== []) {
+                    $fields = $this->mergeDocxImportFieldsPreservingBaseline($fields, $stampedFields, $report->id);
+                }
+            }
+            $fields = $this->applyRequalificationPreApproverNames($report, $fields);
+            $result = $this->regenerateFilledDocxAttachment($report, $fields, true);
+            if ($result !== null) {
+                $relative = (string) ($result['docx_filled_path'] ?? '');
+                $absolute = $relative !== '' ? storage_path('app/public/' . ltrim($relative, '/')) : '';
+                if ($absolute !== '' && is_file($absolute)) {
+                    $previewRelative = 'generated_reports/' . $report->docx_import_path . '_word_preview.docx';
+                    $previewAbsolute = storage_path('app/public/' . $previewRelative);
+                    @copy($absolute, $previewAbsolute);
+                }
+            }
+        }
+
         $docxPath = storage_path('app/public/generated_reports/' . $fileId . '_word_preview.docx');
         if (! is_file($docxPath)) {
             abort(404, 'Word preview not found. Generate preview first.');
@@ -9567,13 +9601,13 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $pdfPath = $this->convertDocxPathToPdf($docxPath, true);
         $filename = $this->reportExportFilename($report, 'docx');
         clearstatcache(true, $pdfPath);
-        $mtime = is_file($pdfPath) ? (string) filemtime($pdfPath) : (string) time();
 
         return response()->file($pdfPath, [
             'Content-Type'        => 'application/pdf',
             'Content-Disposition' => 'inline; filename="' . $filename . '"',
-            'Cache-Control'       => 'private, no-cache, must-revalidate',
-            'ETag'                => '"' . $mtime . '"',
+            'Cache-Control'       => 'no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0',
+            'Pragma'              => 'no-cache',
+            'Expires'             => '0',
         ]);
     }
 
@@ -9599,6 +9633,19 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if (is_file($pdfPath)) {
             @unlink($pdfPath);
         }
+        clearstatcache(true, $pdfPath);
+
+        // If $pdfPath is locked by Chrome or Windows process, convert to a fresh unique name
+        $targetDocx = $docxPath;
+        $actualPdf = $pdfPath;
+        $isTemp = false;
+        if (is_file($pdfPath)) {
+            $uniqueSuffix = '_' . time() . '_' . mt_rand(100, 999);
+            $targetDocx = dirname($docxPath) . DIRECTORY_SEPARATOR . pathinfo($docxPath, PATHINFO_FILENAME) . $uniqueSuffix . '.docx';
+            $actualPdf = dirname($docxPath) . DIRECTORY_SEPARATOR . pathinfo($docxPath, PATHINFO_FILENAME) . $uniqueSuffix . '.pdf';
+            @copy($docxPath, $targetDocx);
+            $isTemp = true;
+        }
 
         $sofficeBinary = $this->resolveLibreOfficeBinary();
         if ($sofficeBinary === null) {
@@ -9615,28 +9662,32 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         $command = $quoteForShell($sofficeBinary)
             . ' --headless --convert-to pdf --outdir '
-            . $quoteForShell(dirname($docxPath))
+            . $quoteForShell(dirname($targetDocx))
             . ' '
-            . $quoteForShell($docxPath)
+            . $quoteForShell($targetDocx)
             . ' 2>&1';
 
         $output = [];
         $exitCode = 0;
         exec($command, $output, $exitCode);
-        clearstatcache(true, $pdfPath);
+        clearstatcache(true, $actualPdf);
 
-        if ($exitCode !== 0 || ! is_file($pdfPath)) {
+        if ($isTemp && is_file($targetDocx)) {
+            @unlink($targetDocx);
+        }
+
+        if ($exitCode !== 0 || ! is_file($actualPdf)) {
             $tail = implode(PHP_EOL, array_slice($output, -5));
             Log::error('DOCX Word-preview PDF conversion failed', [
-                'docx_path' => $docxPath,
-                'pdf_path'  => $pdfPath,
+                'docx_path' => $targetDocx,
+                'pdf_path'  => $actualPdf,
                 'exit_code' => $exitCode,
                 'output'    => $tail,
             ]);
             abort(500, 'Unable to convert Word preview to PDF. ' . $tail);
         }
 
-        return $pdfPath;
+        return $actualPdf;
     }
 
     /**
