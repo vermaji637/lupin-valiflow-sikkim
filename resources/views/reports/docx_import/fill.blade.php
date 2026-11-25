@@ -6134,9 +6134,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (idx < 0) return '';
         if (title.includes('checked by')) {
             const roles = [
-                'post_checked_by_engineering_name',
-                'post_checked_by_production_name',
                 'post_checked_by_validation_name',
+                'post_checked_by_production_name',
+                'post_checked_by_engineering_name',
                 'post_checked_by_quality_name',
             ];
             return roles[idx] || '';
@@ -6162,7 +6162,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const row = sel.closest('tr');
         if (!row) return '';
         const loc = sel.dataset.fieldLocation || '';
-        if (/^table_[123]_row_\d+_col_\d+$/.test(loc) || sel.dataset.isPreApprover === '1') {
+        if (sel.dataset.isPreApprover === '1') {
             return '';
         }
         const table = sel.closest('table');
@@ -6182,20 +6182,20 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             return 'post_approved_by_quality_name';
         }
-        if (text.includes('reviewed')) {
-            return 'post_checked_by_engineering_name';
-        }
-        if (text.includes('engineering') || text.includes('checked')) {
-            return 'post_checked_by_engineering_name';
-        }
-        if (text.includes('production')) {
-            return 'post_checked_by_production_name';
-        }
         if (text.includes('validation') || text.includes('user/validation') || text.includes('user / validation')) {
             if (isApprovedBy) {
                 return 'post_approved_by_user_name';
             }
             return 'post_checked_by_validation_name';
+        }
+        if (text.includes('production')) {
+            return 'post_checked_by_production_name';
+        }
+        if (text.includes('engineering') || text.includes('reviewed')) {
+            return 'post_checked_by_engineering_name';
+        }
+        if (text.includes('checked')) {
+            return 'post_checked_by_engineering_name';
         }
         if (text.includes('performed') || text.includes('recorded') || text.includes('complied')) {
             return 'post_prepared_by_name';
@@ -6479,7 +6479,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         return (c.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
                     })
                     : [];
-                const isApprovalPage = headers[0] === 'role'
+                const isApprovalPage = (headers[0] === 'role' || headers[0] === '' || headers[0] === 'role / description' || headers[0] === 'sign-off' || headers[0] === 'designation')
                     && (headers[1] || '').indexOf('name') >= 0
                     && (headers[2] || '').indexOf('signature') >= 0;
                 if (isApprovalPage || !role) return;
@@ -7672,10 +7672,11 @@ document.addEventListener('DOMContentLoaded', function () {
             return Promise.resolve(false);
         }
 
-        if (draftAbort) {
+        const isKeepalive = !!opts.keepalive;
+        if (!isKeepalive && draftAbort) {
             try { draftAbort.abort(); } catch (abortErr) {}
         }
-        draftAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        draftAbort = (!isKeepalive && typeof AbortController !== 'undefined') ? new AbortController() : null;
         const thisAbort = draftAbort;
 
         return fetch(draftSaveUrl, {
@@ -7687,8 +7688,8 @@ document.addEventListener('DOMContentLoaded', function () {
             },
             credentials: 'same-origin',
             body: body,
-            keepalive: !!opts.keepalive && !thisAbort,
-            signal: thisAbort ? thisAbort.signal : undefined,
+            keepalive: isKeepalive,
+            signal: isKeepalive ? undefined : (thisAbort ? thisAbort.signal : undefined),
         })
             .then(function (response) {
                 return response.json().then(function (data) {
@@ -7760,15 +7761,14 @@ document.addEventListener('DOMContentLoaded', function () {
         if (draftTimer) {
             clearTimeout(draftTimer);
         }
-        // Longer debounce — date pickers / typing were flooding /draft and
-        // making Add Row clicks feel ignored during saves.
+        // Debounce autosave while typing
         draftTimer = setTimeout(function () {
             if (window.docxAddRowBusy) {
                 scheduleDraftSave();
                 return;
             }
             saveDraftNow({ silent: true });
-        }, 2200);
+        }, 800);
     };
     window.docxScheduleDraftSave = scheduleDraftSave;
     window.docxSaveDraftNow = saveDraftNow;
@@ -7798,6 +7798,14 @@ document.addEventListener('DOMContentLoaded', function () {
         }
             scheduleDraftSave();
         });
+    document.addEventListener('focusout', function (e) {
+            const t = e.target;
+        if (!draftInputTarget(t)) return;
+        if (draftDirty && !finalSubmitting) {
+            if (draftTimer) clearTimeout(draftTimer);
+            saveDraftNow({ silent: true });
+        }
+    });
 
     if (form) {
         form.addEventListener('submit', function () {
@@ -7976,14 +7984,18 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (!result.data.toc_preserved) {
                         applyWordPreviewToc(result.data.toc_field_values || {});
                     }
-                    if (previewTab) {
-                        previewTab.location.href = previewUrl;
+                    if (previewTab && !previewTab.closed) {
+                        try {
+                            previewTab.location.replace(previewUrl);
+                        } catch (locErr) {
+                            previewTab.location.href = previewUrl;
+                        }
                     } else {
                         // Fallback if popup was blocked.
                         window.open(previewUrl, '_blank', 'noopener');
                     }
                     setDraftStatus(
-                        '<i class="fas fa-file-word mr-1"></i> Word preview opened.' + ((result.data && result.data.toc_preserved) ? ' TOC page numbers are the ones you entered.' : ''),
+                        '<i class="fas fa-file-word mr-1"></i> Word preview opened.' + ((result.data && result.data.toc_preserved) ? ' TOC page numbers preserved.' : '') + ' <a href="' + previewUrl + '" target="_blank" class="text-primary font-weight-bold ml-1" style="text-decoration:underline;"><i class="fas fa-external-link-alt mr-1"></i>Open Preview</a>',
                         'ok'
                     );
                 })
@@ -8012,8 +8024,19 @@ document.addEventListener('DOMContentLoaded', function () {
             saveDraftNow({ keepalive: true, silent: true });
         }
     });
+    window.addEventListener('beforeunload', function () {
+        if (draftDirty && !finalSubmitting) {
+            if (draftTimer) {
+                clearTimeout(draftTimer);
+            }
+            saveDraftNow({ keepalive: true, silent: true });
+        }
+    });
     window.addEventListener('pagehide', function () {
         if (draftDirty && !finalSubmitting) {
+            if (draftTimer) {
+                clearTimeout(draftTimer);
+            }
             saveDraftNow({ keepalive: true, silent: true });
         }
     });

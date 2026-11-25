@@ -2793,7 +2793,7 @@ def _render_heading_paragraph(
         or is_section_heading_paragraph(prefixed_clean_p)
         or is_num_section
         or re.match(
-            r"^(?:\d+(?:\.\d+)*\s*)?(?:METHODOLOGY|REPORT APPROVAL|APPROVAL PAGE)\b",
+            r"^(?:\d+(?:\.\d+)*\s*)?(?:METHODOLOGY|REPORT APPROVAL|APPROVAL PAGE|APPROVAL)\b",
             clean_upper,
         )
     ):

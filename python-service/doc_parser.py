@@ -592,6 +592,7 @@ def has_paragraph_blank(text: str) -> bool:
         if is_locked_section_title(cleaned) or is_locked_section_title(normalized):
             return False
         if cleaned.lower() in (
+            "approval",
             "methodology",
             "report approval",
             "approval page",
@@ -1016,7 +1017,7 @@ def is_approval_page_table(table) -> bool:
     header = [c.text.strip().lower() for c in table.rows[0].cells]
     if len(header) < 4:
         return False
-    if header[0] != "role":
+    if header[0] not in ("role", "", "role / description", "sign-off", "designation"):
         return False
     if "name" not in header[1]:
         return False
@@ -1630,6 +1631,7 @@ _LOCKED_SECTION_TITLES_EXACT = {
     "methodology",
     "report approval",
     "approval page",
+    "approval",
     "table of contents",
     "observation / results and evaluation",
     "observation/results and evaluation",
@@ -1684,6 +1686,7 @@ _LOCKED_SECTION_TITLE_PREFIXES = (
     "methodology",
     "report approval",
     "approval page",
+    "approval",
     "observation / results",
     "observation/results",
     "installation checks",

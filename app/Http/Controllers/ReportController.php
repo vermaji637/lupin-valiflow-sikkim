@@ -1097,12 +1097,12 @@ private function clearStageSignaturesFromData(array &$data, string $stage): void
     // POST-stage approver roles mapped to form select field keys
     private function buildPostApprovalSteps(array $data): array
     {
-        // Match Word Checked By order: Engineering → Production → Validation → QA.
+        // Match Word Checked By order: Validation → Production → Engineering → QA.
         return [
             ['key' => 'post_prepared_by_name',            'label' => 'POST_PREPARED',      'order' => 1],
-            ['key' => 'post_checked_by_engineering_name', 'label' => 'POST_ENGINEERING',   'order' => 2],
+            ['key' => 'post_checked_by_validation_name',  'label' => 'POST_VALIDATION',    'order' => 2],
             ['key' => 'post_checked_by_production_name',  'label' => 'POST_PRODUCTION',    'order' => 3],
-            ['key' => 'post_checked_by_validation_name',  'label' => 'POST_VALIDATION',    'order' => 4],
+            ['key' => 'post_checked_by_engineering_name', 'label' => 'POST_ENGINEERING',   'order' => 4],
             ['key' => 'post_checked_by_quality_name',     'label' => 'POST_CHECKED_QA',    'order' => 5],
             ['key' => 'post_approved_by_user_name',       'label' => 'POST_APPROVED_USER', 'order' => 6],
             ['key' => 'post_approved_by_quality_name',    'label' => 'POST_APPROVED_QA',   'order' => 7],
