@@ -7103,6 +7103,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         );
         $fields = $this->stripStaleTableTocFields($fields);
         $fields = $this->lockTocTableDescriptionFields($fields);
+        $fields = $this->stripNeqMisparsedSectionHeadingFields($fields);
         if ($fields !== ($report->docx_import_fields ?? [])) {
             $report->docx_import_fields = $fields;
             $report->save();
@@ -7200,7 +7201,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             $isAtt14Doc = str_contains($reportPath, 'attachment 14')
                 || str_contains($reportPath, 'attachment_14')
                 || str_contains($reportTitle, 'attachment 14')
-                || str_contains($reportTitle, 'ioq');
+                || (str_contains($reportTitle, 'report for of') && str_contains($reportTitle, 'machine'));
 
             if ($isAtt14Doc) {
                 $hasIoqMachineBlank = collect($fields)->contains(function ($f) {
@@ -7269,7 +7270,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 fn ($f) => is_array($f) && str_contains(strtolower((string) ($f['label'] ?? '')), 'following test were performed') && ($f['type'] ?? '') !== 'paragraph_blank'
             );
 
-            if (($hasAttachmentParas && ! $hasAttachmentFields) || ! $hasParagraphContent || ! $hasCol0Fields || ($hasTable0Row1 && ! $hasTable0Row0) || $hasSpuriousHeadings || $hasFollowingTestContent) {
+            if (($hasAttachmentParas && ! $hasAttachmentFields) || ! $hasParagraphContent || ! $hasCol0Fields || $hasSpuriousHeadings || $hasFollowingTestContent) {
                 $this->flushDocxPreviewCache((string) $report->docx_import_path, $report->id);
                 $existingBeforeReparse = is_array($fields) ? $fields : [];
                 $reparsed = $this->reparseDocxForReport($report);
@@ -9663,6 +9664,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $fields = is_array($report->docx_import_fields) ? $report->docx_import_fields : [];
         $fields = $this->stripStaleTableTocFields($fields);
         $fields = $this->lockTocTableDescriptionFields($fields);
+        $fields = $this->stripNeqMisparsedSectionHeadingFields($fields);
         if ($fields === []) {
             return response()->json([
                 'success' => false,
@@ -9792,6 +9794,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         if ($fields !== []) {
             $fields = $this->stripStaleTableTocFields($fields);
             $fields = $this->lockTocTableDescriptionFields($fields);
+        $fields = $this->stripNeqMisparsedSectionHeadingFields($fields);
             if ($this->requalificationPreApprovalIsComplete($report)) {
                 $stampedFields = $this->fieldsWithApprovalStamps($report);
                 if ($stampedFields !== []) {
@@ -11192,6 +11195,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         $fields = $this->lockConnectedAccessoriesDescriptions($fields);
         $fields = $this->lockRequalificationTemplateFilledColumns($fields);
         $fields = $this->lockTocTableDescriptionFields($fields);
+        $fields = $this->stripNeqMisparsedSectionHeadingFields($fields);
 
         $lockedCount = 0;
         $unlockedCount = 0;
@@ -12241,6 +12245,46 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
      */
     private function mergeDraftOnlyFieldsAfterReparse(array $existing, array $reparsed): array
     {
+        $existingByLoc = [];
+        foreach ($existing as $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = trim((string) ($field['location'] ?? ''));
+            if ($loc !== '') {
+                $existingByLoc[$loc] = $field;
+            }
+        }
+
+        // Preserve existing user-typed or draft-saved values into reparsed fields
+        foreach ($reparsed as $idx => $field) {
+            if (! is_array($field)) {
+                continue;
+            }
+            $loc = trim((string) ($field['location'] ?? ''));
+            if ($loc !== '' && isset($existingByLoc[$loc])) {
+                $ex = $existingByLoc[$loc];
+                $exVal = (string) ($ex['value'] ?? '');
+                $isDraftOwned = ($ex['user_filled'] ?? false) === true
+                    || ($ex['draft_editable'] ?? false) === true
+                    || trim($exVal) !== '';
+
+                if ($isDraftOwned && trim($exVal) !== '') {
+                    $reparsed[$idx]['value'] = $exVal;
+                    $reparsed[$idx]['user_filled'] = true;
+                    $reparsed[$idx]['draft_editable'] = true;
+                    $reparsed[$idx]['prefilled'] = false;
+                    $reparsed[$idx]['locked'] = false;
+                }
+                if (! empty($ex['approver_role'])) {
+                    $reparsed[$idx]['approver_role'] = $ex['approver_role'];
+                }
+                if (! empty($ex['user_id'])) {
+                    $reparsed[$idx]['user_id'] = $ex['user_id'];
+                }
+            }
+        }
+
         $reparsedByLoc = [];
         foreach ($reparsed as $field) {
             if (! is_array($field)) {
@@ -13222,6 +13266,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
         }
 
         $exact = [
+            'approval',
             'objective',
             'scope',
             'responsibility',
@@ -13282,6 +13327,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             'methodology',
             'report approval',
             'approval page',
+            'approval',
             'observation / results',
             'observation/results',
             'installation checks',
