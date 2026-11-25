@@ -264,7 +264,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/reports/{report}/docx-import/recall-pre', [DocxImportController::class, 'recallRequalificationPreApproval'])
         ->name('reports.docx-import.recall-pre')
         ->where(['report' => '[0-9]+']);
-    // NEQ-only: generate a Word draft from current fill values (real TOC pages) before send-for-approval.
+    // NEQ & Requalification: generate a Word draft from current fill values (real TOC pages) before send-for-approval.
     Route::post('/reports/{report}/docx-import/preview-word', [DocxImportController::class, 'previewWordDraft'])
         ->name('reports.docx-import.preview-word')
         ->where(['report' => '[0-9]+']);

@@ -920,22 +920,33 @@ class DocxImportController extends Controller
             if (! is_array($field) || ! $this->isDocxDateTimeEntryField($field)) {
                 continue;
             }
-            if (($field['date_selected'] ?? false) === true || ($field['date_selected'] ?? false) === 1 || ($field['date_selected'] ?? false) === '1') {
+            if (
+                ($field['date_selected'] ?? false) === true
+                || ($field['date_selected'] ?? false) === 1
+                || ($field['date_selected'] ?? false) === '1'
+                || ! empty($field['user_filled'])
+            ) {
                 // Requal/reval date columns: date-only calendar (no time picker).
                 $fields[$idx]['widget'] = 'date';
                 $normalized = $this->normalizeDateTimeInputValue((string) ($field['value'] ?? ''));
-                $fields[$idx]['value'] = $normalized !== ''
-                    ? substr($normalized, 0, 10)
-                    : '';
+                if ($normalized !== '') {
+                    $fields[$idx]['value'] = substr($normalized, 0, 10);
+                }
                 continue;
             }
-            $kept = $this->normalizeDateTimeInputValue((string) ($field['value'] ?? ''));
-            // A value written by the date-time picker is Y-m-d or Y-m-dTH:i.
-            // Keep that after refresh. Template dates such as 13/01/17 stay blank.
+            $rawVal = trim((string) ($field['value'] ?? ''));
+            $kept = $this->normalizeDateTimeInputValue($rawVal);
+            // A value written by the date-time picker is Y-m-d, d-m-Y, or Y-m-dTH:i.
+            // Keep that after refresh.
             if ($kept !== '' && preg_match('/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/', $kept) === 1) {
                 $fields[$idx]['date_selected'] = true;
                 $fields[$idx]['widget'] = 'date';
                 $fields[$idx]['value'] = substr($kept, 0, 10);
+                continue;
+            }
+            // If field already has non-empty text, preserve it (e.g. valid date or user value) instead of wiping it out!
+            if ($rawVal !== '') {
+                $fields[$idx]['widget'] = 'date';
                 continue;
             }
             $fields[$idx]['value'] = '';
@@ -2908,6 +2919,21 @@ class DocxImportController extends Controller
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1) {
             return $value . 'T00:00';
         }
+        // Support DD-MM-YYYY or DD/MM/YYYY (e.g. 24-11-2026 or 24/11/2026)
+        if (preg_match('/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:[T ](\d{2}:\d{2}))?$/', $value, $m) === 1) {
+            $day = str_pad($m[1], 2, '0', STR_PAD_LEFT);
+            $month = str_pad($m[2], 2, '0', STR_PAD_LEFT);
+            $year = $m[3];
+            $time = ! empty($m[4]) ? $m[4] : '00:00';
+            return "{$year}-{$month}-{$day}T{$time}";
+        }
+        // Support DD-MM-YY or DD/MM/YY (e.g. 13/01/17 -> 2017-01-13)
+        if (preg_match('/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2})$/', $value, $m) === 1) {
+            $day = str_pad($m[1], 2, '0', STR_PAD_LEFT);
+            $month = str_pad($m[2], 2, '0', STR_PAD_LEFT);
+            $year = (int) $m[3] > 50 ? '19' . $m[3] : '20' . $m[3];
+            return "{$year}-{$month}-{$day}T00:00";
+        }
 
         return '';
     }
@@ -4566,8 +4592,29 @@ class DocxImportController extends Controller
             $drop = [];
             foreach ($byTable as $tableNum => $rows) {
                 foreach ($rows as $rowNum => $cols) {
+                    // NEVER drop col_3 if table has col_4 or col_5 (it is a multi-column data table!)
+                    if (isset($cols[4]) || isset($cols[5])) {
+                        continue;
+                    }
                     // Invented 4th column (Word Att14 is 3-col).
+                    // Only drop if col_3 is NOT a meaningful data/date column and has no value.
                     if (isset($cols[3])) {
+                        $f3 = $fields[$cols[3]] ?? null;
+                        if (is_array($f3)) {
+                            $l3 = strtolower(trim((string) ($f3['label'] ?? '')));
+                            $v3 = trim((string) ($f3['value'] ?? ''));
+                            if (
+                                str_contains($l3, 'date')
+                                || str_contains($l3, 'calib')
+                                || str_contains($l3, 'maint')
+                                || str_contains($l3, 'due')
+                                || str_contains($l3, 'obs')
+                                || str_contains($l3, 'spec')
+                                || $v3 !== ''
+                            ) {
+                                continue;
+                            }
+                        }
                         $drop[$cols[3]] = true;
                     }
                     // Only scrub column-header row (row 1), never signer rows.
@@ -5155,6 +5202,52 @@ PY;
      */
     private function neqApprovalTableTitle(array $fields, array $rows): string
     {
+        // Safety guard: Check max columns and whether this is a data table.
+        // A department signature table has at most 3 or 4 columns (Dept, Name, Sig/Date).
+        // Any table with col_4, col_5 (i.e. 5+ columns) or data field labels is NEVER a department signature table.
+        $maxCol = 0;
+        $isDataTable = false;
+        foreach ($rows as $cols) {
+            foreach ($cols as $colNum => $idx) {
+                if ($colNum > $maxCol) {
+                    $maxCol = $colNum;
+                }
+                if (! is_array($fields[$idx] ?? null)) {
+                    continue;
+                }
+                $lbl = strtolower(trim((string) ($fields[$idx]['label'] ?? '')));
+                $val = strtolower(trim((string) ($fields[$idx]['value'] ?? '')));
+                $blob = $lbl . ' ' . $val;
+                if (
+                    str_contains($blob, 'instrument')
+                    || str_contains($blob, 'equipment')
+                    || str_contains($blob, 'calibration')
+                    || str_contains($blob, 'preventive maintenance')
+                    || str_contains($blob, 'maintenance')
+                    || str_contains($blob, 'sop')
+                    || str_contains($blob, 'observation')
+                    || str_contains($blob, 'acceptance criteria')
+                    || str_contains($blob, 'acceptance')
+                    || str_contains($blob, 'damper')
+                    || str_contains($blob, 'valve')
+                    || str_contains($blob, 'checks')
+                    || str_contains($blob, 'parameter')
+                    || str_contains($blob, 'specification')
+                    || str_contains($blob, 'test')
+                    || str_contains($blob, 'deviation')
+                    || str_contains($blob, 'corrective')
+                    || str_contains($blob, 'attachment')
+                    || str_contains($blob, 'revision')
+                ) {
+                    $isDataTable = true;
+                }
+            }
+        }
+
+        if ($maxCol >= 4 || $isDataTable) {
+            return '';
+        }
+
         foreach ($rows[0] ?? [] as $idx) {
             if (! is_array($fields[$idx] ?? null)) {
                 continue;
@@ -5185,6 +5278,39 @@ PY;
             }
         }
         if (! $hasSigDate) {
+            return '';
+        }
+
+        // Only infer if columns match department signature structure (Dept, Name & Designation, Signature & Date):
+        $hasDeptAndName = false;
+        foreach ($rows as $rowNum => $cols) {
+            if ($rowNum < 1) {
+                continue;
+            }
+            $deptTxt = isset($cols[0]) && is_array($fields[$cols[0]] ?? null)
+                ? strtolower(trim((string) (($fields[$cols[0]]['value'] ?? '') ?: ($fields[$cols[0]]['label'] ?? ''))))
+                : '';
+            $nameTxt = isset($cols[1]) && is_array($fields[$cols[1]] ?? null)
+                ? strtolower(trim((string) (($fields[$cols[1]]['label'] ?? '') ?: ($fields[$cols[1]]['value'] ?? ''))))
+                : '';
+            $nameType = isset($cols[1]) && is_array($fields[$cols[1]] ?? null)
+                ? strtolower(trim((string) ($fields[$cols[1]]['type'] ?? '')))
+                : '';
+            if (
+                str_contains($deptTxt, 'engineering')
+                || str_contains($deptTxt, 'production')
+                || str_contains($deptTxt, 'quality')
+                || str_contains($deptTxt, 'validation')
+                || str_contains($deptTxt, 'department')
+                || str_contains($nameTxt, 'name')
+                || str_contains($nameTxt, 'designation')
+                || $nameType === 'approver'
+            ) {
+                $hasDeptAndName = true;
+                break;
+            }
+        }
+        if (! $hasDeptAndName) {
             return '';
         }
 
@@ -6466,7 +6592,11 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                             }
                         }
                     } else {
-                        $namedNode->setAttribute('value', $value);
+                        $inputVal = $value;
+                        if (strtolower((string) $namedNode->getAttribute('type')) === 'date') {
+                            $inputVal = substr($value, 0, 10);
+                        }
+                        $namedNode->setAttribute('value', $inputVal);
                     }
                 }
             }
@@ -6629,6 +6759,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 'attachments'      => array_values($attachments),
                 'docx_filled_path' => $relative,
                 'fields'           => $fields,
+                'toc_page_values'  => is_array($tocValues) ? $tocValues : [],
             ];
         } catch (\Throwable $e) {
             Log::error('DOCX approval stamp regenerate error: ' . $e->getMessage());
@@ -6878,6 +7009,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                 ->route('reports.show', $report)
                 ->with('info', 'This document is currently pending approval.');
         }
+
+        // Clear stale draft sequence counter on fresh fill form load
+        Cache::forget('docx-draft-seq-' . $report->id);
 
         // Re-apply metadata upgrades on stored fields in case parser rules changed.
         $fields          = $report->docx_import_fields ?? [];
@@ -7709,12 +7843,15 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ) {
                 $norm = $this->normalizeDateTimeInputValue((string) ($updatedField['value'] ?? ''));
                 $picked = $norm !== '' || trim((string) ($updatedField['value'] ?? '')) !== '';
+                $isDateOnly = ($updatedField['widget'] ?? '') === 'date'
+                    || ($field['widget'] ?? '') === 'date'
+                    || in_array(($report->import_source ?? ''), ['requalification', 'revalidation'], true);
                 if ($norm !== '') {
-                    $updatedField['value'] = $norm;
+                    $updatedField['value'] = $isDateOnly ? substr($norm, 0, 10) : $norm;
                 }
                 $updatedField['date_selected'] = $picked;
                 if ($picked) {
-                    $updatedField['widget'] = 'datetime-local';
+                    $updatedField['widget'] = $isDateOnly ? 'date' : 'datetime-local';
                     // Draft-saved dates must stay editable after refresh.
                     $updatedField['locked'] = false;
                     $updatedField['user_filled'] = true;
@@ -7758,8 +7895,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ];
             $norm = $this->normalizeDateTimeInputValue((string) $submittedValue);
             if ($norm !== '') {
-                $newField['value'] = $norm;
-                $newField['widget'] = 'datetime-local';
+                $isDateOnly = in_array(($report->import_source ?? ''), ['requalification', 'revalidation'], true);
+                $newField['value'] = $isDateOnly ? substr($norm, 0, 10) : $norm;
+                $newField['widget'] = $isDateOnly ? 'date' : 'datetime-local';
                 $newField['date_selected'] = true;
             }
             $updatedFields[] = $newField;
@@ -7878,6 +8016,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         // A slower autosave must not replace page numbers the user just typed
         // and sent with Word Preview. Higher draft_seq wins.
+        $forceSave = $request->boolean('force_save');
         $incomingSeq = (int) $request->input('draft_seq', 0);
         $seqKey = 'docx-draft-seq-' . $report->id;
         $seqLock = null;
@@ -7886,7 +8025,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             try {
                 $seqLock->block(12);
                 $currentSeq = (int) Cache::get($seqKey, 0);
-                if ($currentSeq > $incomingSeq) {
+                if (! $forceSave && $currentSeq > $incomingSeq) {
                     $seqLock->release();
 
                     return response()->json([
@@ -7896,7 +8035,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
                         'saved_at' => (string) data_get($report->data, 'docx_fill_draft_saved_at', ''),
                     ]);
                 }
-                Cache::put($seqKey, $incomingSeq, now()->addDays(14));
+                Cache::put($seqKey, max($currentSeq, $incomingSeq), now()->addDays(14));
             } catch (\Throwable $e) {
                 Log::warning('DOCX draft sequence lock skipped', [
                     'report_id' => $report->id,
@@ -9383,7 +9522,7 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     }
 
     /**
-     * NEQ-only: generate a Word (.docx) preview from the current fill form values.
+     * NEQ & Requalification: generate a Word (.docx) preview from the current fill form values.
      * Does not submit for approval. Uses Word/LibreOffice TOC page recompute so
      * the initiator can check real page numbers before Send for Approval.
      */
@@ -9391,11 +9530,12 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
     {
         $this->extendPythonExecutionTime();
 
+        $isNeq = $this->isNeqImportSource($report->import_source ?? null);
         $source = strtolower(trim((string) ($report->import_source ?? '')));
         if (! in_array($source, ['new_equipment_qualification', 'requalification', 'revalidation'], true)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Word preview is not available for this protocol type.',
+                'message' => 'Word preview is only available for New Equipment and Requalification protocols.',
             ], 404);
         }
 
@@ -9435,7 +9575,8 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             ], 422);
         }
 
-        // Persist current form values first (same as autosave draft).
+        // Persist current form values first (same as autosave draft, forced to avoid stale skip).
+        $request->merge(['force_save' => true]);
         $draftResponse = $this->saveDraft($request, $report);
         if ($draftResponse->getStatusCode() >= 400) {
             return $draftResponse;
@@ -9488,7 +9629,9 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
             }
         }
         $fields = $this->applyRequalificationPreApproverNames($report, $fields);
-        $result = $this->regenerateFilledDocxAttachment($report, $fields, true);
+        // NEQ preserves manual typed TOC page numbers; Requal recomputes TOC pages via Word/LO.
+        $preserveToc = $isNeq;
+        $result = $this->regenerateFilledDocxAttachment($report, $fields, $preserveToc);
         if ($result === null) {
             return response()->json([
                 'success' => false,
@@ -9529,16 +9672,16 @@ private function repairMissingApprovalPagePerformerRows(array $fields): array
 
         return response()->json([
             'success'           => true,
-            'message'           => 'Word preview ready. Table of contents uses the page numbers you entered.',
-            'toc_preserved'     => true,
+            'message'           => 'Word preview ready.',
+            'toc_preserved'     => $preserveToc,
             'preview_url'       => $previewUrl,
             'download_url'      => $previewUrl, // legacy alias
-            'toc_field_values'  => [],
+            'toc_field_values'  => $preserveToc ? [] : ($result['toc_page_values'] ?? []),
         ]);
     }
 
     /**
-     * NEQ-only: open Word preview in-browser (PDF inline in a new tab).
+     * NEQ & Requalification: open Word preview in-browser (PDF inline in a new tab).
      * Converts the last generated `_word_preview.docx` via LibreOffice.
      */
     public function downloadWordPreview(Report $report)

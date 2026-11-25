@@ -52,6 +52,10 @@ def _normalize_text_value(value) -> str:
                 value = recovered
         except (UnicodeEncodeError, UnicodeDecodeError):
             pass
+    # Clean T00:00 from date strings for clean Word output
+    m_dt = re.match(r"^(\d{4}-\d{2}-\d{2})T00:00(?::00)?$", value)
+    if m_dt:
+        value = m_dt.group(1)
     return value
 
 
@@ -1406,17 +1410,32 @@ def _body_toc_paragraph_elements(doc) -> list:
         sdt_paras = []
     # If the document has content-control TOC entries (like Requalification),
     # body paragraphs are never TOC rows!
-    if len(sdt_paras) >= 4:
+    if len(sdt_paras) >= 2:
         return []
 
     found = []
     for child in list(doc.element.body):
         if child.tag != qn("w:p"):
             continue
-        style = _paragraph_style_id(child).lower().replace(" ", "")
+        p_pr = child.find(qn("w:pPr"))
+        style = ""
+        if p_pr is not None:
+            ps = p_pr.find(qn("w:pStyle"))
+            if ps is not None:
+                style = (ps.get(qn("w:val")) or "").lower().replace(" ", "")
         # toc 3 is a body heading style on Att14, not a contents row.
         if style in {"toc3"}:
             continue
+        raw_text = "".join(
+            node.text for node in child.iter() if node.tag == qn("w:t") and node.text
+        ).strip()
+        if not raw_text or raw_text.lower() == "table of contents":
+            continue
+
+        # Stop when real body section starts (e.g. "OBJECTIVE" / "1.0 OBJECTIVE" as a heading).
+        if (style.startswith("heading") or "heading" in style) and any(w in raw_text.lower() for w in ["objective", "scope"]):
+            break
+
         title, page = _parse_toc_title_from_element(child)
         if not title or not page:
             continue
@@ -1444,7 +1463,7 @@ def _body_toc_paragraph_elements(doc) -> list:
 
 
 def _toc_sdt_target_paragraph(doc, index: int):
-    """Paragraph for toc_sdt_{index}: content-control row first, body TOC row otherwise."""
+    """Paragraph for toc_sdt_{index}: content-control row first, body TOC row otherwise (e.g. NEQ)."""
     try:
         sdt_paras = doc._element.xpath("//w:sdt//w:p")
     except Exception:
@@ -3847,7 +3866,7 @@ def _parse_toc_title_from_element(p_el) -> tuple[str, str]:
         tag = elem.tag.split("}")[-1]
         if tag == "t" and elem.text:
             tokens.append(elem.text)
-        elif tag == "tab":
+        elif tag == "tab" and elem.getparent() is not None and elem.getparent().tag.split("}")[-1] == "r":
             tokens.append("\t")
     raw = "".join(tokens).strip()
     if not raw or raw.lower() == "table of contents":

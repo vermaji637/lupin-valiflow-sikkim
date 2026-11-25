@@ -3423,7 +3423,7 @@ def _render_table_colgroup(table) -> str:
     return "".join(parts)
 
 
-def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_tracker: list = None, header_tpl: str = "", footer_tpl: str = "", num_resolver=None, hard_page_breaks_only: bool = False) -> str:
+def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_tracker: list = None, header_tpl: str = "", footer_tpl: str = "", num_resolver=None, hard_page_breaks_only: bool = False, import_source: str = "") -> str:
     # Att14 Discussion Report: 1-col TOC list → card with one line per section
     # (Word packs 7.0 + 8.0 in one cell; card split keeps them separate).
     if is_toc_list_table(table):
@@ -3472,6 +3472,26 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
         and page_tracker is not None
         and _is_functional_tests_sheet
         and not _is_major_components_sheet
+    )
+
+    _is_reval = (import_source or "").strip().lower() == "revalidation"
+    _is_reval_table2 = bool(
+        _is_reval
+        and ncols == 7
+        and total_rows == 11
+        and re.search(r"instrument\s*used", _hdr_blob)
+    )
+    _is_reval_table3 = bool(
+        _is_reval
+        and ncols == 4
+        and total_rows == 14
+        and re.search(r"challenge\s*test", _hdr_blob)
+    )
+    _is_reval_table4 = bool(
+        _is_reval
+        and ncols == 3
+        and total_rows == 11
+        and re.search(r"list\s+of\s+attachment", _hdr_blob)
     )
 
     def _open_continued_table_page() -> None:
@@ -3542,7 +3562,13 @@ def _render_table(table, t_idx: int, field_map: dict, mode: str = "edit", page_t
             )
         )
 
-        if r_idx > 0 and page_tracker is not None and (is_row_page_break or force_chunk):
+        force_chunk_reval = bool(
+            (_is_reval_table2 and r_idx == 6)
+            or (_is_reval_table3 and r_idx in (4, 8, 12))
+            or (_is_reval_table4 and r_idx == 7)
+        )
+
+        if r_idx > 0 and page_tracker is not None and (is_row_page_break or force_chunk or force_chunk_reval):
             _open_continued_table_page()
             rows_since_break = 0
 
@@ -4653,6 +4679,18 @@ def build_fill_html(
         8.2–8.4 / REFERENCES / History / Summary under overflow:hidden.
         Extra pages are OK; hidden content is not.
         """
+        if (import_source or "").strip().lower() == "revalidation":
+            combined = f"{num_prefix} {para_text}".upper()
+            return bool(
+                re.search(
+                    r"\b("
+                    r"LIST\s+OF\s+ATTACHMENT|"
+                    r"(7\.0\s*)?REPORT\s+APPROVAL|"
+                    r"REVISION\s+HISTORY|POST-APPROVAL"
+                    r")\b",
+                    combined,
+                )
+            )
         combined = f"{num_prefix} {para_text}".upper()
         return bool(
             re.search(
@@ -4663,8 +4701,33 @@ def build_fill_html(
                 r"HISTORY\s+OF\s+EQUIPMENT|"
                 r"REVIEW\s+OF\s+CHANGE\s+CONTROLS|"
                 r"LIST\s+OF\s+ATTACHMENT|"
-                r"DEVIATIONS?\s*\(IF ANY\)|SUMMARY\s*&\s*CONCLUSION|"
+                r"DEVIATIONS?\s*\(IF\s+ANY\)|"
+                r"DEVIATION(\s+AND\s+CORRECTIVE\s+ACTION\s+TAKEN)?\s*\(IF\s+ANY\)|"
+                r"SUMMARY\s*(AND|&)\s*CONCLUSION|"
                 r"REVISION\s+HISTORY|POST-APPROVAL"
+                r")\b",
+                combined,
+            )
+        )
+
+    def _is_reval_section_heading(para_text: str, num_prefix: str = "") -> bool:
+        """
+        Break before major Revalidation / Periodic HVAC headings:
+        - 1.0 OBJECTIVE (or OBJECTIVE:) after TOC
+        - 3.0 OBSERVATION / RESULTS AND EVALUATION (or OBSERVATION / RESULTS)
+        - 4.0 LIST OF ATTACHMENT
+        - 7.0 REPORT APPROVAL
+        """
+        if (import_source or "").strip().lower() != "revalidation":
+            return False
+        combined = f"{num_prefix} {para_text}".upper()
+        return bool(
+            re.search(
+                r"\b("
+                r"(1\.0\s*)?OBJECTIVE|"
+                r"(3\.0\s*)?OBSERVATION\s*/\s*RESULTS(\s+AND\s+EVALUATION)?|"
+                r"(4\.0\s*)?LIST\s+OF\s+ATTACHMENT|"
+                r"(7\.0\s*)?REPORT\s+APPROVAL"
                 r")\b",
                 combined,
             )
@@ -4776,6 +4839,7 @@ def build_fill_html(
                         footer_tpl=footer_html_tpl,
                         num_resolver=num_resolver,
                         hard_page_breaks_only=hard_page_breaks_only,
+                        import_source=import_source or "",
                     )
                 )
                 _close_requal_91_keep_after_table(table_idx)
@@ -4795,7 +4859,7 @@ def build_fill_html(
                 if para_text and _is_toc_title_text(para_text):
                     if _is_followed_by_toc_card(child):
                         continue
-                    if has_content_on_page and _element_has_page_break(child, hard_only=hard_page_breaks_only):
+                    if has_content_on_page:
                         _force_new_page()
                     html_parts.append(
                         '<p class="docx-para docx-heading-target" style="font-weight:700; text-align:center; font-size:14px; margin: 16px 0 10px 0; text-transform:uppercase; letter-spacing:0.5px;" '
@@ -4814,6 +4878,7 @@ def build_fill_html(
                         _element_has_page_break(child, hard_only=hard_page_breaks_only)
                         or _is_major_tail_section(para_text, num_prefix)
                         or _is_requal_checks_heading(para_text, num_prefix)
+                        or _is_reval_section_heading(para_text, num_prefix)
                     ):
                         _force_new_page()
                     _open_requal_91_keep(para_text, num_prefix)
@@ -4842,7 +4907,7 @@ def build_fill_html(
             if _peek_text and _is_toc_title_text(_peek_text):
                 if _is_followed_by_toc_card(child):
                     continue
-                if has_content_on_page and _element_has_page_break(child, hard_only=hard_page_breaks_only):
+                if has_content_on_page:
                     _force_new_page()
                 html_parts.append(
                     '<p class="docx-para docx-heading-target" style="font-weight:700; text-align:center; font-size:14px; margin: 16px 0 10px 0; text-transform:uppercase; letter-spacing:0.5px;" '
@@ -4863,6 +4928,7 @@ def build_fill_html(
                 _element_has_page_break(child, hard_only=hard_page_breaks_only)
                 or _is_major_tail_section(_peek_text, _peek_prefix)
                 or _is_requal_checks_heading(_peek_text, _peek_prefix)
+                or _is_reval_section_heading(_peek_text, _peek_prefix)
             ):
                 _force_new_page()
             _open_requal_91_keep(_peek_text, _peek_prefix)

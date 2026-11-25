@@ -111,6 +111,33 @@
     line-height: 1.35;
     box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
 }
+#docxEsignDock #docxDraftStatusFloating {
+    pointer-events: none !important;
+    user-select: none;
+    cursor: default;
+    font-size: 11px;
+    font-weight: 600;
+    max-width: 250px;
+    white-space: normal;
+    text-align: right;
+    line-height: 1.35;
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15);
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+    transition: all 0.2s ease-in-out;
+}
+#docxEsignDock #docxDraftStatusFloating.badge-saving {
+    background: #fffbeb !important;
+    color: #92400e !important;
+    border-color: #fde68a !important;
+}
+#docxEsignDock #docxDraftStatusFloating.badge-danger {
+    background: #fef2f2 !important;
+    color: #b91c1c !important;
+    border-color: #fecaca !important;
+}
 
 /* ── Preview container ── */
 body.premium-app #docxFillForm .docx-preview-wrapper {
@@ -945,7 +972,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
         </div>
     @endif
 
-    @if(empty($requalFillLocked) && in_array(($importSource ?? ''), ['requalification', 'revalidation', 'new_equipment_qualification'], true))
+    @if((empty($requalFillLocked) || !empty($isPreApprovalMode)) && in_array(($importSource ?? ''), ['requalification', 'revalidation', 'new_equipment_qualification'], true))
         <div id="docxEsignDock" aria-label="E-Sign and Preview Actions">
             <div class="btn-group shadow" role="group">
                 <button type="button" class="btn btn-outline-primary bg-white shadow-sm font-weight-bold" id="btnWordPreviewFloating"
@@ -958,6 +985,12 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                 </button>
             </div>
             <span id="docxEsignStatus" class="badge badge-light text-secondary px-3 py-2" style="display:none;"></span>
+            <div id="docxDraftStatusFloating" class="badge badge-light text-dark shadow-sm px-3 py-2"
+                 style="@if(empty($draftSavedAt)) display:none; @else display:inline-flex; align-items:center; @endif">
+                @if(!empty($draftSavedAt))
+                    <i class="fas fa-cloud-upload-alt mr-1 text-success"></i> Draft saved {{ $draftSavedAt }}
+                @endif
+            </div>
         </div>
     @endif
 
@@ -1503,7 +1536,7 @@ body.premium-app #docxFillForm .docx-preview-wrapper a.docx-attachment-link {
                                 <i class="fas fa-times mr-1"></i> Cancel
                             </a>
                         --}}
-                        {{-- Word preview with real TOC pages (Word/LO) before submit. --}}
+                        {{-- Word preview with real TOC pages (Word/LO) before submit (NEQ, Requalification & Revalidation). --}}
                         @if(in_array(($importSource ?? ''), ['new_equipment_qualification', 'requalification', 'revalidation'], true)
                             && empty($requalFillLocked)
                             && count($fields) > 0)
@@ -1538,6 +1571,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const btnText   = document.getElementById('btnText');
     const requalFillLocked = @json(!empty($requalFillLocked));
     const isPreApprovalMode = @json(!empty($isPreApprovalMode));
+    const docxImportSource = @json($importSource ?? '');
+    const isRevalidation = (docxImportSource === 'revalidation');
 
     if (requalFillLocked && !isPreApprovalMode && form) {
         form.querySelectorAll('.docx-preview-wrapper input, .docx-preview-wrapper select, .docx-preview-wrapper textarea, .requal-locked-block input, .requal-locked-block select, .requal-locked-block textarea').forEach(function (el) {
@@ -1840,6 +1875,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (lastRow.offsetHeight + 12 >= pageBody.clientHeight && last.rows.length <= 2 && pageBody.childElementCount === 1) {
                     break;
                 }
+                // Never split rows from a signature / approval table (Prepared / Checked / Approved By).
+                if (isSignatureOrApprovalTable(last)) {
+                    if (pageBody.childElementCount > 1) {
+                        moveWholeTableWithGlue(page, last);
+                        continue;
+                    }
+                    break;
+                }
                 // 2.0 SCOPE: keep together only when other content shares the sheet.
                 if (isCompactKeepTogetherTable(last)) {
                     const glued = collectBlocksGluedBeforeTable(last);
@@ -1852,9 +1895,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 // Keep Sr.No 1 visible: if only header+one data row remain and still
                 // overfull, move the whole leftover table instead of clipping row 1.
                 if (last.rows.length <= 2) {
-                    const nextPage = followingA4Page(page) || createContinuationPage(page);
-                    const nextBody = nextPage.querySelector('.docx-page-body');
                     const tIdx = last.getAttribute('data-table-index') || '';
+                    const nextPage = getOrCreateContinuationPage(page, tIdx);
+                    const nextBody = nextPage.querySelector('.docx-page-body');
                     const existing = tIdx
                         ? nextBody.querySelector('table.docx-table[data-table-index="' + tIdx + '"]')
                         : null;
@@ -1881,7 +1924,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 // If the row did not move, push the whole leftover table — never
                 // leave General Checks / major-component rows clipped under overflow:hidden.
                 if (last.contains(lastRow) || (before && before.nextElementSibling === lastRow)) {
-                    const nextPage = followingA4Page(page) || createContinuationPage(page);
+                    const tIdx = last.getAttribute('data-table-index') || '';
+                    const nextPage = getOrCreateContinuationPage(page, tIdx);
                     const nextBody = nextPage.querySelector('.docx-page-body');
                     if (nextBody && last.parentNode === pageBody) {
                         nextBody.insertBefore(last, nextBody.firstChild);
@@ -1903,7 +1947,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             if (pageBody.childElementCount === 1) break;
-            const nextPage = followingA4Page(page) || createContinuationPage(page);
+            const nextPage = getOrCreateContinuationPage(page);
             const nextBody = nextPage.querySelector('.docx-page-body');
             nextBody.insertBefore(last, nextBody.firstChild);
         }
@@ -2026,6 +2070,36 @@ document.addEventListener('DOMContentLoaded', function () {
         return newPage;
     }
 
+    function getOrCreateContinuationPage(page, forTableIndex) {
+        const next = followingA4Page(page);
+        if (next) {
+            const nextBody = next.querySelector('.docx-page-body');
+            if (nextBody) {
+                // If next page is completely empty, use it!
+                if (!nextBody.children.length) {
+                    return next;
+                }
+                // If next page has a continuation of the same table index, use it!
+                if (forTableIndex !== null && forTableIndex !== undefined && forTableIndex !== '') {
+                    if (forTableIndex === 'toc') {
+                        const first = nextBody.firstElementChild;
+                        if (first && first.classList && first.classList.contains('docx-toc-card')) {
+                            return next;
+                        }
+                    } else {
+                        const matchingTable = nextBody.querySelector('table.docx-table[data-table-index="' + String(forTableIndex) + '"]');
+                        if (matchingTable) {
+                            return next;
+                        }
+                    }
+                }
+            }
+        }
+        // Next page belongs to another section (or doesn't exist).
+        // Create a new continuation page right after this page!
+        return createContinuationPage(page);
+    }
+
     function rowPlainLabel(row) {
         return ((row && (row.innerText || row.textContent)) || '')
             .replace(/\s+/g, ' ')
@@ -2033,11 +2107,21 @@ document.addEventListener('DOMContentLoaded', function () {
             .toLowerCase();
     }
 
+    function isSignatureOrApprovalTable(table) {
+        if (!table || !table.querySelector) return false;
+        if (table.classList && (table.classList.contains('docx-dept-signature-table') || table.classList.contains('docx-approval-table'))) return true;
+        const tIdx = table.getAttribute && table.getAttribute('data-table-index');
+        if (tIdx === '1' || tIdx === '2' || tIdx === '3' || tIdx === '18' || tIdx === '19' || tIdx === '20') return true;
+        const text = (table.innerText || table.textContent || '').replace(/\s+/g, ' ').toLowerCase();
+        return /\b(prepared\s+by|checked\s+by|approved\s+by)\b/.test(text)
+            && (/\b(name\s*&\s*designation|signature\s*&\s*date)\b/.test(text) || /\b(engineering|production|quality\s+assurance|validation)\b/.test(text));
+    }
+
     function rowLooksLikeColumnHeader(row) {
         if (!row) return false;
         if (row.getAttribute('data-cont-header') === '1') return true;
         if (row.getAttribute('data-row-index') === '0' && row.querySelector('.docx-table-header, th, .docx-readonly-value')) {
-            // Row 0 is usually the column header (DETAILS / Connected Accessories / Sr.No).
+            // Row 0 is usually the column header (DETAILS / Connected Accessories / Sr.No / Prepared/Checked/Approved By).
             const t0 = rowPlainLabel(row);
             if (
                 /^(details|description|connected\s+accessories)\b/.test(t0)
@@ -2047,12 +2131,19 @@ document.addEventListener('DOMContentLoaded', function () {
                 || /\bpreventive\s+maintenance\b/.test(t0)
                 || /\bacceptance\s*criteria\b/.test(t0)
                 || /\bmethodology\b/.test(t0)
+                || (/\b(prepared\s+by|checked\s+by|approved\s+by)\b/.test(t0) && (/\bname\s*&\s*designation\b/.test(t0) || /\bsignature\s*&\s*date\b/.test(t0)))
             ) {
                 return true;
             }
         }
         const text = rowPlainLabel(row);
         if (!text) return false;
+        if (
+            /\b(prepared\s+by|checked\s+by|approved\s+by)\b/.test(text)
+            && (/\bname\s*&\s*designation\b/.test(text) || /\bsignature\s*&\s*date\b/.test(text))
+        ) {
+            return true;
+        }
         // Generic two-column label headers used by equipment / accessories tables.
         if (/^(details(\s*\|\s*description)?|description)$/.test(text)) return true;
         if (/^details\b/.test(text) && /\bdescription\b/.test(text) && text.length < 40) return true;
@@ -2081,6 +2172,13 @@ document.addEventListener('DOMContentLoaded', function () {
         if (row.getAttribute('data-cont-header') === '1') return true;
         if (row.querySelector('th, .docx-table-header')) return true;
         if (rowLooksLikeColumnHeader(row)) return true;
+        const text = rowPlainLabel(row);
+        if (
+            /\b(prepared\s+by|checked\s+by|approved\s+by)\b/.test(text)
+            && (/\bname\s*&\s*designation\b/.test(text) || /\bsignature\s*&\s*date\b/.test(text))
+        ) {
+            return true;
+        }
         return row.getAttribute('data-row-index') === '0'
             && !row.querySelector('input:not([type="hidden"]), textarea, select');
     }
@@ -2141,6 +2239,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (/\binstrument\s+name\b/.test(text) && /calibrat/.test(text)) return false;
         if (/\bpreventive\s+maintenance\b/.test(text)) return false;
         if (/\bconnected\s+accessories\b/.test(text)) return false;
+        if (isSignatureOrApprovalTable(sourceTable)) return false;
         if (isHvacChecklistTable(sourceTable)) return false;
         if (isNoPullBackTable(sourceTable)) return false;
         return true;
@@ -2254,10 +2353,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function dedupeDuplicateColumnHeaderRows() {
         // Keep ONE column header per table fragment (DETAILS, Connected Accessories,
-        // SOP, Instrument Name, Checks/Methodology, etc.).
+        // SOP, Instrument Name, Checks/Methodology, Checked By, etc.).
         document.querySelectorAll('.docx-preview table.docx-table:not(.header-table)').forEach(function (table) {
             let seenColHdr = false;
+            const seenHeaderSignatures = {};
             Array.from(table.rows).forEach(function (row) {
+                const label = rowPlainLabel(row);
+                const isSigHdr = /\b(prepared\s+by|checked\s+by|approved\s+by)\b/.test(label)
+                    && (/\bname\s*&\s*designation\b/.test(label) || /\bsignature\s*&\s*date\b/.test(label));
+
+                if (isSigHdr) {
+                    const m = label.match(/\b(prepared\s+by|checked\s+by|approved\s+by)\b/);
+                    const key = m ? m[1].replace(/\s+/g, ' ') : label;
+                    if (seenHeaderSignatures[key]) {
+                        row.remove();
+                        return;
+                    }
+                    seenHeaderSignatures[key] = true;
+                    return;
+                }
+
                 if (!isTableHeaderRow(row) && !rowLooksLikeColumnHeader(row)) return;
                 // Banner rows (Major components / AHU:) may sit above the real header.
                 if (rowLooksLikeSectionBanner(row)) return;
@@ -2269,6 +2384,30 @@ document.addEventListener('DOMContentLoaded', function () {
                 row.remove();
             });
         });
+
+        // Also clean up any orphan header-only table fragment:
+        // If a table on page N has only a header row (no data rows) and its continuation exists on page N+1,
+        // remove the orphan header-only table from page N so the header is not duplicated across the page break!
+        const pages = previewA4Pages();
+        for (let i = 0; i < pages.length - 1; i++) {
+            const body = pages[i].querySelector('.docx-page-body');
+            const nextBody = pages[i + 1].querySelector('.docx-page-body');
+            if (!body || !nextBody) continue;
+
+            body.querySelectorAll('table.docx-table[data-table-index]:not(.header-table)').forEach(function (table) {
+                const tIdx = table.getAttribute('data-table-index');
+                if (!tIdx) return;
+                const hasDataRows = Array.from(table.rows).some(function (r) {
+                    return !isTableHeaderRow(r) && !rowLooksLikeColumnHeader(r);
+                });
+                if (!hasDataRows) {
+                    const cont = nextBody.querySelector('table.docx-table[data-table-index="' + tIdx + '"]');
+                    if (cont) {
+                        table.remove();
+                    }
+                }
+            });
+        }
     }
 
     /**
@@ -2391,9 +2530,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function continuationTable(page, sourceTable) {
-        const nextPage = followingA4Page(page) || createContinuationPage(page);
-        const body = nextPage.querySelector('.docx-page-body');
         const tIdx = sourceTable.getAttribute('data-table-index') || '';
+        const nextPage = getOrCreateContinuationPage(page, tIdx);
+        const body = nextPage.querySelector('.docx-page-body');
         const first = body.firstElementChild;
         if (
             first
@@ -2412,7 +2551,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function continuationTocCard(page) {
-        const nextPage = followingA4Page(page) || createContinuationPage(page);
+        const nextPage = getOrCreateContinuationPage(page, 'toc');
         const body = nextPage.querySelector('.docx-page-body');
         const first = body.firstElementChild;
         if (first && first.classList.contains('docx-toc-card') && first.getAttribute('data-toc-cont') === '1') {
@@ -2440,7 +2579,7 @@ document.addEventListener('DOMContentLoaded', function () {
             // move the WHOLE unit forward. Never peel T12 rows off it — that left a
             // header-only keep hopping page-to-page with 9.0/9.1 stripped out.
             if (body.childElementCount > 1) {
-                const nextPage = followingA4Page(page) || createContinuationPage(page);
+                const nextPage = getOrCreateContinuationPage(page);
                 const nextBody = nextPage.querySelector('.docx-page-body');
                 nextBody.insertBefore(last, nextBody.firstChild);
                 return true;
@@ -2478,6 +2617,14 @@ document.addEventListener('DOMContentLoaded', function () {
             if (row.offsetHeight + 12 >= body.clientHeight && last.rows.length <= 2 && body.childElementCount === 1) {
                 return false;
             }
+            if (isSignatureOrApprovalTable(last)) {
+                // Never split rows from a signature / approval table (Prepared / Checked / Approved By).
+                // If it doesn't fit on this sheet, move the entire table (and glued headings) to the next sheet!
+                if (body.childElementCount > 1) {
+                    return moveWholeTableWithGlue(page, last);
+                }
+                return false;
+            }
             // 2.0 SCOPE: keep together only when earlier content shares this sheet.
             // Alone+overfull must row-split — whole-unit bounce created endless pages.
             if (isCompactKeepTogetherTable(last)) {
@@ -2490,9 +2637,9 @@ document.addEventListener('DOMContentLoaded', function () {
             // Header + last data row still overfull (tall mitigation header): move the
             // whole leftover table so Sr.No 1 is not clipped under overflow:hidden.
             if (last.rows.length <= 2 && (pageIsOverfull(body) || contentOverflows(body))) {
-                const nextPage = followingA4Page(page) || createContinuationPage(page);
-                const nextBody = nextPage.querySelector('.docx-page-body');
                 const tIdx = last.getAttribute('data-table-index') || '';
+                const nextPage = getOrCreateContinuationPage(page, tIdx);
+                const nextBody = nextPage.querySelector('.docx-page-body');
                 const existing = tIdx
                     ? nextBody.querySelector('table.docx-table[data-table-index="' + tIdx + '"]')
                     : null;
@@ -2557,7 +2704,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const lines = last.querySelectorAll(':scope > .docx-textbox-line, :scope > p');
             if (lines.length > 1) {
                 const line = lines[lines.length - 1];
-                const nextPage = followingA4Page(page) || createContinuationPage(page);
+                const nextPage = getOrCreateContinuationPage(page);
                 const nextBody = nextPage.querySelector('.docx-page-body');
                 let cont = nextBody.firstElementChild;
                 if (!(cont && cont.classList && cont.classList.contains('docx-textbox')
@@ -2611,7 +2758,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 return true;
             }
         }
-        const nextPage = followingA4Page(page) || createContinuationPage(page);
+        const tIdx = (last.matches && last.matches('table.docx-table')) ? (last.getAttribute('data-table-index') || '') : '';
+        const nextPage = getOrCreateContinuationPage(page, tIdx);
         const nextBody = nextPage.querySelector('.docx-page-body');
         if (last.matches && last.matches('table.docx-table')) {
             const glued = collectBlocksGluedBeforeTable(last);
@@ -2691,9 +2839,10 @@ document.addEventListener('DOMContentLoaded', function () {
         return glued;
     }
 
-    /** Only 2.0 SCOPE Details|Description (Tag No…Area) — never generic small tables. */
+    /** Only 2.0 SCOPE Details|Description (Tag No…Area) & signature blocks — never generic small tables. */
     function isCompactKeepTogetherTable(table) {
         if (!table || !table.rows || table.classList.contains('header-table')) return false;
+        if (isSignatureOrApprovalTable(table)) return true;
         const rowCount = table.rows.length;
         if (rowCount < 3 || rowCount > 12) return false;
         const labels = Array.from(table.rows).slice(0, Math.min(12, rowCount)).map(function (row) {
@@ -2709,10 +2858,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function moveWholeTableWithGlue(page, table) {
         if (!page || !table) return false;
-        const nextPage = followingA4Page(page) || createContinuationPage(page);
+        const tIdx = table.getAttribute('data-table-index') || '';
+        const nextPage = getOrCreateContinuationPage(page, tIdx);
         const nextBody = nextPage.querySelector('.docx-page-body');
         if (!nextBody) return false;
-        const tIdx = table.getAttribute('data-table-index') || '';
         const existing = tIdx
             ? nextBody.querySelector('table.docx-table[data-table-index="' + tIdx + '"]')
             : null;
@@ -2832,8 +2981,6 @@ document.addEventListener('DOMContentLoaded', function () {
     function dropEmptySheet(page) {
         const body = page.querySelector('.docx-page-body');
         if (!body) return false;
-        // Never destroy sheets that still hold protocol sections / FT rows.
-        if (isProtectedProtocolSheet(page)) return false;
         Array.from(body.children).forEach(function (el) {
             // Only strip true header-only clones — keep single-row data continuations.
             if (el.matches && el.matches('table.docx-table') && !el.querySelector('[name]')) {
@@ -2853,12 +3000,23 @@ document.addEventListener('DOMContentLoaded', function () {
             if (el.classList && el.classList.contains('docx-toc-card') && !el.querySelector('.docx-toc-line')) {
                 el.remove();
             }
+            const text = ((el.innerText || el.textContent || '')).replace(/\s+/g, ' ').trim();
+            if (
+                !text
+                && !(el.querySelector && el.querySelector('input, textarea, select, img, table'))
+            ) {
+                el.remove();
+            }
         });
-        if (body.children.length) return false;
-        const prev = page.previousElementSibling;
-        if (prev && prev.classList.contains('docx-page-break-indicator')) prev.remove();
-        page.remove();
-        return true;
+        if (body.children.length === 0) {
+            const prev = page.previousElementSibling;
+            if (prev && prev.classList.contains('docx-page-break-indicator')) prev.remove();
+            page.remove();
+            return true;
+        }
+        // Never destroy sheets that still hold real protocol sections / FT rows.
+        if (isProtectedProtocolSheet(page)) return false;
+        return false;
     }
 
     function pullBlockBack(body, nextBody, el) {
@@ -2902,6 +3060,8 @@ document.addEventListener('DOMContentLoaded', function () {
     // pull-back fights spill under overflow:hidden — spill forward only.
     function isNoPullBackTable(table) {
         if (!table || !table.querySelector) return false;
+        if (typeof isRevalidation !== 'undefined' && isRevalidation) return true;
+        if (isSignatureOrApprovalTable(table)) return true;
         if (isHvacChecklistTable(table)) return true;
         const tIdx = table.getAttribute && table.getAttribute('data-table-index');
         if (tIdx === '7' || tIdx === '9') return true;
@@ -3244,18 +3404,20 @@ document.addEventListener('DOMContentLoaded', function () {
     function isMajorTailHeading(el) {
         if (!el) return false;
         const text = ((el.dataset && el.dataset.headingText) || el.innerText || el.textContent || '').toUpperCase();
-        return /\b(DEVIATIONS?\s*\(IF ANY\)|LIST OF ATTACHMENT|SUMMARY\s*&\s*CONCLUSION|REFERENCES|ABBREVIATIONS|REVISION\s+HISTORY|POST-APPROVAL)\b/.test(text);
+        return /\b(DEVIATIONS?\s*\(IF ANY\)|DEVIATION(\s+AND\s+CORRECTIVE\s+ACTION\s+TAKEN)?\s*\(IF\s+ANY\)|LIST OF ATTACHMENT|SUMMARY\s*(AND|&)\s*CONCLUSION|REFERENCES|ABBREVIATIONS|REVISION\s+HISTORY|POST-APPROVAL|REPORT\s+APPROVAL|(1\.0\s*)?OBJECTIVE|(3\.0\s*)?OBSERVATION)\b/.test(text);
     }
 
     function majorTailSectionKey(el) {
         const text = headingTextOf(el);
+        if (/\bOBJECTIVE\b/.test(text)) return 'objective';
+        if (/\bOBSERVATION\b/.test(text)) return 'observation';
         if (/\bDEVIATIONS?\b/.test(text)) return 'deviations';
         if (/\bLIST\s+OF\s+ATTACHMENT\b/.test(text)) return 'attachments';
         if (/\bSUMMARY\b/.test(text)) return 'summary';
         if (/\bREFERENCES\b/.test(text)) return 'references';
         if (/\bABBREVIATIONS\b/.test(text)) return 'abbreviations';
         if (/\bREVISION\s+HISTORY\b/.test(text)) return 'revision';
-        if (/\bPOST-APPROVAL\b/.test(text)) return 'post_approval';
+        if (/\b(POST-APPROVAL|REPORT\s+APPROVAL)\b/.test(text)) return 'post_approval';
         return '';
     }
 
@@ -3561,8 +3723,28 @@ document.addEventListener('DOMContentLoaded', function () {
         const nextBody = next.querySelector('.docx-page-body');
         const first = nextBody && nextBody.firstElementChild;
         if (!first) return false;
+        if (typeof isRevalidation !== 'undefined' && isRevalidation) {
+            return false;
+        }
         // Hard lock: never pack across 8↔9 / 9.1↔9.2 or yank (Sign/Date).
         if (shouldBlockRequalPackBoundary(page, next)) {
+            return false;
+        }
+        // 16.0 POST-APPROVAL SIGNATURE: in original Word protocol, POST-APPROVAL starts
+        // on a clean page (page 27/28) with its own Prepared By / Checked By / Approved By tables.
+        // Never pull POST-APPROVAL SIGNATURE or its approval tables backwards onto an earlier page
+        // (such as Revision History), which breaks Table 19 and duplicates Checked By headings.
+        const firstText = ((first.dataset && first.dataset.headingText) || first.innerText || first.textContent || '').toUpperCase();
+        if (
+            /\b(TABLE\s+OF\s+CONTENTS|(1\.0\s*)?OBJECTIVE|(3\.0\s*)?OBSERVATION\s*\/\s*RESULTS|(4\.0\s*)?LIST\s+OF\s+ATTACHMENT|(6\.0\s*)?SUMMARY\s*(AND|&)\s*CONCLUSION|POST-APPROVAL)\b/i.test(firstText)
+            || isSignatureOrApprovalTable(first)
+        ) {
+            return false;
+        }
+
+        // If current page contains REVISION HISTORY (heading or Table 17), never pull any following section onto it.
+        const pageText = ((body.innerText || body.textContent) || '').toUpperCase();
+        if (/\bREVISION\s+HISTORY\b/.test(pageText) || body.querySelector('table[data-table-index="17"]')) {
             return false;
         }
         // Abbreviations / Revision / Post-Approval must not swallow the next
@@ -3654,6 +3836,10 @@ document.addEventListener('DOMContentLoaded', function () {
         // sheet — leaving large blank bands. Use scrollHeight so tall tables are
         // not underestimated and clipped after dropEmptySheet.
         if (isMajorTailHeading(first)) {
+            // NEVER pull POST-APPROVAL SIGNATURE backwards — it belongs on its own clean sheet.
+            if (/\bPOST-APPROVAL\b/i.test(((first.dataset && first.dataset.headingText) || first.innerText || first.textContent || ''))) {
+                return false;
+            }
             const free = pageFreeSpace(body);
             const section = [first];
             let walk = first.nextElementSibling;
@@ -3666,8 +3852,16 @@ document.addEventListener('DOMContentLoaded', function () {
             }, 0) + 40;
             if (sectionNeed > 0 && sectionNeed <= free) {
                 let moved = false;
+                const movedElements = [];
                 for (let si = 0; si < section.length; si++) {
-                    if (!pullBlockBack(body, nextBody, section[si])) break;
+                    if (!pullBlockBack(body, nextBody, section[si])) {
+                        // Rollback on partial failure to avoid splitting headings and tables!
+                        for (let ri = movedElements.length - 1; ri >= 0; ri--) {
+                            nextBody.insertBefore(movedElements[ri], nextBody.firstChild);
+                        }
+                        return false;
+                    }
+                    movedElements.push(section[si]);
                     moved = true;
                 }
                 if (moved) dropEmptySheet(next);
@@ -4096,6 +4290,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Compact SCOPE/details tables are moved as a whole in spillOneBlock —
         // never peel individual rows (that created the mid-table break).
         if (isCompactKeepTogetherTable(table)) return null;
+        if (isSignatureOrApprovalTable(table)) return null;
         // Mid-page table with section/para siblings after it (e.g. 8.2 T10 then
         // 8.3/8.4): never peel — that left headings behind and parked the table
         // under Verification / History. spillOneBlock moves the bottom block instead.
@@ -4136,9 +4331,9 @@ document.addEventListener('DOMContentLoaded', function () {
         // Header/banner-only leftover: drop it when continuation already has data
         // (keeps 9.3 / 8.1 from showing column headers twice at the page break).
         if (tableIsHeaderOnly(table) || table.rows.length <= hdrN) {
-            const nextPage = followingA4Page(page) || createContinuationPage(page);
-            const nextBody = nextPage.querySelector('.docx-page-body');
             const tIdx = table.getAttribute('data-table-index') || '';
+            const nextPage = getOrCreateContinuationPage(page, tIdx);
+            const nextBody = nextPage.querySelector('.docx-page-body');
             const existing = tIdx
                 ? nextBody.querySelector('table.docx-table[data-table-index="' + tIdx + '"]')
                 : null;
@@ -4201,12 +4396,15 @@ document.addEventListener('DOMContentLoaded', function () {
             changed = false;
             Array.from(document.querySelectorAll('.docx-preview .docx-a4-page')).forEach(function (sheet) {
                 if (!document.body.contains(sheet)) return;
-                if (isProtectedProtocolSheet(sheet)) return;
                 const body = sheet.querySelector('.docx-page-body');
                 if (!body) return;
                 Array.from(body.children).forEach(function (el) {
                     if (el.matches && el.matches('table.docx-table') && !el.querySelector('[name]')) {
                         const rows = Array.from(el.rows || []);
+                        if (!rows.length) {
+                            el.remove();
+                            return;
+                        }
                         const onlyHeader = rows.length > 0 && rows.every(function (row) {
                             const rIdx = parseInt(row.getAttribute('data-row-index') || '-1', 10);
                             return rIdx === 0
@@ -4225,7 +4423,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     const text = ((el.innerText || el.textContent || '')).replace(/\s+/g, ' ').trim();
                     if (
                         !text
-                        && !(el.querySelector && el.querySelector('input, textarea, select, img, table'))
+                        && !(el.querySelector && el.querySelector('input:not([type="hidden"]), textarea, select, img'))
                     ) {
                         el.remove();
                     }
@@ -7289,25 +7487,38 @@ document.addEventListener('DOMContentLoaded', function () {
     const draftSaveUrl = @json(route('reports.docx-import.draft', $report));
     const wordPreviewUrl = @json(route('reports.docx-import.preview-word', $report));
     const draftStatusEl = document.getElementById('docxDraftStatus');
+    const draftStatusFloatingEl = document.getElementById('docxDraftStatusFloating');
     const btnSaveDraft = document.getElementById('btnSaveDraft');
     const btnWordPreview = document.getElementById('btnWordPreview');
     const btnWordPreviewText = document.getElementById('btnWordPreviewText');
     let draftTimer = null;
     let draftSaving = false;
     let draftPending = false;
-    let draftSeq = 0;
+    let draftSeq = Date.now();
     let draftAbort = null;
     let draftDirty = false;
     let finalSubmitting = false;
     let wordPreviewBusy = false;
 
     const setDraftStatus = function (message, tone) {
-        if (!draftStatusEl) return;
-        draftStatusEl.style.display = 'inline-block';
-        draftStatusEl.className = 'badge shadow-sm mr-2 px-3 py-2 '
-            + (tone === 'danger' ? 'badge-danger'
-                : (tone === 'saving' ? 'badge-warning text-dark' : 'badge-light text-secondary'));
-        draftStatusEl.innerHTML = message;
+        const els = [draftStatusEl, draftStatusFloatingEl].filter(Boolean);
+        if (!els.length) return;
+        els.forEach(function (el) {
+            el.style.display = tone === 'hidden' ? 'none' : 'inline-flex';
+            el.style.alignItems = 'center';
+            if (el === draftStatusFloatingEl) {
+                el.className = 'badge shadow-sm px-3 py-2 '
+                    + (tone === 'danger' ? 'badge-danger text-white'
+                        : (tone === 'saving' ? 'badge-saving'
+                            : (tone === 'ok' ? 'badge-light text-dark font-weight-bold' : 'badge-light text-secondary')));
+            } else {
+                el.className = 'badge shadow-sm mr-2 px-3 py-2 '
+                    + (tone === 'danger' ? 'badge-danger text-white'
+                        : (tone === 'saving' ? 'badge-warning text-dark'
+                            : (tone === 'ok' ? 'badge-light text-dark font-weight-bold' : 'badge-light text-secondary')));
+            }
+            el.innerHTML = message;
+        });
     };
 
     /**
@@ -7447,8 +7658,11 @@ document.addEventListener('DOMContentLoaded', function () {
         let body;
         try {
             body = collectDraftFormData();
-            draftSeq += 1;
+            draftSeq = Math.max(draftSeq + 1, Date.now());
             body.append('draft_seq', String(draftSeq));
+            if (opts && opts.force) {
+                body.append('force_save', '1');
+            }
         } catch (collectErr) {
             console.warn('DOCX draft FormData collect failed', collectErr);
             draftSaving = false;
@@ -7618,7 +7832,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (draftTimer) {
                 clearTimeout(draftTimer);
             }
-            saveDraftNow({ silent: false });
+            saveDraftNow({ silent: false, force: true });
         });
     }
 
@@ -7712,8 +7926,9 @@ document.addEventListener('DOMContentLoaded', function () {
             let body;
             try {
                 body = collectDraftFormData();
-                draftSeq += 1;
+                draftSeq = Math.max(draftSeq + 1, Date.now());
                 body.append('draft_seq', String(draftSeq));
+                body.append('force_save', '1');
             } catch (collectErr) {
                 if (previewTab) {
                     try { previewTab.close(); } catch (e) {}
@@ -7768,7 +7983,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         window.open(previewUrl, '_blank', 'noopener');
                     }
                     setDraftStatus(
-                        '<i class="fas fa-file-word mr-1"></i> Word preview opened. TOC page numbers are the ones you entered.',
+                        '<i class="fas fa-file-word mr-1"></i> Word preview opened.' + ((result.data && result.data.toc_preserved) ? ' TOC page numbers are the ones you entered.' : ''),
                         'ok'
                     );
                 })
